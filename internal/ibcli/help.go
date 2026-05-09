@@ -1,0 +1,371 @@
+package ibcli
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+)
+
+var (
+	helpPanelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#38bdf8")).
+			Padding(1, 2)
+	helpTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ade80"))
+	helpSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cbd5e1"))
+	helpSectionStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#67e8f9"))
+	helpCommandStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#facc15"))
+	helpExampleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#a7f3d0"))
+)
+
+func (a *App) installHelp(root *cobra.Command) {
+	var visit func(*cobra.Command)
+	visit = func(cmd *cobra.Command) {
+		cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+			fmt.Fprint(cmd.OutOrStdout(), a.renderHelp(cmd))
+		})
+		cmd.SetUsageFunc(func(cmd *cobra.Command) error {
+			fmt.Fprint(cmd.ErrOrStderr(), a.renderUsage(cmd))
+			return nil
+		})
+		for _, child := range cmd.Commands() {
+			visit(child)
+		}
+	}
+	visit(root)
+}
+
+func (a *App) renderHelp(cmd *cobra.Command) string {
+	var blocks []string
+	blocks = append(blocks, a.helpHeader(cmd))
+	if isDNSCommand(cmd) {
+		blocks = append(blocks, a.helpContext())
+	}
+	blocks = append(blocks, a.usageBlock(cmd))
+	if details := a.commandDetails(cmd); details != "" {
+		blocks = append(blocks, details)
+	}
+	if cmd.HasAvailableSubCommands() {
+		blocks = append(blocks, a.childCommandsBlock(cmd))
+	}
+	if flags := localOptionsBlock(cmd); flags != "" {
+		blocks = append(blocks, flags)
+	}
+	if flags := globalOptionsBlock(cmd); flags != "" {
+		blocks = append(blocks, flags)
+	}
+	if examples := examplesBlock(cmd); examples != "" {
+		blocks = append(blocks, examples)
+	}
+	if hint := helpDetailHint(cmd); hint != "" {
+		blocks = append(blocks, hint)
+	}
+	return strings.Join(blocks, "\n") + "\n"
+}
+
+func (a *App) renderUsage(cmd *cobra.Command) string {
+	var blocks []string
+	lines := []string{cmd.UseLine()}
+	if cmd.HasAvailableSubCommands() {
+		lines = append(lines, cmd.CommandPath()+" <"+childArgumentName(cmd)+">")
+	}
+	blocks = append(blocks, sectionWithLines("Usage", lines))
+	if cmd.HasAvailableSubCommands() {
+		blocks = append(blocks, a.childCommandsBlock(cmd))
+	}
+	if details := usageDetails(cmd); details != "" {
+		blocks = append(blocks, details)
+	}
+	return strings.Join(blocks, "\n") + "\n"
+}
+
+func (a *App) helpHeader(cmd *cobra.Command) string {
+	title := helpTitleStyle.Render(cmd.CommandPath())
+	if cmd.Short == "" {
+		return title
+	}
+	return title + helpSubtitleStyle.Render(" - "+cmd.Short)
+}
+
+func (a *App) usageBlock(cmd *cobra.Command) string {
+	lines := []string{cmd.UseLine()}
+	if cmd.HasAvailableSubCommands() {
+		lines = append(lines, cmd.CommandPath()+" <"+childArgumentName(cmd)+">")
+	}
+	return sectionWithLines("Usage", lines)
+}
+
+func (a *App) commandDetails(cmd *cobra.Command) string {
+	switch cmd.CommandPath() {
+	case "ib":
+		return sectionWithLines("Workflow", []string{
+			"ib config new --default  ->  ib dns zone use example.com  ->  ib dns list",
+			`ib dns create app host 192.0.2.10 -c "Application host"`,
+		})
+	case "ib config":
+		return strings.Join([]string{
+			sectionWithRows("Configuration Usage", [][]string{
+				{"setup", "ib config new [PROFILE]"},
+				{"edit", "ib config edit [PROFILE]"},
+				{"switch", "ib config use PROFILE"},
+				{"inspect", "ib config list"},
+				{"completion", "ib config completion [bash|zsh|fish]"},
+				{"cache", "ib config cache status|clear"},
+			}),
+			sectionWithRows("Profile Details", [][]string{
+				{"prompts", "server, username, password, WAPI version, SSL, read endpoint, DNS view, default zone"},
+				{"storage", a.ConfigFile},
+				{"key", a.ConfigKeyFile},
+				{"password", "encrypted at rest"},
+			}),
+		}, "\n")
+	case "ib config new":
+		return sectionWithRows("Create Profile", [][]string{
+			{"profile", "optional argument; blank prompt creates profile 'default'"},
+			{"prompts", "endpoint, credentials, WAPI/TLS, read endpoint, DNS defaults"},
+			{"test", "connection test must pass before saving"},
+			{"retry", "failed connection test shows a retry prompt"},
+			{"default", "--default makes this profile the selected default"},
+			{"example", "ib config new prod --default"},
+		})
+	case "ib config edit":
+		return sectionWithRows("Edit Profile", [][]string{
+			{"profile", "optional argument; omit to edit the current default profile"},
+			{"password", "leave blank to keep the existing encrypted password"},
+			{"test", "connection test must pass before saving changes"},
+			{"retry", "failed connection test shows a retry prompt"},
+			{"default", "--default makes this profile the selected default"},
+			{"example", "ib config edit prod"},
+		})
+	case "ib config list":
+		return sectionWithRows("List Profiles", [][]string{
+			{"shows", "profile, default, server, read endpoint, DNS view, default zone"},
+			{"formats", "-o table, -o jq, or -o csv"},
+			{"empty", "prints setup guidance when no profiles exist"},
+		})
+	case "ib config use":
+		return sectionWithRows("Select Default Profile", [][]string{
+			{"effect", "updates the persistent default_profile in the config file"},
+			{"scope", "future ib commands use this profile unless another profile is selected later"},
+			{"completion", "PROFILE completes from configured profile names"},
+			{"example", "ib config use prod"},
+		})
+	case "ib config delete":
+		return sectionWithRows("Delete Profile", [][]string{
+			{"allowed", "removes a non-default profile from the config file"},
+			{"blocked", "the current default profile cannot be deleted"},
+			{"before", "run ib config use OTHER_PROFILE to delete the current default"},
+			{"example", "ib config delete old-profile"},
+		})
+	case "ib dns create":
+		return sectionWithRows("Create Record Usage", [][]string{
+			{"types", strings.Join(supportedRecordTypes(), ", ")},
+			{"zone", "--zone -> ib dns zone use -> IB_ZONE -> configured default"},
+			{"ttl", "optional; omit to use the zone default"},
+			{"example", `ib dns create app host 192.0.2.10 -c "Application host"`},
+			{"creates", "HOST app.example.com with IPv4 address 192.0.2.10"},
+		})
+	case "ib dns delete":
+		return sectionWithRows("Delete Record Usage", [][]string{
+			{"forward", "ib dns delete <record-name> [zone]"},
+			{"ptr", "ib dns delete ptr <ip-address>"},
+			{"example", "ib dns delete app"},
+		})
+	case "ib config completion":
+		return strings.Join([]string{
+			sectionWithRows("Completion Usage", [][]string{
+				{"no arg", "print setup instructions"},
+				{"bash", "generate Bash completion"},
+				{"zsh", "generate Zsh completion"},
+				{"fish", "generate Fish completion"},
+			}),
+			sectionWithLines("Setup", []string{
+				"ib config completion bash > ~/.ib-complete.bash",
+				`printf '\n# ib shell completion\n. ~/.ib-complete.bash\n' >> ~/.bashrc`,
+				"ib config completion zsh > ~/.ib-complete.zsh",
+				"ib config completion fish > ~/.config/fish/completions/ib.fish",
+			}),
+		}, "\n")
+	case "ib config cache":
+		return sectionWithRows("Cache Usage", [][]string{
+			{"status", "show zone and record cache entries with age and expiry"},
+			{"clear", "delete local zone and record cache entries"},
+			{"scope", "cache entries are separated by profile, DNS view, and zone"},
+			{"storage", "local SQLite cache under ~/.ib"},
+		})
+	case "ib config cache status":
+		return sectionWithRows("Cache Status", [][]string{
+			{"shows", "kind, profile, view, zone, serial, items, age, stale_expires"},
+			{"formats", "-o table, -o jq, or -o csv"},
+		})
+	case "ib config cache clear":
+		return sectionWithRows("Cache Clear", [][]string{
+			{"clears", "local zone and record cache entries"},
+			{"keeps", "configuration profiles, encryption key, and active session files"},
+		})
+	}
+	return ""
+}
+
+func (a *App) helpContext() string {
+	return a.dnsContextLine()
+}
+
+func (a *App) childCommandsBlock(cmd *cobra.Command) string {
+	children := cmd.Commands()
+	sort.Slice(children, func(i, j int) bool {
+		return children[i].Name() < children[j].Name()
+	})
+	var rows [][]string
+	for _, child := range children {
+		if !child.IsAvailableCommand() || child.IsAdditionalHelpTopicCommand() {
+			continue
+		}
+		rows = append(rows, []string{child.Name(), child.Short})
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	return sectionWithRows(childSectionTitle(cmd), rows)
+}
+
+func childArgumentName(cmd *cobra.Command) string {
+	if cmd == cmd.Root() {
+		return "module"
+	}
+	return "command"
+}
+
+func childSectionTitle(cmd *cobra.Command) string {
+	if cmd == cmd.Root() {
+		return "Modules"
+	}
+	return "Commands"
+}
+
+func helpDetailHint(cmd *cobra.Command) string {
+	if !cmd.HasAvailableSubCommands() {
+		return ""
+	}
+	return helpSubtitleStyle.Render(fmt.Sprintf(`Use "%s <%s> --help" for more detail.`, cmd.CommandPath(), childArgumentName(cmd)))
+}
+
+func usageDetails(cmd *cobra.Command) string {
+	switch cmd.CommandPath() {
+	case "ib dns search":
+		return strings.Join([]string{
+			sectionWithLines("Example", []string{"ib dns search app"}),
+			helpSubtitleStyle.Render(`Use "ib dns search -h" for more info.`),
+		}, "\n")
+	}
+	return ""
+}
+
+func localOptionsBlock(cmd *cobra.Command) string {
+	if cmd == cmd.Root() {
+		return ""
+	}
+	return flagsBlock("Options", cmd.NonInheritedFlags(), false)
+}
+
+func globalOptionsBlock(cmd *cobra.Command) string {
+	rows := [][]string{{"-h, --help", "show help for this command"}}
+	flags := cmd.InheritedFlags()
+	if cmd == cmd.Root() {
+		flags = cmd.PersistentFlags()
+	}
+	rows = append(rows, flagRows(flags, false)...)
+	return sectionWithRows("Global Options", rows)
+}
+
+func flagsBlock(title string, flags *pflag.FlagSet, includeHelp bool) string {
+	if flags == nil || !flags.HasAvailableFlags() {
+		return ""
+	}
+	rows := flagRows(flags, includeHelp)
+	if len(rows) == 0 {
+		return ""
+	}
+	return sectionWithRows(title, rows)
+}
+
+func flagRows(flags *pflag.FlagSet, includeHelp bool) [][]string {
+	var rows [][]string
+	flags.VisitAll(func(flag *pflag.Flag) {
+		if flag.Hidden || (!includeHelp && flag.Name == "help") {
+			return
+		}
+		name := "--" + flag.Name
+		if flag.Shorthand != "" {
+			name = "-" + flag.Shorthand + ", " + name
+		}
+		if flag.NoOptDefVal == "" && flag.Value.Type() != "bool" {
+			name += " " + strings.ToUpper(flag.Value.Type())
+		}
+		detail := flag.Usage
+		if flag.DefValue != "" && flag.DefValue != "false" && flag.DefValue != "-1" {
+			detail += " (default " + flag.DefValue + ")"
+		}
+		rows = append(rows, []string{name, detail})
+	})
+	return rows
+}
+
+func examplesBlock(cmd *cobra.Command) string {
+	example := strings.TrimSpace(cmd.Example)
+	if example == "" {
+		return ""
+	}
+	return sectionWithLines("Examples", strings.Split(example, "\n"))
+}
+
+func sectionWithLines(title string, lines []string) string {
+	var builder strings.Builder
+	builder.WriteString(helpSectionStyle.Render(title))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		builder.WriteString("\n  ")
+		builder.WriteString(helpCommandStyle.Render(line))
+	}
+	return builder.String()
+}
+
+func sectionWithRows(title string, rows [][]string) string {
+	var builder strings.Builder
+	builder.WriteString(helpSectionStyle.Render(title))
+	labelWidth := 0
+	for _, row := range rows {
+		if len(row) > 0 && len(row[0]) > labelWidth {
+			labelWidth = len(row[0])
+		}
+	}
+	for _, row := range rows {
+		if len(row) == 0 {
+			continue
+		}
+		label := row[0]
+		detail := ""
+		if len(row) > 1 {
+			detail = row[1]
+		}
+		builder.WriteString("\n  ")
+		builder.WriteString(helpCommandStyle.Render(label))
+		if detail != "" {
+			builder.WriteString(strings.Repeat(" ", labelWidth-len(label)+2))
+			builder.WriteString(helpSubtitleStyle.Render(detail))
+		}
+	}
+	return builder.String()
+}
+
+func isDNSCommand(cmd *cobra.Command) bool {
+	path := cmd.CommandPath()
+	return path == "ib dns" || strings.HasPrefix(path, "ib dns ")
+}
