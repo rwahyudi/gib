@@ -240,6 +240,45 @@ func TestSimpleListModelCanRenderDNSViews(t *testing.T) {
 	}
 }
 
+func TestZoneListModelKeepsEightRowListArea(t *testing.T) {
+	model := newZoneListModel("Default DNS Zone", []string{
+		"corp.example.edu",
+		"dev.example.com",
+		"example.com",
+	}, "")
+
+	if got := simpleListAreaLineCount(model.View()); got != zoneListVisibleItems {
+		t.Fatalf("zone list area rows = %d, want %d:\n%s", got, zoneListVisibleItems, model.View())
+	}
+
+	viewModel := newSimpleListModel("Default DNS View", []string{
+		"default",
+		"DNS Zone View",
+	}, "default", "view")
+	if got := simpleListAreaLineCount(viewModel.View()); got != 2 {
+		t.Fatalf("DNS view list area rows = %d, want 2:\n%s", got, viewModel.View())
+	}
+}
+
+func simpleListAreaLineCount(view string) int {
+	lines := strings.Split(view, "\n")
+	inList := false
+	count := 0
+	for _, line := range lines {
+		if strings.Contains(line, "Filter:") {
+			inList = true
+			continue
+		}
+		if strings.Contains(line, "type prefix to filter") {
+			return count
+		}
+		if inList {
+			count++
+		}
+	}
+	return count
+}
+
 func TestZoneListModelPreselectsCurrentZone(t *testing.T) {
 	model := newZoneListModel("Default DNS Zone", []string{
 		"corp.example.edu",

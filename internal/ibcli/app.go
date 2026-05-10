@@ -34,7 +34,8 @@ const (
 )
 
 var (
-	errUsageDisplayed = errors.New("usage displayed")
+	errUsageDisplayed  = errors.New("usage displayed")
+	errDeleteCancelled = errors.New("delete cancelled")
 
 	successStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ade80"))
 	warningStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#facc15"))
@@ -60,7 +61,11 @@ type App struct {
 	Stdin         io.Reader
 	gum           *Gum
 
+	dnsZoneOverride             string
+	dnsViewOverride             string
 	backgroundRecordRevalidator func(Profile, string) error
+	dnsDeleteRecordSelector     func(string, []TypedRecord) (TypedRecord, bool, error)
+	dnsDeleteConfirmer          func(string, TypedRecord) (bool, error)
 }
 
 func NewDefaultApp() (*App, error) {
@@ -171,6 +176,10 @@ func (a *App) PrintError(err error) {
 
 func (a *App) PrintSuccess(message string) {
 	fmt.Fprintln(a.Stdout, successStyle.Render(message))
+}
+
+func (a *App) PrintInfo(message string) {
+	fmt.Fprintln(a.Stdout, noteStyle.Render(message))
 }
 
 func (a *App) PrintWarning(message string) {

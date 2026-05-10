@@ -495,6 +495,23 @@ func (a *App) clearCache() error {
 	return nil
 }
 
+func (a *App) clearProfileCache(profileName string) error {
+	profileName, err := normalizeProfileName(profileName)
+	if err != nil {
+		return err
+	}
+	db, err := a.openCacheDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.Exec(`
+DELETE FROM zone_cache WHERE profile = ?;
+DELETE FROM record_cache WHERE profile = ?;
+DELETE FROM record_refresh_locks WHERE profile = ?;`, profileName, profileName, profileName)
+	return err
+}
+
 func (a *App) tryAcquireRecordRefreshLease(profile Profile, zone string, now time.Time, ttl time.Duration) (bool, error) {
 	profileName, view := cacheScope(profile)
 	zone = normalizeCacheZone(zone)

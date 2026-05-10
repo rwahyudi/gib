@@ -58,6 +58,37 @@ func TestDNSCreateWorkflowPostsToPrimaryWithoutMandatoryTTL(t *testing.T) {
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
 }
 
+func TestDNSCreateUsesDNSContextOverrides(t *testing.T) {
+	var postPayload map[string]any
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "record:a" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&postPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode("record:a/ref")
+	}))
+	defer primary.Close()
+
+	read := emptyReadServer(t)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	if err := app.Execute([]string{"dns", "--zone", "override.example.com", "--view", "DNS Alt View", "create", "app", "a", "192.0.2.10", "--noptr"}); err != nil {
+		t.Fatalf("create with context overrides: %v", err)
+	}
+
+	for key, want := range map[string]any{
+		"name": "app.override.example.com",
+		"view": "DNS Alt View",
+	} {
+		if postPayload[key] != want {
+			t.Fatalf("payload[%s] = %#v, want %#v; payload = %#v", key, postPayload[key], want, postPayload)
+		}
+	}
+}
+
 func TestDNSCreateWorkflowRejectsOldTypeNameValueOrder(t *testing.T) {
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -146,8 +177,12 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
 	profile := mustLoadProfile(t, app)
 	writeWorkflowRecordCache(t, app, profile)
+	app.dnsDeleteConfirmer = func(target string, record TypedRecord) (bool, error) {
+		t.Fatalf("confirmation prompt should be skipped when -y is provided")
+		return false, nil
+	}
 
-	if err := app.Execute([]string{"dns", "delete", "app"}); err != nil {
+	if err := app.Execute([]string{"dns", "delete", "app", "-y"}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -158,6 +193,209 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 		t.Fatalf("expected record lookup requests on read server")
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
+}
+
+func TestDNSDeleteRequiresConfirmationBeforeDelete(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		http.NotFound(w, r)
+	}))
+	defer primary.Close()
+
+	var readRequests []string
+	read := recordLookupServer(t, &readRequests)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	err := app.Execute([]string{"dns", "delete", "app"})
+	if err == nil {
+		t.Fatal("delete succeeded without confirmation in non-interactive mode")
+	}
+	for _, want := range []string{"delete confirmation requires an interactive terminal", "-y"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error missing %q: %v", want, err)
+		}
+	}
+	if len(primaryRequests) != 0 {
+		t.Fatalf("unconfirmed delete made primary requests: %#v", primaryRequests)
+	}
+	if len(readRequests) == 0 {
+		t.Fatalf("expected record lookup requests on read server")
+	}
+}
+
+func TestDNSDeleteCanceledBeforePrimaryDelete(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		http.NotFound(w, r)
+	}))
+	defer primary.Close()
+
+	var readRequests []string
+	read := recordLookupServer(t, &readRequests)
+	defer read.Close()
+
+	app, stdout := dnsWorkflowApp(t, primary.URL, read.URL)
+	app.Output = tableOutput
+	app.dnsDeleteConfirmer = func(target string, record TypedRecord) (bool, error) {
+		if target != "app.example.com" {
+			t.Fatalf("target = %q, want app.example.com", target)
+		}
+		if ref := cleanString(record.Item["_ref"]); ref != "record:a/ref" {
+			t.Fatalf("confirmation record ref = %q, want record:a/ref", ref)
+		}
+		return false, nil
+	}
+
+	if err := app.Execute([]string{"dns", "delete", "app"}); err != nil {
+		t.Fatalf("cancelled delete returned error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "INFO: delete cancelled") {
+		t.Fatalf("cancelled delete output missing info line:\n%s", stdout.String())
+	}
+	if len(primaryRequests) != 0 {
+		t.Fatalf("canceled delete made primary requests: %#v", primaryRequests)
+	}
+	if len(readRequests) == 0 {
+		t.Fatalf("expected record lookup requests on read server")
+	}
+}
+
+func TestDNSDeleteDuplicateSelectionCanceledPrintsInfo(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		http.NotFound(w, r)
+	}))
+	defer primary.Close()
+
+	var readRequests []string
+	read := duplicateRecordLookupServer(t, &readRequests)
+	defer read.Close()
+
+	app, stdout := dnsWorkflowApp(t, primary.URL, read.URL)
+	app.Output = tableOutput
+	app.dnsDeleteRecordSelector = func(target string, matches []TypedRecord) (TypedRecord, bool, error) {
+		if target != "app.example.com" {
+			t.Fatalf("target = %q, want app.example.com", target)
+		}
+		if len(matches) != 2 {
+			t.Fatalf("matches = %#v, want two duplicate candidates", matches)
+		}
+		return TypedRecord{}, false, nil
+	}
+
+	if err := app.Execute([]string{"dns", "delete", "app"}); err != nil {
+		t.Fatalf("cancelled duplicate delete returned error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "INFO: delete cancelled") {
+		t.Fatalf("cancelled duplicate delete output missing info line:\n%s", stdout.String())
+	}
+	if len(primaryRequests) != 0 {
+		t.Fatalf("canceled duplicate delete made primary requests: %#v", primaryRequests)
+	}
+	if len(readRequests) == 0 {
+		t.Fatalf("expected duplicate lookup requests on read server")
+	}
+}
+
+func TestDNSDeleteDuplicateRecordsUsesSelectedRef(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		if r.Method != http.MethodDelete || trimWAPIPath(r.URL.Path) != "record:cname/ref-cname" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "record:cname/ref-cname"})
+	}))
+	defer primary.Close()
+
+	var readRequests []string
+	read := duplicateRecordLookupServer(t, &readRequests)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	app.Output = tableOutput
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	app.dnsDeleteRecordSelector = func(target string, matches []TypedRecord) (TypedRecord, bool, error) {
+		if target != "app.example.com" {
+			t.Fatalf("target = %q, want app.example.com", target)
+		}
+		if len(matches) != 2 {
+			t.Fatalf("matches = %#v, want two duplicate candidates", matches)
+		}
+		for _, match := range matches {
+			if cleanString(match.Item["_ref"]) == "record:cname/ref-cname" {
+				return match, true, nil
+			}
+		}
+		t.Fatalf("CNAME duplicate candidate missing: %#v", matches)
+		return TypedRecord{}, false, nil
+	}
+	app.dnsDeleteConfirmer = func(target string, record TypedRecord) (bool, error) {
+		if target != "app.example.com" {
+			t.Fatalf("confirmation target = %q, want app.example.com", target)
+		}
+		if ref := cleanString(record.Item["_ref"]); ref != "record:cname/ref-cname" {
+			t.Fatalf("confirmation record ref = %q, want record:cname/ref-cname", ref)
+		}
+		return true, nil
+	}
+
+	if err := app.Execute([]string{"dns", "delete", "app"}); err != nil {
+		t.Fatalf("delete duplicate: %v", err)
+	}
+
+	if strings.Join(primaryRequests, ",") != "DELETE record:cname/ref-cname" {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	if len(readRequests) == 0 {
+		t.Fatalf("expected duplicate lookup requests on read server")
+	}
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+}
+
+func TestDNSDeleteDuplicateRecordsFailsSafelyWhenNonInteractive(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		http.NotFound(w, r)
+	}))
+	defer primary.Close()
+
+	var readRequests []string
+	read := duplicateRecordLookupServer(t, &readRequests)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	app.Output = jsonOutput
+
+	err := app.Execute([]string{"dns", "delete", "app"})
+	if err == nil {
+		t.Fatal("duplicate delete succeeded in non-interactive mode")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"multiple records found for app.example.com",
+		"run in an interactive terminal to choose one",
+		"ref=record:a/ref-a",
+		"ref=record:cname/ref-cname",
+		"value=192.0.2.10",
+		"value=alias.example.com",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("duplicate error missing %q:\n%s", want, message)
+		}
+	}
+	if len(primaryRequests) != 0 {
+		t.Fatalf("non-interactive duplicate delete made primary requests: %#v", primaryRequests)
+	}
+	if len(readRequests) == 0 {
+		t.Fatalf("expected duplicate lookup requests on read server")
+	}
 }
 
 func TestDNSListDefaultsToFastAllRecordsOnly(t *testing.T) {
@@ -478,6 +716,47 @@ func recordLookupServer(t *testing.T, requests *[]string) *httptest.Server {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+	}))
+}
+
+func duplicateRecordLookupServer(t *testing.T, requests *[]string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
+		object := trimWAPIPath(r.URL.Path)
+		*requests = append(*requests, r.Method+" "+object)
+		if r.URL.Query().Get("name") != "app.example.com" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+			return
+		}
+		switch object {
+		case "record:a":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":     "record:a/ref-a",
+					"name":     "app.example.com",
+					"ipv4addr": "192.0.2.10",
+					"view":     "default",
+					"zone":     "example.com",
+					"comment":  "primary address",
+				}},
+			})
+		case "record:cname":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":      "record:cname/ref-cname",
+					"name":      "app.example.com",
+					"canonical": "alias.example.com",
+					"view":      "default",
+					"zone":      "example.com",
+					"comment":   "temporary alias",
+				}},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		}
 	}))
 }
 

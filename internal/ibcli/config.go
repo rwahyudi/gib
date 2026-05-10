@@ -548,6 +548,9 @@ func intFromAny(value any) int {
 }
 
 func (a *App) resolveDNSView(profile Profile) string {
+	if view := strings.TrimSpace(a.dnsViewOverride); view != "" {
+		return view
+	}
 	if view := strings.TrimSpace(a.readSessionView()); view != "" {
 		return view
 	}
@@ -563,6 +566,9 @@ func (a *App) resolveDNSView(profile Profile) string {
 func (a *App) resolveDNSZone(profile Profile, explicit string) (string, error) {
 	if explicit != "" {
 		return normalizeZoneName(explicit)
+	}
+	if zone := strings.TrimSpace(a.dnsZoneOverride); zone != "" {
+		return normalizeZoneName(zone)
 	}
 	if zone := a.readSessionZone(profile.Name); zone != "" {
 		return normalizeZoneName(zone)
@@ -583,8 +589,12 @@ func (a *App) dnsContextLine() string {
 		profileName = defaultProfileName
 	}
 	view := a.resolveDNSView(profile)
-	zone := a.readSessionZone(profileName)
-	source := "shell session"
+	zone := strings.TrimSpace(a.dnsZoneOverride)
+	source := "command override"
+	if zone == "" {
+		zone = a.readSessionZone(profileName)
+		source = "shell session"
+	}
 	if zone == "" {
 		zone = strings.TrimSpace(os.Getenv(defaultZoneEnv))
 		source = defaultZoneEnv

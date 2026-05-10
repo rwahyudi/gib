@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testApp(t *testing.T) *App {
@@ -306,6 +307,99 @@ func TestConfigOverviewWithProfilesShowsActionPanel(t *testing.T) {
 		if strings.Contains(output, unwanted) {
 			t.Fatalf("configure overview contains unwanted %q:\n%s", unwanted, output)
 		}
+	}
+}
+
+func TestConfigDeleteClearsProfileCache(t *testing.T) {
+	app := testApp(t)
+	profiles := map[string]Profile{
+		"default": {
+			Name:        "default",
+			Server:      "https://infoblox.example",
+			Username:    "admin",
+			Password:    "secret-password",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			DefaultZone: "example.com",
+			VerifySSL:   true,
+			Timeout:     defaultTimeoutSeconds,
+		},
+		"old": {
+			Name:        "old",
+			Server:      "https://old-infoblox.example",
+			Username:    "admin",
+			Password:    "old-secret-password",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			DefaultZone: "old.example.com",
+			VerifySSL:   true,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}
+	if err := app.writeConfigProfiles("default", profiles); err != nil {
+		t.Fatalf("write profiles: %v", err)
+	}
+	defaultProfile := profiles["default"]
+	oldProfile := profiles["old"]
+	now := time.Now()
+	if err := app.writeCachedZones(defaultProfile, []map[string]any{{"fqdn": "example.com"}}, now); err != nil {
+		t.Fatalf("write default zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(defaultProfile, "example.com", "2026050801", []map[string]any{{"name": "app.example.com"}}, now); err != nil {
+		t.Fatalf("write default record cache: %v", err)
+	}
+	if err := app.writeCachedZones(oldProfile, []map[string]any{{"fqdn": "old.example.com"}}, now); err != nil {
+		t.Fatalf("write old zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(oldProfile, "old.example.com", "2026050801", []map[string]any{{"name": "app.old.example.com"}}, now); err != nil {
+		t.Fatalf("write old record cache: %v", err)
+	}
+	acquired, err := app.tryAcquireRecordRefreshLease(oldProfile, "old.example.com", now, time.Minute)
+	if err != nil {
+		t.Fatalf("acquire old refresh lease: %v", err)
+	}
+	if !acquired {
+		t.Fatalf("old refresh lease was not acquired")
+	}
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "delete", "old"}); err != nil {
+		t.Fatalf("config delete old: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "deleted and cache cleared") {
+		t.Fatalf("delete output did not mention cache clear:\n%s", stdout.String())
+	}
+	_, loadedProfiles, _, err := app.readConfigProfiles(false)
+	if err != nil {
+		t.Fatalf("read profiles after delete: %v", err)
+	}
+	if _, ok := loadedProfiles["old"]; ok {
+		t.Fatalf("old profile still exists after delete: %#v", loadedProfiles)
+	}
+	rows, err := app.cacheStatusRows()
+	if err != nil {
+		t.Fatalf("cache status after delete: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("cache status row count = %d, want only default zone and record rows: %#v", len(rows), rows)
+	}
+	for _, row := range rows {
+		if row["profile"] == "old" {
+			t.Fatalf("old profile cache row was not cleared: %#v", rows)
+		}
+		if row["profile"] != "default" {
+			t.Fatalf("unexpected cache row after delete: %#v", row)
+		}
+	}
+	acquired, err = app.tryAcquireRecordRefreshLease(oldProfile, "old.example.com", now.Add(time.Second), time.Minute)
+	if err != nil {
+		t.Fatalf("re-acquire old refresh lease after delete: %v", err)
+	}
+	if !acquired {
+		t.Fatalf("old profile refresh lease was not cleared")
 	}
 }
 

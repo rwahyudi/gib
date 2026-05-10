@@ -371,6 +371,30 @@ func matchingZoneNames(zones []string, toComplete string) []string {
 func dynamicBashCompletionScript() string {
 	return `# bash completion for ib
 
+__ib_create_usage_on_second_tab()
+{
+    local cmd="$1"
+    local key
+    key="${COMP_LINE:-${COMP_WORDS[*]}}:${COMP_POINT:-${COMP_CWORD:-0}}"
+
+    if [[ "${__ib_create_usage_key:-}" == "${key}" ]]; then
+        __ib_create_usage_count=$(( ${__ib_create_usage_count:-1} + 1 ))
+    else
+        __ib_create_usage_key="${key}"
+        __ib_create_usage_count=1
+    fi
+
+    if [[ "${__ib_create_usage_count}" -lt 2 ]]; then
+        return 0
+    fi
+
+    __ib_create_usage_count=0
+    printf '\n' >&2
+    IB_ACTIVE_HELP=0 "${cmd}" dns create --help >&2
+    printf '\n' >&2
+    printf 'ib dns create ' >&2
+}
+
 __ib_dynamic_completion()
 {
     local cur cmd out line directive comp value flag_prefix
@@ -381,6 +405,12 @@ __ib_dynamic_completion()
     local args=("${COMP_WORDS[@]:1:COMP_CWORD}")
     if [[ -z "${COMP_WORDS[COMP_CWORD]+set}" ]]; then
         args+=("${cur}")
+    fi
+
+    if [[ "${COMP_WORDS[1]}" == "dns" && "${COMP_WORDS[2]}" == "create" && "${COMP_CWORD}" -eq 3 && -z "${cur}" ]]; then
+        __ib_create_usage_on_second_tab "${cmd}"
+        compopt +o default 2>/dev/null || true
+        return 0
     fi
 
     out=$(IB_ACTIVE_HELP=0 "${cmd}" __completeNoDesc "${args[@]}" 2>/dev/null) || return 0

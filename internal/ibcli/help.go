@@ -123,6 +123,11 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 				{"password", "encrypted at rest"},
 			}),
 		}, "\n")
+	case "ib dns":
+		return sectionWithRows("Context Overrides", [][]string{
+			{"zone", "--zone/-z overrides ib dns zone use, IB_ZONE, and configured default for one command"},
+			{"view", "--view/-v overrides ib dns view use, IB_VIEW, and configured view for one command"},
+		})
 	case "ib config new":
 		return sectionWithRows("Create Profile", [][]string{
 			{"profile", "optional argument; blank prompt creates profile 'default'"},
@@ -157,6 +162,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib config delete":
 		return sectionWithRows("Delete Profile", [][]string{
 			{"allowed", "removes a non-default profile from the config file"},
+			{"cache", "clears local cache entries for the deleted profile"},
 			{"blocked", "the current default profile cannot be deleted"},
 			{"before", "run ib config use OTHER_PROFILE to delete the current default"},
 			{"example", "ib config delete old-profile"},
@@ -173,6 +179,8 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		return sectionWithRows("Delete Record Usage", [][]string{
 			{"forward", "ib dns delete <record-name> [zone]"},
 			{"ptr", "ib dns delete ptr <ip-address>"},
+			{"confirm", "prompts before deleting; use -y to skip"},
+			{"duplicates", "interactive table mode prompts you to choose one matching record"},
 			{"example", "ib dns delete app"},
 		})
 	case "ib config completion":
@@ -269,7 +277,11 @@ func localOptionsBlock(cmd *cobra.Command) string {
 	if cmd == cmd.Root() {
 		return ""
 	}
-	return flagsBlock("Options", cmd.NonInheritedFlags(), false)
+	rows := flagRowsForSets(false, cmd.NonInheritedFlags(), cmd.PersistentFlags())
+	if len(rows) == 0 {
+		return ""
+	}
+	return sectionWithRows("Options", rows)
 }
 
 func globalOptionsBlock(cmd *cobra.Command) string {
@@ -294,24 +306,35 @@ func flagsBlock(title string, flags *pflag.FlagSet, includeHelp bool) string {
 }
 
 func flagRows(flags *pflag.FlagSet, includeHelp bool) [][]string {
+	return flagRowsForSets(includeHelp, flags)
+}
+
+func flagRowsForSets(includeHelp bool, sets ...*pflag.FlagSet) [][]string {
 	var rows [][]string
-	flags.VisitAll(func(flag *pflag.Flag) {
-		if flag.Hidden || (!includeHelp && flag.Name == "help") {
-			return
+	seen := map[string]bool{}
+	for _, flags := range sets {
+		if flags == nil {
+			continue
 		}
-		name := "--" + flag.Name
-		if flag.Shorthand != "" {
-			name = "-" + flag.Shorthand + ", " + name
-		}
-		if flag.NoOptDefVal == "" && flag.Value.Type() != "bool" {
-			name += " " + strings.ToUpper(flag.Value.Type())
-		}
-		detail := flag.Usage
-		if flag.DefValue != "" && flag.DefValue != "false" && flag.DefValue != "-1" {
-			detail += " (default " + flag.DefValue + ")"
-		}
-		rows = append(rows, []string{name, detail})
-	})
+		flags.VisitAll(func(flag *pflag.Flag) {
+			if seen[flag.Name] || flag.Hidden || (!includeHelp && flag.Name == "help") {
+				return
+			}
+			seen[flag.Name] = true
+			name := "--" + flag.Name
+			if flag.Shorthand != "" {
+				name = "-" + flag.Shorthand + ", " + name
+			}
+			if flag.NoOptDefVal == "" && flag.Value.Type() != "bool" {
+				name += " " + strings.ToUpper(flag.Value.Type())
+			}
+			detail := flag.Usage
+			if flag.DefValue != "" && flag.DefValue != "false" && flag.DefValue != "-1" {
+				detail += " (default " + flag.DefValue + ")"
+			}
+			rows = append(rows, []string{name, detail})
+		})
+	}
 	return rows
 }
 

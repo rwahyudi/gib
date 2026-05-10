@@ -53,6 +53,11 @@ func TestModuleHelpStillUsesCommands(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"ib dns <command>",
+		"Context Overrides",
+		"--zone/-z overrides",
+		"--view/-v overrides",
+		"-z, --zone STRING",
+		"-v, --view STRING",
 		"Commands",
 		"create  Create a DNS record",
 		`Use "ib dns <command> --help" for more detail.`,
@@ -63,6 +68,29 @@ func TestModuleHelpStillUsesCommands(t *testing.T) {
 	}
 	if strings.Contains(output, "ib dns <module>") {
 		t.Fatalf("dns help output used module wording for nested commands:\n%s", output)
+	}
+}
+
+func TestDNSDeleteHelpShowsConfirmationSkip(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"dns", "delete", "--help"}); err != nil {
+		t.Fatalf("dns delete help: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"Delete Record Usage",
+		"prompts before deleting; use -y to skip",
+		"-y, --yes",
+		"skip delete confirmation prompt",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dns delete help output missing %q:\n%s", want, output)
+		}
 	}
 }
 
@@ -139,6 +167,7 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 			args: []string{"config", "delete", "--help"},
 			want: []string{
 				"Delete Profile",
+				"clears local cache entries for the deleted profile",
 				"the current default profile cannot be deleted",
 				"ib config use OTHER_PROFILE",
 			},

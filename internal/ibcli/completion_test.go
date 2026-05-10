@@ -211,7 +211,8 @@ func TestDNSCreateCompletesFlagsWhenRequested(t *testing.T) {
 	}
 	output := stdout.String()
 	for _, want := range []string{
-		"--zone\tDNS zone; defaults to active/default zone",
+		"--zone\tDNS zone override for this command",
+		"--view\tDNS view override for this command",
 		"--ttl\toptional record TTL in seconds",
 		"--output\toutput format: table, jq, or csv",
 		":4",
@@ -233,7 +234,7 @@ func TestDNSCreateCompletesFlagsAfterPositionalArgs(t *testing.T) {
 		t.Fatalf("completion: %v", err)
 	}
 	output := stdout.String()
-	if !strings.Contains(output, "--zone\tDNS zone; defaults to active/default zone") || !strings.Contains(output, ":4") {
+	if !strings.Contains(output, "--zone\tDNS zone override for this command") || !strings.Contains(output, ":4") {
 		t.Fatalf("completion output missing flags after args:\n%s", output)
 	}
 }
@@ -605,6 +606,7 @@ func TestGeneratedBashCompletionScript(t *testing.T) {
 	output := script.String()
 	for _, want := range []string{
 		"__ib_dynamic_completion",
+		"__ib_create_usage_on_second_tab",
 		"__completeNoDesc",
 		`${COMP_WORDS[0]}`,
 	} {
@@ -626,6 +628,107 @@ func TestGeneratedBashCompletionScript(t *testing.T) {
 	cmd.Stdin = strings.NewReader(output)
 	if raw, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bash completion syntax check failed: %v\n%s", err, raw)
+	}
+}
+
+func TestDynamicBashCompletionCreateNameSlotPrintsUsageOnSecondTab(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	dir := t.TempDir()
+	fakeIB := filepath.Join(dir, "ib")
+	if err := os.WriteFile(fakeIB, []byte(`#!/bin/sh
+if [ "$1" = "dns" ] && [ "$2" = "create" ] && [ "$3" = "--help" ]; then
+  printf 'Usage\n'
+  printf '  ib dns create NAME TYPE VALUE [flags]\n'
+  exit 0
+fi
+printf ':4\n'
+`), 0o755); err != nil {
+		t.Fatalf("write fake ib: %v", err)
+	}
+	scriptPath := filepath.Join(dir, "ib-complete.bash")
+	if err := os.WriteFile(scriptPath, []byte(dynamicBashCompletionScript()), 0o644); err != nil {
+		t.Fatalf("write completion script: %v", err)
+	}
+	cmd := exec.Command("bash", "-lc", `source "$1"
+COMP_WORDS=("$2" "dns" "create" "")
+COMP_CWORD=3
+COMP_LINE="$2 dns create "
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+__ib_dynamic_completion
+printf '\nreply-count=%d\n' "${#COMPREPLY[@]}"
+`, "bash", scriptPath, fakeIB)
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run bash completion simulation: %v\n%s", err, raw)
+	}
+	output := string(raw)
+	if strings.Count(output, "\nUsage\n") != 1 {
+		t.Fatalf("create usage should print once on the second tab:\n%s", output)
+	}
+	if !strings.Contains(output, "ib dns create NAME TYPE VALUE [flags]") {
+		t.Fatalf("create usage missing command shape:\n%s", output)
+	}
+	if !strings.Contains(output, "\nib dns create \nreply-count=0") {
+		t.Fatalf("create usage did not reprint the typed command:\n%s", output)
+	}
+	if !strings.Contains(output, "reply-count=0") {
+		t.Fatalf("create name slot should not insert a completion candidate:\n%s", output)
+	}
+}
+
+func TestDynamicBashCompletionCreatePreservesGlobalFlagCompletion(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	dir := t.TempDir()
+	fakeIB := filepath.Join(dir, "ib")
+	if err := os.WriteFile(fakeIB, []byte(`#!/bin/sh
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [ "$4" = "-" ]; then
+  printf '%s\n' --output -o --help -h --zone :4
+  exit 0
+fi
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [ "$7" = "--output" ]; then
+  printf '%s\n' table jq csv :4
+  exit 0
+fi
+printf ':4\n'
+`), 0o755); err != nil {
+		t.Fatalf("write fake ib: %v", err)
+	}
+	scriptPath := filepath.Join(dir, "ib-complete.bash")
+	if err := os.WriteFile(scriptPath, []byte(dynamicBashCompletionScript()), 0o644); err != nil {
+		t.Fatalf("write completion script: %v", err)
+	}
+	cmd := exec.Command("bash", "-lc", `source "$1"
+COMP_WORDS=("$2" "dns" "create" "-")
+COMP_CWORD=3
+COMP_LINE="$2 dns create -"
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'flags:%s\n' "${COMPREPLY[*]}"
+COMPREPLY=()
+COMP_WORDS=("$2" "dns" "create" "app" "host" "192.0.2.10" "--output" "")
+COMP_CWORD=7
+COMP_LINE="$2 dns create app host 192.0.2.10 --output "
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'outputs:%s\n' "${COMPREPLY[*]}"
+`, "bash", scriptPath, fakeIB)
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run bash completion simulation: %v\n%s", err, raw)
+	}
+	output := string(raw)
+	for _, want := range []string{
+		"flags:--output -o --help -h --zone",
+		"outputs:table jq csv",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("generated bash completion missing %q:\n%s", want, output)
+		}
 	}
 }
 

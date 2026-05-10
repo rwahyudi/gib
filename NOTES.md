@@ -16,6 +16,10 @@ records_cache_swr_ttl = 259200
 
 `records_cache_swr_ttl` is in seconds and controls how long expired per-zone record-cache entries can be served stale while `ib` refreshes them in the background. If the setting is missing or invalid, `ib` uses and writes the default value of `259200` seconds (3 days).
 
+## Config Profiles
+
+`ib config delete PROFILE` removes the non-default profile from the config file and clears local zone-cache, record-cache, and record-refresh lock rows for that profile. Cache rows for other profiles are left intact.
+
 ## DNS Search Progress
 
 For interactive table output, `ib dns search` uses a Bubble Tea progress view on stderr while the search is running. The view shows the search stage, configured worker count, completed zones, match count, and each worker's current zone/cache source. The final record table is still printed normally on stdout after the progress view exits.
@@ -32,7 +36,11 @@ For non-interactive stderr, `-o jq`, or `-o csv`, the progress view is disabled 
 
 `ib dns search KEY` searches only the resolved current zone by default. Use `-z ZONE` to choose a different root zone, and add `-r` or `--recursive` to include child authoritative zones under that root. `--global` still searches every searchable zone in the selected DNS view and cannot be combined with `--recursive`.
 
+All `ib dns` subcommands inherit `--zone`/`-z` and `--view`/`-v`. These are per-command context overrides and take precedence over `ib dns zone use`, `ib dns view use`, `IB_ZONE`, `IB_VIEW`, and configured defaults without saving anything to the profile.
+
 DNS record table output always includes a `Current Context:` footer line. When the table has more than five records, the `Total records` badge is shown on the same line.
+
+`ib dns delete NAME` prompts with a Charmbracelet Huh confirmation before deleting a selected record. Use `-y` or `--yes` to skip the confirmation. If the user cancels either the duplicate-record picker or confirmation prompt, `ib` prints `INFO: delete cancelled` and exits without issuing DELETE. If multiple forward records match the same FQDN, interactive table mode first uses a Charmbracelet Huh select picker showing type, name, value, zone, comment, and `_ref`; the selected record is then confirmed before DELETE. Non-interactive mode and `-o jq`/`-o csv` fail safely unless `-y` is provided.
 
 ## Shell Completion
 
@@ -41,6 +49,12 @@ DNS record table output always includes a `Current Context:` footer line. When t
 `ib dns search KEY -t <tab><tab>` completes supported record type filters such as `a`, `host`, and `txt`. Comma-separated filters are completed from the current segment, so `-t a,` offers remaining types as `a,host`, `a,txt`, and so on.
 
 For Bash, `ib <tab><tab>` should complete root commands such as `config`, `dns`, and `help`. If it does not, regenerate and reload the shell integration with `ib config completion bash > ~/.ib-complete.bash` and start a new shell or run `. ~/.ib-complete.bash`.
+
+For Bash, `ib dns create <tab><tab>` prints the `dns create` usage/help under the prompt, then redraws `ib dns create ` without inserting a placeholder candidate. This behavior lives in the generated Bash completion wrapper, so regenerate and reload `~/.ib-complete.bash` after changing the wrapper template.
+
+Global options still complete while using `ib dns create`: `ib dns create -<tab>` offers options such as `--output`, `-o`, and `--help`, and output format values complete after `--output` or `-o`.
+
+For `ib config new` and `ib config edit`, question 7 (`Default DNS Zone`) uses the Bubble Tea filter list and keeps an eight-row zone list area visible even when fewer rows are currently matched. Question 6 (`Default DNS View`) still sizes to the available DNS view choices.
 
 ## Zone Record Cache Workflow
 

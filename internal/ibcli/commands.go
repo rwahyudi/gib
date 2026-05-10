@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 )
 
@@ -167,10 +168,15 @@ func (a *App) completionCommand() *cobra.Command {
 }
 
 func (a *App) dnsCommand() *cobra.Command {
+	a.dnsZoneOverride = ""
+	a.dnsViewOverride = ""
 	cmd := &cobra.Command{
 		Use:   "dns",
 		Short: "Manage Infoblox DNS records",
 	}
+	cmd.PersistentFlags().StringVarP(&a.dnsZoneOverride, "zone", "z", "", "DNS zone override for this command")
+	cmd.PersistentFlags().StringVarP(&a.dnsViewOverride, "view", "v", "", "DNS view override for this command")
+	_ = cmd.RegisterFlagCompletionFunc("zone", a.zoneFlagCompletion)
 	cmd.AddCommand(a.dnsViewCommand())
 	cmd.AddCommand(a.dnsZoneCommand())
 	cmd.AddCommand(a.dnsCreateCommand())
@@ -355,7 +361,7 @@ func (a *App) dnsZoneCommand() *cobra.Command {
 }
 
 func (a *App) dnsCreateCommand() *cobra.Command {
-	var zone, comment string
+	var comment string
 	var ttl int
 	var noptr bool
 	cmd := &cobra.Command{
@@ -364,11 +370,9 @@ func (a *App) dnsCreateCommand() *cobra.Command {
 		Args:              cobra.ExactArgs(3),
 		ValidArgsFunction: createArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.runDNSCreate(args[1], args[0], args[2], zone, ttl, noptr, comment)
+			return a.runDNSCreate(args[1], args[0], args[2], a.dnsZoneOverride, ttl, noptr, comment)
 		},
 	}
-	cmd.Flags().StringVar(&zone, "zone", "", "DNS zone; defaults to active/default zone")
-	_ = cmd.RegisterFlagCompletionFunc("zone", a.zoneFlagCompletion)
 	cmd.Flags().IntVarP(&ttl, "ttl", "t", -1, "optional record TTL in seconds")
 	cmd.Flags().BoolVar(&noptr, "noptr", false, "do not manage PTR records for A/AAAA workflows")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "record comment")
@@ -376,7 +380,7 @@ func (a *App) dnsCreateCommand() *cobra.Command {
 }
 
 func (a *App) dnsEditCommand() *cobra.Command {
-	var zone, comment string
+	var comment string
 	var ttl int
 	var noptr bool
 	cmd := &cobra.Command{
@@ -397,11 +401,9 @@ func (a *App) dnsEditCommand() *cobra.Command {
 			if len(args) == 3 {
 				value = &args[2]
 			}
-			return a.runDNSEdit(recordName, recordType, value, zone, ttl, noptr, comment)
+			return a.runDNSEdit(recordName, recordType, value, a.dnsZoneOverride, ttl, noptr, comment)
 		},
 	}
-	cmd.Flags().StringVar(&zone, "zone", "", "DNS zone; defaults to active/default zone")
-	_ = cmd.RegisterFlagCompletionFunc("zone", a.zoneFlagCompletion)
 	cmd.Flags().IntVarP(&ttl, "ttl", "t", -1, "optional record TTL in seconds")
 	cmd.Flags().BoolVar(&noptr, "noptr", false, "do not manage PTR records for A/AAAA workflows")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "record comment")
@@ -477,12 +479,11 @@ ib dns search app --global`),
 				return err
 			}
 			options.Types = types
+			options.Zone = strings.TrimSpace(a.dnsZoneOverride)
+			options.View = strings.TrimSpace(a.dnsViewOverride)
 			profile, err := a.loadConfig(true)
 			if err != nil {
 				return err
-			}
-			if options.View != "" {
-				profile.DNSView = strings.TrimSpace(options.View)
 			}
 			client := a.newClient(profile)
 			records, err := a.runDNSSearch(profile, client, options)
@@ -498,9 +499,6 @@ ib dns search app --global`),
 	cmd.Flags().BoolVarP(&options.CaseSensitive, "case-sensitive", "i", false, "use case-sensitive matching")
 	cmd.Flags().BoolVarP(&options.Global, "global", "g", false, "search across the selected DNS view")
 	cmd.Flags().BoolVarP(&options.Recursive, "recursive", "r", false, "include child authoritative zones")
-	cmd.Flags().StringVarP(&options.Zone, "zone", "z", "", "search this zone")
-	_ = cmd.RegisterFlagCompletionFunc("zone", a.zoneFlagCompletion)
-	cmd.Flags().StringVarP(&options.View, "view", "v", "", "search this DNS view")
 	cmd.Flags().BoolVarP(&options.Fuzzy, "fuzzy", "f", false, "enable fuzzy matching")
 	cmd.Flags().StringVarP(&typeFilter, "type", "t", "", "record type filter, comma-separated")
 	_ = cmd.RegisterFlagCompletionFunc("type", recordTypeFlagCompletion)
@@ -509,7 +507,8 @@ ib dns search app --global`),
 }
 
 func (a *App) dnsDeleteCommand() *cobra.Command {
-	return &cobra.Command{
+	var skipConfirm bool
+	cmd := &cobra.Command{
 		Use:               "delete NAME [ZONE]",
 		Short:             "Delete a DNS record by name",
 		Args:              cobra.RangeArgs(1, 2),
@@ -519,9 +518,11 @@ func (a *App) dnsDeleteCommand() *cobra.Command {
 			if len(args) > 1 {
 				zone = args[1]
 			}
-			return a.runDNSDelete(args[0], zone)
+			return a.runDNSDelete(args[0], zone, skipConfirm)
 		},
 	}
+	cmd.Flags().BoolVarP(&skipConfirm, "yes", "y", false, "skip delete confirmation prompt")
+	return cmd
 }
 
 func (a *App) configuredClient() (Profile, *WapiClient, error) {
@@ -622,12 +623,15 @@ func (a *App) deleteProfile(profileName string) error {
 	if err := a.writeConfigProfiles(defaultProfile, profiles); err != nil {
 		return err
 	}
+	if err := a.clearProfileCache(selected); err != nil {
+		return err
+	}
 	if !a.isTableOutput() {
 		return a.emitObject("Action", []string{"status", "action", "profile", "default", "message"}, map[string]any{
-			"status": "success", "action": "delete", "profile": selected, "default": false, "message": "profile deleted",
+			"status": "success", "action": "delete", "profile": selected, "default": false, "message": "profile deleted and cache cleared",
 		})
 	}
-	a.PrintSuccess("SUCCESS: profile '" + selected + "' deleted.")
+	a.PrintSuccess("SUCCESS: profile '" + selected + "' deleted and cache cleared.")
 	return nil
 }
 
@@ -1452,12 +1456,12 @@ func recordTypeList(records []TypedRecord) string {
 	return strings.Join(types, ", ")
 }
 
-func (a *App) runDNSDelete(recordName, zone string) error {
+func (a *App) runDNSDelete(recordName, zone string, skipConfirm bool) error {
 	if strings.EqualFold(recordName, "ptr") {
 		if zone == "" {
 			return cliError("full IP address is required. Use: ib dns delete ptr <ip-address>")
 		}
-		return a.runDNSDeletePTR(zone)
+		return a.runDNSDeletePTR(zone, skipConfirm)
 	}
 	profile, client, err := a.configuredClient()
 	if err != nil {
@@ -1471,11 +1475,26 @@ func (a *App) runDNSDelete(recordName, zone string) error {
 		return cliError("no forward DNS record found for %s in view %s\nHINT: To delete a reverse DNS PTR entry, run: ib dns delete ptr <ip-address>", target, client.View)
 	}
 	if len(matches) > 1 {
-		return cliError("multiple records found for %s. Delete one _ref manually", target)
+		record, err := a.selectDuplicateDeleteRecord(target, matches)
+		if err != nil {
+			if errors.Is(err, errDeleteCancelled) {
+				a.PrintInfo("INFO: delete cancelled")
+				return nil
+			}
+			return err
+		}
+		matches = []TypedRecord{record}
 	}
 	record := matches[0]
 	ref, err := recordRef(record)
 	if err != nil {
+		return err
+	}
+	if err := a.confirmDNSDelete(target, record, skipConfirm); err != nil {
+		if errors.Is(err, errDeleteCancelled) {
+			a.PrintInfo("INFO: delete cancelled")
+			return nil
+		}
 		return err
 	}
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
@@ -1489,7 +1508,180 @@ func (a *App) runDNSDelete(recordName, zone string) error {
 	return nil
 }
 
-func (a *App) runDNSDeletePTR(ipValue string) error {
+func (a *App) selectDuplicateDeleteRecord(target string, matches []TypedRecord) (TypedRecord, error) {
+	if a.dnsDeleteRecordSelector != nil {
+		record, selected, err := a.dnsDeleteRecordSelector(target, matches)
+		if err != nil {
+			return TypedRecord{}, err
+		}
+		if !selected {
+			return TypedRecord{}, errDeleteCancelled
+		}
+		return record, nil
+	}
+	if !a.isTableOutput() || a.gum == nil || !a.gum.interactive() {
+		return TypedRecord{}, duplicateDeleteError(target, matches)
+	}
+
+	selected, err := a.huhDuplicateDeleteSelect(target, matches)
+	if err != nil {
+		return TypedRecord{}, err
+	}
+	return selected, nil
+}
+
+func (a *App) huhDuplicateDeleteSelect(target string, records []TypedRecord) (TypedRecord, error) {
+	if len(records) == 0 {
+		return TypedRecord{}, cliError("no duplicate records available to select")
+	}
+	options := duplicateDeleteOptions(records)
+	selected := 0
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[int]().
+				Title("Multiple records found for " + target + "; select one to delete").
+				Options(options...).
+				Value(&selected).
+				Height(8),
+		),
+	).
+		WithInput(a.Stdin).
+		WithOutput(a.Stdout)
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return TypedRecord{}, errDeleteCancelled
+		}
+		return TypedRecord{}, err
+	}
+	if selected < 0 || selected >= len(records) {
+		return TypedRecord{}, cliError("invalid duplicate record selection")
+	}
+	return records[selected], nil
+}
+
+func duplicateDeleteOptions(records []TypedRecord) []huh.Option[int] {
+	options := make([]huh.Option[int], 0, len(records))
+	for i, record := range records {
+		option := huh.NewOption(duplicateDeleteChoice(i+1, record), i)
+		if i == 0 {
+			option = option.Selected(true)
+		}
+		options = append(options, option)
+	}
+	return options
+}
+
+func duplicateDeleteChoice(index int, record TypedRecord) string {
+	fields := duplicateDeleteFields(record)
+	return fmt.Sprintf("%d. %s %s | %s | zone=%s | ref=%s%s",
+		index,
+		fields["type"],
+		fields["name"],
+		fields["value"],
+		fields["zone"],
+		fields["ref"],
+		duplicateDeleteCommentSuffix(fields["comment"]),
+	)
+}
+
+func duplicateDeleteError(target string, records []TypedRecord) error {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "multiple records found for %s; run in an interactive terminal to choose one:\n", target)
+	for i, record := range records {
+		fields := duplicateDeleteFields(record)
+		fmt.Fprintf(&builder, "  %d. type=%s name=%s value=%s zone=%s ref=%s%s\n",
+			i+1,
+			fields["type"],
+			fields["name"],
+			fields["value"],
+			fields["zone"],
+			fields["ref"],
+			duplicateDeleteCommentSuffix(fields["comment"]),
+		)
+	}
+	return cliError("%s", strings.TrimRight(builder.String(), "\n"))
+}
+
+func duplicateDeleteFields(record TypedRecord) map[string]string {
+	return map[string]string{
+		"type":    displayRecordTypeLabel(record.Type),
+		"name":    recordName(record.Item, record.Type),
+		"value":   recordValue(record.Type, record.Item),
+		"zone":    cleanString(record.Item["zone"]),
+		"comment": cleanString(record.Item["comment"]),
+		"ref":     cleanString(record.Item["_ref"]),
+	}
+}
+
+func duplicateDeleteCommentSuffix(comment string) string {
+	if strings.TrimSpace(comment) == "" {
+		return ""
+	}
+	return " | comment=" + comment
+}
+
+func (a *App) confirmDNSDelete(target string, record TypedRecord, skipConfirm bool) error {
+	if skipConfirm {
+		return nil
+	}
+	confirmed, err := a.promptDNSDeleteConfirmation(target, record)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return errDeleteCancelled
+	}
+	return nil
+}
+
+func (a *App) promptDNSDeleteConfirmation(target string, record TypedRecord) (bool, error) {
+	if a.dnsDeleteConfirmer != nil {
+		return a.dnsDeleteConfirmer(target, record)
+	}
+	if !a.isTableOutput() || a.gum == nil || !a.gum.interactive() {
+		return false, cliError("delete confirmation requires an interactive terminal; rerun with -y to skip confirmation")
+	}
+
+	return a.huhDNSDeleteConfirm(target, record)
+}
+
+func (a *App) huhDNSDeleteConfirm(target string, record TypedRecord) (bool, error) {
+	confirmed := false
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Delete DNS record?").
+				Description(deleteConfirmationDescription(target, record)).
+				Affirmative("Delete").
+				Negative("Cancel").
+				Value(&confirmed),
+		),
+	).
+		WithInput(a.Stdin).
+		WithOutput(a.Stdout)
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return false, errDeleteCancelled
+		}
+		return false, err
+	}
+	return confirmed, nil
+}
+
+func deleteConfirmationDescription(target string, record TypedRecord) string {
+	fields := duplicateDeleteFields(record)
+	name := firstNonEmpty(fields["name"], target)
+	return fmt.Sprintf("%s %s | %s | zone=%s | ref=%s%s",
+		fields["type"],
+		name,
+		fields["value"],
+		fields["zone"],
+		fields["ref"],
+		duplicateDeleteCommentSuffix(fields["comment"]),
+	)
+}
+
+func (a *App) runDNSDeletePTR(ipValue string, skipConfirm bool) error {
 	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
@@ -1510,6 +1702,13 @@ func (a *App) runDNSDeletePTR(ipValue string) error {
 	}
 	ref, err := recordRef(matches[0])
 	if err != nil {
+		return err
+	}
+	if err := a.confirmDNSDelete(address.String(), matches[0], skipConfirm); err != nil {
+		if errors.Is(err, errDeleteCancelled) {
+			a.PrintInfo("INFO: delete cancelled")
+			return nil
+		}
 		return err
 	}
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {

@@ -28,6 +28,7 @@ type zoneListModel struct {
 	filtered []string
 	cursor   int
 	selected string
+	minRows  int
 	done     bool
 	canceled bool
 }
@@ -77,6 +78,9 @@ func newSimpleListModel(title string, choices []string, current string, itemName
 		itemName: itemName,
 		input:    input,
 		choices:  cleanChoices,
+	}
+	if itemName == "zone" {
+		model.minRows = zoneListVisibleItems
 	}
 	model.applyFilter()
 	model.selectValue(current)
@@ -189,8 +193,10 @@ func (m zoneListModel) View() string {
 	var builder strings.Builder
 	builder.WriteString("   " + zoneListTitleStyle.Render(m.title) + "\n")
 	builder.WriteString(m.input.View() + "\n")
+	renderedListRows := 0
 	if len(m.filtered) == 0 {
 		builder.WriteString("   " + zoneListEmptyStyle.Render("No "+m.itemName+"s match this filter") + "\n")
+		renderedListRows = 1
 	} else {
 		for _, row := range m.visibleRows() {
 			marker := " "
@@ -200,7 +206,12 @@ func (m zoneListModel) View() string {
 				style = zoneListSelectedStyle
 			}
 			builder.WriteString(fmt.Sprintf("   %s %s\n", marker, style.Render(row.value)))
+			renderedListRows++
 		}
+	}
+	for renderedListRows < m.minRows {
+		builder.WriteString("     \n")
+		renderedListRows++
 	}
 	builder.WriteString("   " + zoneListHelpStyle.Render("type prefix to filter • up/down move • enter select • esc cancel") + "\n")
 	return builder.String()
