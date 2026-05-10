@@ -15,7 +15,7 @@
       <stop offset="0" stop-color="#0f766e" />
       <stop offset="1" stop-color="#0ea5e9" />
     </linearGradient>
-    <linearGradient id="cache-grad" x1="420" y1="205" x2="610" y2="335" gradientUnits="userSpaceOnUse">
+    <linearGradient id="cache-grad" x1="430" y1="205" x2="620" y2="335" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#064e3b" />
       <stop offset="1" stop-color="#15803d" />
     </linearGradient>
@@ -27,7 +27,7 @@
       <stop offset="0" stop-color="#7c2d12" />
       <stop offset="1" stop-color="#ea580c" />
     </linearGradient>
-    <linearGradient id="refresh-grad" x1="610" y1="292" x2="760" y2="362" gradientUnits="userSpaceOnUse">
+    <linearGradient id="refresh-grad" x1="640" y1="292" x2="790" y2="362" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#581c87" />
       <stop offset="1" stop-color="#c026d3" />
     </linearGradient>
@@ -39,12 +39,12 @@
       <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#020617" flood-opacity=".5" />
       <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#38bdf8" flood-opacity=".16" />
     </filter>
-    <path id="worker1-cache" d="M210 145 L360 145 L360 235 L420 235" />
-    <path id="worker2-cache" d="M210 255 L420 255" />
-    <path id="worker3-cache" d="M210 365 L360 365 L360 295 L420 295" />
-    <path id="cache-read" d="M610 230 L705 230 L705 125 L790 125" />
+    <path id="worker1-cache" d="M210 145 L360 145 L360 235 L430 235" />
+    <path id="worker2-cache" d="M210 255 L430 255" />
+    <path id="worker3-cache" d="M210 365 L360 365 L360 295 L430 295" />
+    <path id="cache-read" d="M620 230 L715 230 L715 125 L790 125" />
     <path id="write-primary" d="M315 469 L485 469 L485 415 L790 415" />
-    <path id="refresh-cache" d="M610 330 L570 330 L570 315 L535 315" />
+    <path id="refresh-cache" d="M640 330 L620 330" />
     <marker id="arrow" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
       <path d="M 0 0 L 8 4 L 0 8 z" fill="#94a3b8" />
     </marker>
@@ -93,12 +93,12 @@
   <text class="text" x="100" y="370">Worker 3</text>
   <text class="tiny" x="84" y="387">zone C cache load</text>
 
-  <rect class="cache node" x="420" y="205" width="190" height="130" rx="5" />
-  <text class="text" x="468" y="246">SQLite Cache</text>
-  <rect class="badge" x="446" y="266" width="137" height="23" rx="3" />
-  <text class="tiny" x="459" y="282">record_cache</text>
-  <rect class="badge" x="446" y="296" width="137" height="23" rx="3" />
-  <text class="tiny" x="459" y="312">refresh_locks</text>
+  <rect class="cache node" x="430" y="205" width="190" height="130" rx="5" />
+  <text class="text" x="478" y="246">SQLite Cache</text>
+  <rect class="badge" x="456" y="266" width="137" height="23" rx="3" />
+  <text class="tiny" x="469" y="282">record_cache</text>
+  <rect class="badge" x="456" y="296" width="137" height="23" rx="3" />
+  <text class="tiny" x="469" y="312">refresh_locks</text>
 
   <rect class="server-read node" x="790" y="90" width="140" height="75" rx="5" />
   <text class="text" x="829" y="123">GCM</text>
@@ -108,19 +108,19 @@
   <text class="text" x="819" y="413">Primary</text>
   <text class="small" x="812" y="435">Grid Master</text>
 
-  <rect class="refresh node" x="610" y="292" width="150" height="70" rx="5" />
-  <text class="text" x="638" y="326">Refresh</text>
-  <text class="small" x="632" y="346">subprocess</text>
+  <rect class="refresh node" x="640" y="292" width="140" height="70" rx="5" />
+  <text class="text" x="663" y="326">Refresh</text>
+  <text class="small" x="657" y="346">subprocess</text>
 
   <rect class="write-box node" x="70" y="445" width="245" height="48" rx="4" />
   <text class="text" x="96" y="475">create / edit / delete</text>
 
-  <path class="line cache-line" d="M210 145 L360 145 L360 235 L420 235" />
-  <path class="line cache-line" d="M210 255 L420 255" />
-  <path class="line cache-line" d="M210 365 L360 365 L360 295 L420 295" />
-  <path class="line read-line" d="M610 230 L705 230 L705 125 L790 125" />
+  <path class="line cache-line" d="M210 145 L360 145 L360 235 L430 235" />
+  <path class="line cache-line" d="M210 255 L430 255" />
+  <path class="line cache-line" d="M210 365 L360 365 L360 295 L430 295" />
+  <path class="line read-line" d="M620 230 L715 230 L715 125 L790 125" />
   <path class="line write-line" d="M315 469 L485 469 L485 415 L790 415" />
-  <path class="line refresh-line" d="M610 330 L570 330 L570 315 L535 315" />
+  <path class="line refresh-line" d="M640 330 L620 330" />
 
   <circle class="dot-cache" r="5">
     <animateMotion dur="2.7s" repeatCount="indefinite" rotate="auto">
@@ -156,5 +156,5 @@
   <text class="tiny" x="245" y="135">parallel cache checks</text>
   <text class="tiny" x="635" y="216">GET / SOA / allrecords</text>
   <text class="tiny" x="515" y="489">POST / PUT / DELETE</text>
-  <text class="tiny" x="567" y="378">renew or replace cache</text>
+  <text class="tiny" x="602" y="378">renew or replace cache</text>
 </svg>

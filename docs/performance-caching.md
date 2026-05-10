@@ -28,6 +28,7 @@ Default tuning in the profile config `[meta]` section:
 ## Cache Decision Flow
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#020617", "primaryColor": "#0f172a", "primaryBorderColor": "#38bdf8", "primaryTextColor": "#e5f4ff", "secondaryColor": "#111827", "secondaryBorderColor": "#22c55e", "tertiaryColor": "#172554", "tertiaryBorderColor": "#818cf8", "lineColor": "#94a3b8", "textColor": "#e5e7eb", "fontFamily": "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"}}}%%
 flowchart TD
     A[ib dns list/search asks for zone records] --> B[Read record_cache by profile + view + zone]
     B --> C{Cache row found?}
@@ -47,6 +48,17 @@ flowchart TD
     I -- No --> L[Download fresh /allrecords]
     L --> M[Store payload_json, serial, cached_at, stale_expires_at]
     M --> N[Return fresh records]
+
+    classDef start fill:#111827,stroke:#38bdf8,color:#e0f2fe,stroke-width:1.2px
+    classDef cache fill:#052e2b,stroke:#22c55e,color:#dcfce7,stroke-width:1.2px
+    classDef decision fill:#1f2937,stroke:#f59e0b,color:#fffbeb,stroke-width:1.2px
+    classDef refresh fill:#312e81,stroke:#a5b4fc,color:#eef2ff,stroke-width:1.2px
+    classDef write fill:#4a044e,stroke:#e879f9,color:#fdf4ff,stroke-width:1.2px
+    class A start
+    class B,E,G,K,N cache
+    class C,D,F,I,G2 decision
+    class G1,G3,G4,H,J refresh
+    class L,M write
 ```
 
 The important performance point is the stale-while-revalidate path: if a record
@@ -59,6 +71,7 @@ or already outside the stale window.
 ![Animated read/write and worker cache flow](assets/cache-workers.svg)
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#020617", "actorBkg": "#0f172a", "actorBorder": "#38bdf8", "actorTextColor": "#e0f2fe", "activationBkgColor": "#172554", "activationBorderColor": "#818cf8", "signalColor": "#94a3b8", "signalTextColor": "#e5e7eb", "labelBoxBkgColor": "#111827", "labelBoxBorderColor": "#475569", "labelTextColor": "#e5e7eb", "loopTextColor": "#e5e7eb", "noteBkgColor": "#1f2937", "noteBorderColor": "#22c55e", "noteTextColor": "#dcfce7", "fontFamily": "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"}}}%%
 sequenceDiagram
     participant User
     participant CLI as ib CLI
@@ -124,6 +137,7 @@ normalization happen before matching.
 ## SQLite Cache Tables
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#020617", "primaryColor": "#0f172a", "primaryBorderColor": "#38bdf8", "primaryTextColor": "#e5f4ff", "secondaryColor": "#052e2b", "secondaryBorderColor": "#22c55e", "tertiaryColor": "#111827", "tertiaryBorderColor": "#818cf8", "lineColor": "#94a3b8", "textColor": "#e5e7eb", "fontFamily": "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"}}}%%
 erDiagram
     CACHE_META {
         text key PK
