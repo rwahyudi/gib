@@ -479,7 +479,7 @@ func (a *App) startZoneCacheRefresh(profile Profile) error {
 		"--profile", firstNonEmpty(strings.TrimSpace(profile.Name), defaultProfileName),
 		"--view", strings.TrimSpace(profile.DNSView),
 	}
-	cmd := exec.Command(executable, args...)
+	cmd := exec.Command(executable, args...) // #nosec G204 -- executable is this ib binary and args are fixed internal cache-refresh flags
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		_ = a.releaseZoneRefreshLease(profile)
@@ -1542,7 +1542,7 @@ func (a *App) startRecordCacheRevalidation(profile Profile, zoneName string) err
 		"--view", strings.TrimSpace(profile.DNSView),
 		"--zone", strings.TrimSpace(zoneName),
 	}
-	cmd := exec.Command(executable, args...)
+	cmd := exec.Command(executable, args...) // #nosec G204 -- executable is this ib binary and args are fixed internal cache-refresh flags
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		_ = a.releaseRecordRefreshLease(profile, zoneName)

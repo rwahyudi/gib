@@ -14,22 +14,17 @@ Go implementation of the `ib` Infoblox DNS CLI.
 | Dynamic completion | Complete profiles, views, zones, records, flags, record types, and output formats from the live `ib` binary. |
 | Operator output | Provide compact colorful tables, current-context footers, JSON/CSV output, and progress display for larger searches. |
 
-Suggested next features:
+## Security Scanning
 
-- Cache-only completion mode for environments where tab completion must never contact Infoblox.
-- OS keychain support for profile passwords, with the current local key file as a fallback.
-- Custom CA bundle support so operators can verify private Infoblox certificates without disabling SSL verification.
-- Batch import/export for planned DNS changes, including dry-run and review output.
-- Audit-friendly change log output for create, edit, and delete workflows.
+GitHub Actions runs tests, Go vulnerability checks, Go static security checks, and Trivy filesystem scans on pushes, pull requests, and a weekly schedule. Dependabot monitors Go modules and GitHub Actions updates weekly.
 
-## Build And Test
-
-Use `/tmp` for Go caches in this sandboxed checkout:
+Run the same checks locally when the tools are installed:
 
 ```bash
 env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go test ./...
-env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go build -buildvcs=false -o ib ./cmd/ib
-env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go build -buildvcs=false -o /home/rwahyudi/bin/ib ./cmd/ib
+env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod govulncheck ./...
+gosec ./...
+trivy fs --scanners vuln,secret,license .
 ```
 
 ## Setup

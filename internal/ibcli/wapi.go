@@ -45,7 +45,7 @@ func (a *App) newClient(profile Profile) *WapiClient {
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if !profile.VerifySSL {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // operator-controlled Infoblox profile setting
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- operator-controlled Infoblox profile setting
 	}
 
 	// read_server is intentionally optional. When config did not find a usable

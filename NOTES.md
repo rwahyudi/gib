@@ -10,6 +10,10 @@ When changing one of those flows, update the nearby code comment in the same pat
 
 The README includes a concise Features section with current capabilities and suggested next features. Keep it in sync when adding or removing major CLI behavior, but avoid duplicating the detailed command reference.
 
+## Security Scanning
+
+Security scanning lives in GitHub Actions and Dependabot. Keep README security commands in sync when adding or changing `go test`, `govulncheck`, `gosec`, Trivy, or dependency update automation.
+
 ## Global Cache and Search Settings
 
 The config file stores global cache/search tuning in the `[meta]` section:
