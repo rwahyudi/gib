@@ -448,6 +448,76 @@ func (a *App) cachedZones(profile Profile, client *WapiClient, search string) ([
 	return filterZones(zones, search), nil
 }
 
+func (a *App) queueZoneCacheRefresh(profile Profile) {
+	a.invalidateZoneCache(profile)
+	a.startZoneCacheRefreshAsync(profile)
+}
+
+func (a *App) startZoneCacheRefreshAsync(profile Profile) {
+	_ = a.startZoneCacheRefresh(profile)
+}
+
+func (a *App) startZoneCacheRefresh(profile Profile) error {
+	acquired, err := a.tryAcquireZoneRefreshLease(profile, time.Now(), recordRefreshLeaseTTL)
+	if err != nil || !acquired {
+		return err
+	}
+	if a.backgroundZoneRefresher != nil {
+		if err := a.backgroundZoneRefresher(profile); err != nil {
+			_ = a.releaseZoneRefreshLease(profile)
+			return err
+		}
+		return nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		_ = a.releaseZoneRefreshLease(profile)
+		return err
+	}
+	args := []string{
+		"config", "cache", "refresh-zones",
+		"--profile", firstNonEmpty(strings.TrimSpace(profile.Name), defaultProfileName),
+		"--view", strings.TrimSpace(profile.DNSView),
+	}
+	cmd := exec.Command(executable, args...)
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		_ = a.releaseZoneRefreshLease(profile)
+		return err
+	}
+	go func() {
+		_ = cmd.Wait()
+	}()
+	return nil
+}
+
+func (a *App) runZoneCacheRefresh(profileName string, view string) error {
+	releaseProfile := Profile{Name: strings.TrimSpace(profileName), DNSView: strings.TrimSpace(view)}
+	if releaseProfile.Name == "" {
+		releaseProfile.Name = defaultProfileName
+	}
+	defer func() {
+		_ = a.releaseZoneRefreshLease(releaseProfile)
+	}()
+	profile, err := a.loadConfigProfile(profileName, true)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(view) != "" {
+		profile.DNSView = strings.TrimSpace(view)
+	}
+	releaseProfile = profile
+	return a.refreshZoneCache(profile, a.newClient(profile))
+}
+
+func (a *App) refreshZoneCache(profile Profile, client *WapiClient) error {
+	zones, err := queryZones(client, "")
+	if err != nil {
+		return err
+	}
+	return a.writeCachedZones(profile, zones, time.Now())
+}
+
 func filterZones(zones []map[string]any, search string) []map[string]any {
 	search = strings.ToLower(strings.TrimSpace(search))
 	if search == "" {
@@ -1417,6 +1487,15 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 	return cachedRecordLoadResult{Records: recordsFromAllRecordRows(rows), Source: recordCacheSourceAllRecords}, nil
 }
 
+func (a *App) queueRecordCacheRefreshAfterWrite(profile Profile, zoneName string) {
+	zoneName, err := normalizeZoneName(zoneName)
+	if err != nil {
+		return
+	}
+	a.deleteRecordCacheEntry(profile, zoneName)
+	a.startRecordCacheRevalidationAsync(profile, zoneName)
+}
+
 func (a *App) startRecordCacheRevalidationAsync(profile Profile, zoneName string) {
 	_ = a.startRecordCacheRevalidation(profile, zoneName)
 }
@@ -1482,14 +1561,18 @@ func (a *App) runRecordCacheRevalidate(profileName string, view string, zoneName
 func (a *App) revalidateRecordCache(profile Profile, client *WapiClient, zoneName string) error {
 	now := time.Now()
 	entry, err := a.readCachedRecords(profile, zoneName)
-	if err != nil || !entry.CacheFound {
+	if err != nil {
 		return err
 	}
 	currentSerial, hasSerial, err := currentZoneSerial(client, zoneName)
 	if err != nil {
+		if isZoneNotFoundError(err) {
+			a.invalidateRecordCache(profile, zoneName)
+			return nil
+		}
 		return err
 	}
-	if hasSerial && entry.Serial != "" && entry.Serial == currentSerial {
+	if entry.CacheFound && hasSerial && entry.Serial != "" && entry.Serial == currentSerial {
 		return a.renewCachedRecordsAge(profile, zoneName, now, now.Add(a.recordsCacheSWRTTL()))
 	}
 	rows, err := allRecordRowsForZone(client, zoneName, false)
@@ -1503,13 +1586,27 @@ func (a *App) revalidateRecordCache(profile Profile, client *WapiClient, zoneNam
 	return a.writeCachedRecords(profile, zoneName, serial, rows, now)
 }
 
+type zoneNotFoundError struct {
+	zone string
+	view string
+}
+
+func (e zoneNotFoundError) Error() string {
+	return fmt.Sprintf("no DNS zone found for %s in view %s", e.zone, e.view)
+}
+
+func isZoneNotFoundError(err error) bool {
+	var target zoneNotFoundError
+	return errors.As(err, &target)
+}
+
 func currentZoneSerial(client *WapiClient, zoneName string) (string, bool, error) {
 	matches, err := findZone(client, zoneName, zoneSerialFields)
 	if err != nil {
 		return "", false, err
 	}
 	if len(matches) == 0 {
-		return "", false, cliError("no DNS zone found for %s in view %s", zoneName, client.View)
+		return "", false, zoneNotFoundError{zone: zoneName, view: client.View}
 	}
 	if len(matches) > 1 {
 		return "", false, cliError("multiple zones found for %s; target is ambiguous", zoneName)

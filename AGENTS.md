@@ -24,7 +24,7 @@ For manual checks, prefer focused commands such as `./ib --help`, `./ib dns crea
 
 ## Coding Style & Naming Conventions
 
-Follow standard Go style: tabs from `gofmt`, short package-local helper names, and exported identifiers only when needed outside a package. Use Cobra for command structure, Lipgloss for styled output, and the existing Gum wrapper for interactive prompts. Keep table output styled, but keep `-o jq` and `-o csv` plain and machine-readable.
+Follow standard Go style: tabs from `gofmt`, short package-local helper names, and exported identifiers only when needed outside a package. Use Cobra for command structure, Lipgloss for styled output, and the existing Gum wrapper for interactive prompts. Keep table output styled, but keep `-o json` and `-o csv` plain and machine-readable.
 
 Preserve operator-facing conventions: compact help text, `Current Context: Profile: ... | View: ... | Zone: ...`, HOST-first create examples, and color-coded DNS record types in table output.
 

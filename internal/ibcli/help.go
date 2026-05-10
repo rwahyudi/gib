@@ -117,7 +117,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 				{"cache", "ib config cache status|clear"},
 			}),
 			sectionWithRows("Profile Details", [][]string{
-				{"prompts", "server, username, password, WAPI version, SSL, read endpoint, DNS view, default zone"},
+				{"prompts", "server, username, password, WAPI version, SSL, auto GCM read endpoint, DNS view, default zone"},
 				{"storage", a.ConfigFile},
 				{"key", a.ConfigKeyFile},
 				{"password", "encrypted at rest"},
@@ -131,7 +131,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib config new":
 		return sectionWithRows("Create Profile", [][]string{
 			{"profile", "optional argument; blank prompt creates profile 'default'"},
-			{"prompts", "endpoint, credentials, WAPI/TLS, read endpoint, DNS defaults"},
+			{"prompts", "endpoint, credentials, WAPI/TLS, auto GCM read endpoint, DNS defaults"},
 			{"test", "connection test must pass before saving"},
 			{"retry", "failed connection test shows a retry prompt"},
 			{"default", "--default makes this profile the selected default"},
@@ -149,7 +149,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib config list":
 		return sectionWithRows("List Profiles", [][]string{
 			{"shows", "profile, default, server, read endpoint, DNS view, default zone"},
-			{"formats", "-o table, -o jq, or -o csv"},
+			{"formats", "-o table, -o json, or -o csv"},
 			{"empty", "prints setup guidance when no profiles exist"},
 		})
 	case "ib config use":
@@ -208,7 +208,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib config cache status":
 		return sectionWithRows("Cache Status", [][]string{
 			{"shows", "kind, profile, view, zone, serial, items, age, stale_expires"},
-			{"formats", "-o table, -o jq, or -o csv"},
+			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib config cache clear":
 		return sectionWithRows("Cache Clear", [][]string{

@@ -111,7 +111,7 @@ func TestConfigHelpCoversWorkflowAndStorage(t *testing.T) {
 		"ib config edit [PROFILE]",
 		"ib config cache status|clear",
 		"Profile Details",
-		"server, username, password, WAPI version, SSL, read endpoint, DNS view, default zone",
+		"server, username, password, WAPI version, SSL, auto GCM read endpoint, DNS view, default zone",
 		"encrypted at rest",
 	} {
 		if !strings.Contains(output, want) {
@@ -133,6 +133,7 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 			want: []string{
 				"Create Profile",
 				"blank prompt creates profile 'default'",
+				"auto GCM read endpoint",
 				"connection test must pass before saving",
 				"failed connection test shows a retry prompt",
 				"ib config new prod --default",
@@ -152,7 +153,7 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 			want: []string{
 				"List Profiles",
 				"profile, default, server, read endpoint, DNS view, default zone",
-				"-o table, -o jq, or -o csv",
+				"-o table, -o json, or -o csv",
 			},
 		},
 		{
@@ -220,7 +221,7 @@ func TestConfigCacheAndCompletionHelpCoversOperationalDetails(t *testing.T) {
 			want: []string{
 				"Cache Status",
 				"kind, profile, view, zone, serial, items, age, stale_expires",
-				"-o table, -o jq, or -o csv",
+				"-o table, -o json, or -o csv",
 			},
 		},
 		{
@@ -420,8 +421,11 @@ func TestGlobalOutputFlagCompletesValuesOnSubcommands(t *testing.T) {
 			t.Fatalf("completion %v: %v", args, err)
 		}
 		output := stdout.String()
-		if !strings.Contains(output, "jq\tJSON output for jq") {
-			t.Fatalf("completion %v missing jq value:\n%s", args, output)
+		if !strings.Contains(output, "json\tJSON output") {
+			t.Fatalf("completion %v missing json value:\n%s", args, output)
+		}
+		if strings.Contains(output, "jq") {
+			t.Fatalf("completion %v still exposes jq value:\n%s", args, output)
 		}
 		if args[len(args)-1] == "" {
 			for _, want := range []string{"table\tstyled table output", "csv\tCSV output"} {
@@ -433,5 +437,24 @@ func TestGlobalOutputFlagCompletesValuesOnSubcommands(t *testing.T) {
 		if !strings.Contains(output, ":4") {
 			t.Fatalf("completion %v did not disable file completion:\n%s", args, output)
 		}
+	}
+}
+
+func TestGlobalOutputFlagRejectsJQValue(t *testing.T) {
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	err := app.Execute([]string{"-o", "jq", "config", "list"})
+	if err == nil {
+		t.Fatal("old jq output value succeeded")
+	}
+	if !strings.Contains(err.Error(), `unsupported output format "jq"; use table, json, or csv`) {
+		t.Fatalf("unexpected jq rejection error: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("jq rejection wrote output stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }

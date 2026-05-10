@@ -610,6 +610,52 @@ func TestRecordCacheRevalidateRefreshesChangedSerial(t *testing.T) {
 	}
 }
 
+func TestRecordCacheRevalidatePopulatesMissingCache(t *testing.T) {
+	var allRecordRequests int
+	server := recordCacheServer(t, "2026050802", []map[string]any{{"type": "HOST_IPV4ADDR", "name": "live.example.com", "address": "192.0.2.20"}}, &allRecordRequests)
+	defer server.Close()
+
+	app := testApp(t)
+	profile := Profile{Name: "default", DNSView: "default"}
+
+	if err := app.revalidateRecordCache(profile, testWapiClient(server), "example.com"); err != nil {
+		t.Fatalf("revalidate missing record cache: %v", err)
+	}
+	if allRecordRequests != 1 {
+		t.Fatalf("allrecords requests = %d, want 1", allRecordRequests)
+	}
+	entry, err := app.readCachedRecords(profile, "example.com")
+	if err != nil {
+		t.Fatalf("read refreshed cache: %v", err)
+	}
+	if !entry.CacheFound {
+		t.Fatalf("record cache was not populated")
+	}
+	if entry.Serial != "2026050802" {
+		t.Fatalf("serial = %q, want 2026050802", entry.Serial)
+	}
+	records := recordsFromAllRecordRows(entry.Rows)
+	if len(records) != 1 || recordName(records[0].Item, records[0].Type) != "live.example.com" {
+		t.Fatalf("records = %#v", records)
+	}
+}
+
+func TestRecordCacheRefreshAfterWriteSkipsDuplicateLease(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", DNSView: "default"}
+	refreshes := make(chan string, 2)
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		refreshes <- zone
+		return nil
+	}
+
+	app.queueRecordCacheRefreshAfterWrite(profile, "example.com")
+	app.queueRecordCacheRefreshAfterWrite(profile, "example.com")
+
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+	assertNoRecordRefreshQueued(t, refreshes)
+}
+
 func TestCachedRecordsForZoneEnrichesTTLFromRecordRef(t *testing.T) {
 	var allRecordRequests int
 	var detailRequests int

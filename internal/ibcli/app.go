@@ -22,7 +22,7 @@ const (
 	defaultZoneEnv        = "IB_ZONE"
 	defaultViewEnv        = "IB_VIEW"
 	tableOutput           = "table"
-	jsonOutput            = "jq"
+	jsonOutput            = "json"
 	csvOutput             = "csv"
 	recordOutputType      = "RECORD"
 	zoneObject            = "zone_auth"
@@ -64,6 +64,7 @@ type App struct {
 	dnsZoneOverride             string
 	dnsViewOverride             string
 	backgroundRecordRevalidator func(Profile, string) error
+	backgroundZoneRefresher     func(Profile) error
 	dnsDeleteRecordSelector     func(string, []TypedRecord) (TypedRecord, bool, error)
 	dnsDeleteConfirmer          func(string, TypedRecord) (bool, error)
 }
@@ -138,7 +139,7 @@ Common usage:
 		"output",
 		"o",
 		tableOutput,
-		"output format: table, jq, or csv",
+		"output format: table, json, or csv",
 	)
 	_ = root.RegisterFlagCompletionFunc("output", outputFormatCompletion)
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
@@ -148,7 +149,7 @@ Common usage:
 			a.Output = tableOutput
 		case jsonOutput, csvOutput:
 		default:
-			return fmt.Errorf("unsupported output format %q; use table, jq, or csv", a.Output)
+			return fmt.Errorf("unsupported output format %q; use table, json, or csv", a.Output)
 		}
 		return nil
 	}
@@ -254,7 +255,7 @@ func rewriteRootModuleError(err error) error {
 func outputFormatCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	candidates := []string{
 		tableOutput + "\tstyled table output",
-		jsonOutput + "\tJSON output for jq",
+		jsonOutput + "\tJSON output",
 		csvOutput + "\tCSV output",
 	}
 	toComplete = strings.ToLower(strings.TrimSpace(toComplete))

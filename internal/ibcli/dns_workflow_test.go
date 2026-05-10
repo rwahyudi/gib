@@ -33,6 +33,7 @@ func TestDNSCreateWorkflowPostsToPrimaryWithoutMandatoryTTL(t *testing.T) {
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
 	profile := mustLoadProfile(t, app)
 	writeWorkflowRecordCache(t, app, profile)
+	refreshes := captureRecordRefreshes(app)
 
 	if err := app.Execute([]string{"dns", "create", "app", "a", "192.0.2.10", "--noptr"}); err != nil {
 		t.Fatalf("create: %v", err)
@@ -56,6 +57,7 @@ func TestDNSCreateWorkflowPostsToPrimaryWithoutMandatoryTTL(t *testing.T) {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
 func TestDNSCreateUsesDNSContextOverrides(t *testing.T) {
@@ -135,6 +137,7 @@ func TestDNSEditWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
 	profile := mustLoadProfile(t, app)
 	writeWorkflowRecordCache(t, app, profile)
+	refreshes := captureRecordRefreshes(app)
 
 	if err := app.Execute([]string{"dns", "edit", "app", "a", "192.0.2.20", "--ttl", "600", "--comment", "Updated", "--noptr"}); err != nil {
 		t.Fatalf("edit: %v", err)
@@ -157,6 +160,7 @@ func TestDNSEditWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 		t.Fatalf("expected record lookup requests on read server")
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
 func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
@@ -177,6 +181,7 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
 	profile := mustLoadProfile(t, app)
 	writeWorkflowRecordCache(t, app, profile)
+	refreshes := captureRecordRefreshes(app)
 	app.dnsDeleteConfirmer = func(target string, record TypedRecord) (bool, error) {
 		t.Fatalf("confirmation prompt should be skipped when -y is provided")
 		return false, nil
@@ -193,6 +198,87 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 		t.Fatalf("expected record lookup requests on read server")
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+}
+
+func TestZoneCreateQueuesZoneAndRecordCacheRefresh(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != zoneObject {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode("zone_auth/ref")
+	}))
+	defer primary.Close()
+
+	read := emptyReadServer(t)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedZones(profile, []map[string]any{{"fqdn": "old.example.com"}}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	recordRefreshes := captureRecordRefreshes(app)
+	zoneRefreshes := captureZoneRefreshes(app)
+
+	if err := app.runZoneCreate("new.example.com", "FORWARD", "", ""); err != nil {
+		t.Fatalf("zone create: %v", err)
+	}
+
+	if strings.Join(primaryRequests, ",") != "POST zone_auth" {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	assertZoneCacheInvalidated(t, app, profile)
+	assertZoneRefreshQueued(t, zoneRefreshes, "default")
+	assertRecordRefreshQueued(t, recordRefreshes, "new.example.com")
+}
+
+func TestZoneDeleteQueuesZoneRefreshAndClearsRecordCache(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":        "zone_auth/ref",
+					"fqdn":        "old.example.com",
+					"view":        "default",
+					"zone_format": "FORWARD",
+				}},
+			})
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/zone_auth/ref"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "zone_auth/ref"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app, _ := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedZones(profile, []map[string]any{{"fqdn": "old.example.com"}}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "old.example.com", "2026050801", []map[string]any{{"name": "old.example.com"}}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+	recordRefreshes := captureRecordRefreshes(app)
+	zoneRefreshes := captureZoneRefreshes(app)
+
+	if err := app.runZoneDelete("old.example.com"); err != nil {
+		t.Fatalf("zone delete: %v", err)
+	}
+
+	if strings.Join(requests, ",") != "GET zone_auth,DELETE zone_auth/ref" {
+		t.Fatalf("requests = %#v", requests)
+	}
+	assertZoneCacheInvalidated(t, app, profile)
+	assertRecordCacheInvalidated(t, app, profile, "old.example.com")
+	assertZoneRefreshQueued(t, zoneRefreshes, "default")
+	assertNoRecordRefreshQueued(t, recordRefreshes)
 }
 
 func TestDNSDeleteRequiresConfirmationBeforeDelete(t *testing.T) {
@@ -239,6 +325,7 @@ func TestDNSDeleteCanceledBeforePrimaryDelete(t *testing.T) {
 
 	app, stdout := dnsWorkflowApp(t, primary.URL, read.URL)
 	app.Output = tableOutput
+	refreshes := captureRecordRefreshes(app)
 	app.dnsDeleteConfirmer = func(target string, record TypedRecord) (bool, error) {
 		if target != "app.example.com" {
 			t.Fatalf("target = %q, want app.example.com", target)
@@ -261,6 +348,7 @@ func TestDNSDeleteCanceledBeforePrimaryDelete(t *testing.T) {
 	if len(readRequests) == 0 {
 		t.Fatalf("expected record lookup requests on read server")
 	}
+	assertNoRecordRefreshQueued(t, refreshes)
 }
 
 func TestDNSDeleteDuplicateSelectionCanceledPrintsInfo(t *testing.T) {
@@ -320,6 +408,7 @@ func TestDNSDeleteDuplicateRecordsUsesSelectedRef(t *testing.T) {
 	app.Output = tableOutput
 	profile := mustLoadProfile(t, app)
 	writeWorkflowRecordCache(t, app, profile)
+	refreshes := captureRecordRefreshes(app)
 	app.dnsDeleteRecordSelector = func(target string, matches []TypedRecord) (TypedRecord, bool, error) {
 		if target != "app.example.com" {
 			t.Fatalf("target = %q, want app.example.com", target)
@@ -356,6 +445,7 @@ func TestDNSDeleteDuplicateRecordsUsesSelectedRef(t *testing.T) {
 		t.Fatalf("expected duplicate lookup requests on read server")
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
 func TestDNSDeleteDuplicateRecordsFailsSafelyWhenNonInteractive(t *testing.T) {
@@ -790,5 +880,67 @@ func assertRecordCacheInvalidated(t *testing.T, app *App, profile Profile, zone 
 	}
 	if entry.CacheFound {
 		t.Fatalf("record cache for %s was not invalidated", zone)
+	}
+}
+
+func assertZoneCacheInvalidated(t *testing.T, app *App, profile Profile) {
+	t.Helper()
+	entry, err := app.readCachedZones(profile)
+	if err != nil {
+		t.Fatalf("read zone cache: %v", err)
+	}
+	if entry.CacheFound {
+		t.Fatalf("zone cache was not invalidated")
+	}
+}
+
+func captureRecordRefreshes(app *App) chan string {
+	refreshes := make(chan string, 8)
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		refreshes <- zone
+		return nil
+	}
+	return refreshes
+}
+
+func captureZoneRefreshes(app *App) chan string {
+	refreshes := make(chan string, 4)
+	app.backgroundZoneRefresher = func(profile Profile) error {
+		refreshes <- profile.DNSView
+		return nil
+	}
+	return refreshes
+}
+
+func assertRecordRefreshQueued(t *testing.T, refreshes <-chan string, wantZone string) {
+	t.Helper()
+	select {
+	case zone := <-refreshes:
+		if zone != wantZone {
+			t.Fatalf("record refresh zone = %q, want %q", zone, wantZone)
+		}
+	default:
+		t.Fatalf("record refresh for %s was not queued", wantZone)
+	}
+}
+
+func assertNoRecordRefreshQueued(t *testing.T, refreshes <-chan string) {
+	t.Helper()
+	select {
+	case zone := <-refreshes:
+		t.Fatalf("unexpected record refresh queued for %s", zone)
+	default:
+	}
+}
+
+func assertZoneRefreshQueued(t *testing.T, refreshes <-chan string, wantView string) {
+	t.Helper()
+	select {
+	case view := <-refreshes:
+		if view != wantView {
+			t.Fatalf("zone refresh view = %q, want %q", view, wantView)
+		}
+	default:
+		t.Fatalf("zone cache refresh for view %s was not queued", wantView)
 	}
 }

@@ -133,6 +133,19 @@ func (a *App) cacheCommand() *cobra.Command {
 	revalidateCmd.Flags().String("view", "", "DNS view")
 	revalidateCmd.Flags().String("zone", "", "DNS zone")
 	cmd.AddCommand(revalidateCmd)
+	refreshZonesCmd := &cobra.Command{
+		Use:    "refresh-zones",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profileName, _ := cmd.Flags().GetString("profile")
+			view, _ := cmd.Flags().GetString("view")
+			return a.runZoneCacheRefresh(profileName, view)
+		},
+	}
+	refreshZonesCmd.Flags().String("profile", "", "profile name")
+	refreshZonesCmd.Flags().String("view", "", "DNS view")
+	cmd.AddCommand(refreshZonesCmd)
 	return cmd
 }
 
@@ -752,12 +765,9 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	}
 	a.printConfigureSuccess("SUCCESS: Infoblox connection test passed.")
 
-	a.printConfigureStep(step, "Read Endpoint", "Optionally route read-only GET requests to a Grid Master Candidate.")
+	a.printConfigureStep(step, "Read Endpoint", "Automatically test Grid Master Candidates for read-only GET routing.")
 	step++
-	readServer := current.ReadServer
-	if selectedReadServer, changed := a.promptReadServer(probe, current.ReadServer); changed {
-		readServer = selectedReadServer
-	}
+	readServer, _ := a.promptReadServer(probe, current.ReadServer)
 	probe.ReadServer = readServer
 	a.printConfigureStep(step, "DNS View", "Pick the default DNS view for DNS commands.")
 	step++
@@ -766,11 +776,16 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 		dnsView = "default"
 	}
 	if viewNames, err := queryViewNames(a.newClient(probe)); err == nil && len(viewNames) > 0 {
-		selectedView, err := a.gum.ListFilter("Default DNS View", viewNames, dnsView, "view")
-		if err != nil {
-			return err
+		if len(viewNames) == 1 {
+			dnsView = viewNames[0]
+			a.printConfigureInfo("INFO: only one DNS view found; using " + dnsView + ".")
+		} else {
+			selectedView, err := a.gum.ListFilter("Default DNS View", viewNames, dnsView, "view")
+			if err != nil {
+				return err
+			}
+			dnsView = selectedView
 		}
-		dnsView = selectedView
 	} else {
 		dnsView, err = a.gum.Input("Default DNS View", dnsView, false)
 		if err != nil {
@@ -875,31 +890,40 @@ func (a *App) testConnection(profile Profile) error {
 	return nil
 }
 
-func (a *App) promptReadServer(profile Profile, current string) (string, bool) {
+func (a *App) promptReadServer(profile Profile, _ string) (string, bool) {
 	candidates, disabled, err := gcmReadServers(a.newClient(profile))
 	if err != nil {
-		a.printConfigureWarning("WARNING: could not discover Grid Master Candidates: " + err.Error())
-		return "", false
+		a.printConfigureInfo("INFO: could not discover Grid Master Candidates; read queries will use the primary server: " + err.Error())
+		return "", true
 	}
 	if len(disabled) > 0 {
 		for _, host := range disabled {
-			a.printConfigureWarning("WARNING: Grid Master Candidate " + host + " has Read-Only API disabled and will not be used.")
+			a.printConfigureInfo("INFO: Grid Master Candidate " + host + " has Read-Only API disabled and will not be used.")
 		}
-		return "", true
 	}
 	if len(candidates) == 0 {
-		return "", false
+		a.printConfigureInfo("INFO: no usable Grid Master Candidate found; read queries will use the primary server.")
+		return "", true
 	}
-	choices := append([]string{"Do not use a read endpoint"}, candidates...)
-	defaultChoice := "Do not use a read endpoint"
-	if current != "" {
-		defaultChoice = current
+	for _, candidate := range candidates {
+		if err := a.testReadServer(profile, candidate); err != nil {
+			a.printConfigureInfo("INFO: Grid Master Candidate " + candidate + " failed read-only API probe and will not be used: " + err.Error())
+			continue
+		}
+		a.printConfigureInfo("INFO: read-only GET requests will use Grid Master Candidate " + candidate + ".")
+		return candidate, true
 	}
-	selected, err := a.gum.Choose("Grid Master Candidate for WAPI GET queries", choices, defaultChoice)
-	if err != nil || selected == choices[0] {
-		return "", err == nil
-	}
-	return selected, true
+	a.printConfigureInfo("INFO: no Grid Master Candidate passed read-only API probe; read queries will use the primary server.")
+	return "", true
+}
+
+func (a *App) testReadServer(profile Profile, readServer string) error {
+	probe := profile
+	probe.ReadServer = readServer
+	client := a.newClient(probe)
+	params := url.Values{"_return_fields": []string{"name"}, "_max_results": []string{"1"}}
+	_, err := client.Request(http.MethodGet, gridObject, params, nil)
+	return err
 }
 
 func gcmReadServers(client *WapiClient) ([]string, []string, error) {
@@ -946,6 +970,10 @@ func (a *App) promptDefaultZone(profile Profile, current string) string {
 	if len(choices) == 0 {
 		zone, _ := a.gum.Input("Default DNS zone (optional)", current, false)
 		return strings.TrimRight(zone, ".")
+	}
+	if len(choices) == 1 {
+		a.printConfigureInfo("INFO: only one DNS zone found; using " + choices[0] + ".")
+		return strings.TrimRight(choices[0], ".")
 	}
 	selected, err := a.gum.ZoneFilter("Default DNS Zone", choices, current)
 	if err != nil {
@@ -1019,8 +1047,8 @@ func (a *App) runZoneCreate(zoneName, zoneFormat, comment, nsGroup string) error
 	if err != nil {
 		return err
 	}
-	a.invalidateZoneCache(profile)
-	a.invalidateRecordCache(profile, zone)
+	a.queueZoneCacheRefresh(profile)
+	a.queueRecordCacheRefreshAfterWrite(profile, zone)
 	if !a.isTableOutput() {
 		row := actionRow("create", "ZONE", zone, zone, client.View, "created DNS zone")
 		row["ref"] = ref
@@ -1187,7 +1215,7 @@ func (a *App) runZoneDelete(zoneName string) error {
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return err
 	}
-	a.invalidateZoneCache(profile)
+	a.queueZoneCacheRefresh(profile)
 	a.invalidateRecordCache(profile, target)
 	if !a.isTableOutput() {
 		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", "ZONE", target, target, client.View, "deleted DNS zone"))
@@ -1225,7 +1253,7 @@ func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr 
 	if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
 		return err
 	}
-	a.invalidateRecordCache(profile, resolvedZone)
+	a.queueRecordCacheRefreshAfterWrite(profile, resolvedZone)
 	if noptr && recordType != "a" && recordType != "aaaa" {
 		a.PrintWarning("WARNING: --noptr only applies to A/AAAA workflows and was ignored.")
 	}
@@ -1269,7 +1297,7 @@ func (a *App) runDNSCreatePTR(profile Profile, client *WapiClient, name, value, 
 	if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
 		return err
 	}
-	a.invalidateRecordCache(profile, reverseZone)
+	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 	if noptr {
 		a.PrintWarning("WARNING: --noptr only applies to A/AAAA workflows and was ignored.")
 	}
@@ -1346,7 +1374,7 @@ func (a *App) runDNSEdit(recordNameValue, requestedType string, value *string, z
 	if _, err := client.Request(http.MethodPut, ref, nil, payload); err != nil {
 		return err
 	}
-	a.invalidateRecordCache(profile, cleanString(record.Item["zone"]))
+	a.queueRecordCacheRefreshAfterWrite(profile, cleanString(record.Item["zone"]))
 	if noptr && record.Type != "a" && record.Type != "aaaa" {
 		a.PrintWarning("WARNING: --noptr only applies to A/AAAA workflows and was ignored.")
 	}
@@ -1418,7 +1446,7 @@ func (a *App) syncPTRForAddress(profile Profile, client *WapiClient, address net
 		if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
 			return "", err
 		}
-		a.invalidateRecordCache(profile, reverseZone)
+		a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 		return reverseZone, nil
 	}
 	ref, err := recordRef(matches[0])
@@ -1432,7 +1460,7 @@ func (a *App) syncPTRForAddress(profile Profile, client *WapiClient, address net
 	if _, err := client.Request(http.MethodPut, ref, nil, payload); err != nil {
 		return "", err
 	}
-	a.invalidateRecordCache(profile, reverseZone)
+	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 	return reverseZone, nil
 }
 
@@ -1500,7 +1528,7 @@ func (a *App) runDNSDelete(recordName, zone string, skipConfirm bool) error {
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return err
 	}
-	a.invalidateRecordCache(profile, cleanString(record.Item["zone"]))
+	a.queueRecordCacheRefreshAfterWrite(profile, cleanString(record.Item["zone"]))
 	if !a.isTableOutput() {
 		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", strings.ToUpper(record.Type), target, cleanString(record.Item["zone"]), client.View, "deleted DNS record"))
 	}
@@ -1714,7 +1742,7 @@ func (a *App) runDNSDeletePTR(ipValue string, skipConfirm bool) error {
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return err
 	}
-	a.invalidateRecordCache(profile, reverseZone)
+	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 	if !a.isTableOutput() {
 		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", "PTR", address.String(), reverseZone, client.View, "deleted PTR record"))
 	}

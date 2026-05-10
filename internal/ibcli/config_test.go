@@ -24,6 +24,8 @@ func testApp(t *testing.T) *App {
 		Stderr:        os.Stderr,
 		Stdin:         strings.NewReader(""),
 	}
+	app.backgroundRecordRevalidator = func(Profile, string) error { return nil }
+	app.backgroundZoneRefresher = func(Profile) error { return nil }
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 	return app
 }
@@ -223,7 +225,7 @@ func TestConfigOverviewWithoutProfilesUsesSetupPanel(t *testing.T) {
 		"Create a profile first; credentials are encrypted.",
 		"ib config new [PROFILE]",
 		"server, username, password, WAPI/TLS",
-		"read endpoint, DNS view, default zone",
+		"auto GCM read endpoint",
 		"runs before saving; retry on failure",
 		"ib config completion [bash|zsh|fish]",
 		"ib config cache status|clear",
@@ -247,15 +249,15 @@ func TestConfigOverviewWithoutProfilesKeepsMachineReadableOutput(t *testing.T) {
 	app.Stderr = &stderr
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 
-	if err := app.Execute([]string{"-o", "jq", "configure"}); err != nil {
+	if err := app.Execute([]string{"-o", "json", "configure"}); err != nil {
 		t.Fatalf("configure overview: %v", err)
 	}
 	output := strings.TrimSpace(stdout.String())
 	if output != "[]" {
-		t.Fatalf("configure jq output = %q, want []", output)
+		t.Fatalf("configure json output = %q, want []", output)
 	}
 	if stderr.Len() != 0 {
-		t.Fatalf("configure jq wrote stderr:\n%s", stderr.String())
+		t.Fatalf("configure json wrote stderr:\n%s", stderr.String())
 	}
 }
 
@@ -500,6 +502,171 @@ func TestConfigureNewProfileNamePromptStartsBlankAndDefaultsOnEnter(t *testing.T
 	}
 }
 
+func TestConfigureNewAutoSavesGCMReadServer(t *testing.T) {
+	var gcmRequests []string
+	gcm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gcmRequests = append(gcmRequests, r.Method+" "+strings.TrimPrefix(r.URL.Path, "/wapi/"+defaultWAPIVersion+"/"))
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/grid"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "grid"}})
+		case strings.HasSuffix(r.URL.Path, "/view"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"name": "default"}}})
+		case strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"fqdn": "primary.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gcm.Close()
+
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+strings.TrimPrefix(r.URL.Path, "/wapi/"+defaultWAPIVersion+"/"))
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/grid"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "grid"}})
+		case strings.HasSuffix(r.URL.Path, "/member"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"host_name": gcm.URL, "master_candidate": true, "enable_ro_api_access": true},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer primary.Close()
+
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		primary.URL,
+		"admin",
+		"secret",
+		"",
+		"n",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if profiles["demo"].ReadServer != gcm.URL {
+		t.Fatalf("read server = %q, want %q", profiles["demo"].ReadServer, gcm.URL)
+	}
+	if !strings.Contains(strings.Join(primaryRequests, ","), "GET grid") ||
+		!strings.Contains(strings.Join(primaryRequests, ","), "GET member") {
+		t.Fatalf("primary discovery requests = %#v", primaryRequests)
+	}
+	gcmJoined := strings.Join(gcmRequests, ",")
+	for _, want := range []string{"GET grid", "GET view", "GET zone_auth"} {
+		if !strings.Contains(gcmJoined, want) {
+			t.Fatalf("GCM requests missing %q: %#v", want, gcmRequests)
+		}
+	}
+}
+
+func TestConfigureAutoSelectsSingleDNSViewAndZone(t *testing.T) {
+	server := newConfigSingleViewZoneServer(t)
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		server.URL,
+		"admin",
+		"secret",
+		"",
+		"n",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if profiles["demo"].DNSView != "DNS Zone View" {
+		t.Fatalf("DNS view = %q, want DNS Zone View", profiles["demo"].DNSView)
+	}
+	if profiles["demo"].DefaultZone != "primary.example.com" {
+		t.Fatalf("default zone = %q, want primary.example.com", profiles["demo"].DefaultZone)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"INFO: only one DNS view found; using DNS Zone View.",
+		"INFO: only one DNS zone found; using primary.example.com.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("configure output missing %q:\n%s", want, output)
+		}
+	}
+	for _, unwanted := range []string{
+		"\n   Default DNS View\n",
+		"Default DNS zone (optional)",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("single view/zone should not prompt with %q:\n%s", unwanted, output)
+		}
+	}
+}
+
+func TestConfigureEditClearsOldReadServerWhenNoUsableGCM(t *testing.T) {
+	server := newConfigSuccessServer(t)
+	app := testApp(t)
+	profiles := map[string]Profile{
+		defaultProfileName: {
+			Name:        defaultProfileName,
+			Server:      server.URL,
+			ReadServer:  "https://readonly.example",
+			Username:    "admin",
+			Password:    "secret",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			DefaultZone: "example.com",
+			VerifySSL:   false,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}
+	if err := app.writeConfigProfiles(defaultProfileName, profiles); err != nil {
+		t.Fatalf("write profiles: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		"",
+		"",
+		"",
+		"",
+		"n",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "edit"}); err != nil {
+		t.Fatalf("configure edit: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	_, savedProfiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if savedProfiles[defaultProfileName].ReadServer != "" {
+		t.Fatalf("read server = %q, want blank", savedProfiles[defaultProfileName].ReadServer)
+	}
+}
+
 func TestConfigNewCanRetryDetailsAfterValidationError(t *testing.T) {
 	server := newConfigSuccessServer(t)
 	app := testApp(t)
@@ -673,7 +840,7 @@ func TestConfigureViewAndZonePromptsAreIndentedAndSequenced(t *testing.T) {
 	}
 }
 
-func TestPromptReadServerPreservesCurrentWhenDiscoveryHasNoCandidates(t *testing.T) {
+func TestPromptReadServerClearsCurrentWhenDiscoveryHasNoCandidates(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/member") {
 			http.NotFound(w, r)
@@ -699,8 +866,11 @@ func TestPromptReadServerPreservesCurrentWhenDiscoveryHasNoCandidates(t *testing
 		Timeout:     defaultTimeoutSeconds,
 	}
 	selected, changed := app.promptReadServer(profile, "https://readonly.example")
-	if changed {
-		t.Fatalf("read server changed to %q, want no change", selected)
+	if !changed || selected != "" {
+		t.Fatalf("selected=%q changed=%v, want explicit clear", selected, changed)
+	}
+	if !strings.Contains(stdout.String(), "INFO: no usable Grid Master Candidate found; read queries will use the primary server.") {
+		t.Fatalf("no-candidate info line missing:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
 }
 
@@ -738,14 +908,116 @@ func TestPromptReadServerClearsCurrentWhenReadOnlyAPIDisabled(t *testing.T) {
 		t.Fatalf("selected=%q changed=%v, want explicit clear", selected, changed)
 	}
 	output := stdout.String()
-	if !strings.Contains(output, "   WARNING: Grid Master Candidate gcm.example.com has Read-Only API disabled and will not be used.") {
-		t.Fatalf("read-only warning was not indented:\nstdout:\n%s\nstderr:\n%s", output, stderr.String())
+	if !strings.Contains(output, "   INFO: Grid Master Candidate gcm.example.com has Read-Only API disabled and will not be used.") {
+		t.Fatalf("read-only info line was not indented:\nstdout:\n%s\nstderr:\n%s", output, stderr.String())
 	}
-	if strings.Contains(output, "\nWARNING: Grid Master Candidate") || strings.HasPrefix(output, "WARNING: Grid Master Candidate") {
-		t.Fatalf("read-only warning should be indented:\n%s", output)
+	if strings.Contains(output, "\nINFO: Grid Master Candidate") || strings.HasPrefix(output, "INFO: Grid Master Candidate") {
+		t.Fatalf("read-only info line should be indented:\n%s", output)
 	}
 	if stderr.Len() != 0 {
-		t.Fatalf("read-only warning should stay in config output:\n%s", stderr.String())
+		t.Fatalf("read-only info line should stay in config output:\n%s", stderr.String())
+	}
+}
+
+func TestPromptReadServerUsesFirstGCMWithWorkingReadOnlyAPI(t *testing.T) {
+	var probeRequests int
+	gcm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/grid") {
+			http.NotFound(w, r)
+			return
+		}
+		probeRequests++
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "grid"}})
+	}))
+	defer gcm.Close()
+
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/member") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{
+				{"host_name": gcm.URL, "master_candidate": true, "enable_ro_api_access": true},
+			},
+		})
+	}))
+	defer primary.Close()
+
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	profile := Profile{
+		Name:        defaultProfileName,
+		Server:      primary.URL,
+		Username:    "admin",
+		Password:    "secret",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		VerifySSL:   true,
+		Timeout:     defaultTimeoutSeconds,
+	}
+
+	selected, changed := app.promptReadServer(profile, "")
+	if !changed || selected != gcm.URL {
+		t.Fatalf("selected=%q changed=%v, want %q", selected, changed, gcm.URL)
+	}
+	if probeRequests != 1 {
+		t.Fatalf("read-only probe requests = %d, want 1", probeRequests)
+	}
+	if !strings.Contains(stdout.String(), "INFO: read-only GET requests will use Grid Master Candidate "+gcm.URL+".") {
+		t.Fatalf("success info line missing:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestPromptReadServerClearsCurrentWhenGCMProbeFails(t *testing.T) {
+	gcm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "read-only API unavailable", http.StatusForbidden)
+	}))
+	defer gcm.Close()
+
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/member") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{
+				{"host_name": gcm.URL, "master_candidate": true, "enable_ro_api_access": true},
+			},
+		})
+	}))
+	defer primary.Close()
+
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	profile := Profile{
+		Name:        defaultProfileName,
+		Server:      primary.URL,
+		Username:    "admin",
+		Password:    "secret",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		VerifySSL:   true,
+		Timeout:     defaultTimeoutSeconds,
+	}
+
+	selected, changed := app.promptReadServer(profile, "https://readonly.example")
+	if !changed || selected != "" {
+		t.Fatalf("selected=%q changed=%v, want explicit clear", selected, changed)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "failed read-only API probe and will not be used") ||
+		!strings.Contains(output, "read queries will use the primary server") {
+		t.Fatalf("probe failure info missing:\nstdout:\n%s\nstderr:\n%s", output, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("probe failure info should stay in config output:\n%s", stderr.String())
 	}
 }
 
@@ -818,6 +1090,33 @@ func newConfigViewSuccessServer(t *testing.T) *httptest.Server {
 		case strings.HasSuffix(r.URL.Path, "/member"),
 			strings.HasSuffix(r.URL.Path, "/zone_auth"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func newConfigSingleViewZoneServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/grid"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "grid"}})
+		case strings.HasSuffix(r.URL.Path, "/member"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		case strings.HasSuffix(r.URL.Path, "/view"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"name": "DNS Zone View"}}})
+		case strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"fqdn":         "primary.example.com",
+					"view":         "DNS Zone View",
+					"zone_format":  "FORWARD",
+					"primary_type": "Grid",
+				}},
+			})
 		default:
 			http.NotFound(w, r)
 		}

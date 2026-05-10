@@ -16,6 +16,7 @@ const (
 	cacheFileName         = "cache.sqlite3"
 	cacheSchemaVersion    = "6"
 	recordRefreshLeaseTTL = 300 * time.Second
+	zoneRefreshLockName   = "<zone-cache>"
 )
 
 const cacheSchema = `
@@ -466,6 +467,20 @@ func (a *App) invalidateZoneCache(profile Profile) {
 	_, _ = db.Exec(`DELETE FROM zone_cache WHERE profile = ? AND view = ?`, profileName, view)
 }
 
+func (a *App) deleteRecordCacheEntry(profile Profile, zone string) {
+	profileName, view := cacheScope(profile)
+	zone = normalizeCacheZone(zone)
+	if zone == "" {
+		return
+	}
+	db, err := a.openCacheDB()
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_, _ = db.Exec(`DELETE FROM record_cache WHERE profile = ? AND view = ? AND zone = ?`, profileName, view, zone)
+}
+
 func (a *App) invalidateRecordCache(profile Profile, zone string) {
 	profileName, view := cacheScope(profile)
 	zone = normalizeCacheZone(zone)
@@ -547,6 +562,14 @@ func (a *App) releaseRecordRefreshLease(profile Profile, zone string) error {
 	defer db.Close()
 	_, err = db.Exec(`DELETE FROM record_refresh_locks WHERE cache_key = ?`, key)
 	return err
+}
+
+func (a *App) tryAcquireZoneRefreshLease(profile Profile, now time.Time, ttl time.Duration) (bool, error) {
+	return a.tryAcquireRecordRefreshLease(profile, zoneRefreshLockName, now, ttl)
+}
+
+func (a *App) releaseZoneRefreshLease(profile Profile) error {
+	return a.releaseRecordRefreshLease(profile, zoneRefreshLockName)
 }
 
 func (a *App) cacheStatusRows() ([]map[string]any, error) {

@@ -20,6 +20,12 @@ records_cache_swr_ttl = 259200
 
 `ib config delete PROFILE` removes the non-default profile from the config file and clears local zone-cache, record-cache, and record-refresh lock rows for that profile. Cache rows for other profiles are left intact.
 
+`ib config new` and `ib config edit` Step 05 (`Read Endpoint`) automatically discovers Grid Master Candidates from the primary Grid Master. Candidates with Read-Only API disabled are reported with an indented green `INFO:` line and are not saved. Candidates with Read-Only API enabled must also pass a direct WAPI GET probe before being saved as `read_server`. If no candidate exists or no candidate passes the probe, `read_server` is left blank so both reads and writes use the primary server.
+
+When `read_server` is set, the WAPI client routes GET requests to the GCM read endpoint and keeps POST, PUT, and DELETE requests on the primary server.
+
+During `ib config new` and `ib config edit`, DNS View and Default DNS Zone are only prompted when there are multiple choices. If Infoblox returns exactly one DNS view, that view is selected automatically. If exactly one eligible primary forward zone remains after filtering out secondary zones, that zone is selected automatically.
+
 ## DNS Search Progress
 
 For interactive table output, `ib dns search` uses a Bubble Tea progress view on stderr while the search is running. The view shows the search stage, configured worker count, completed zones, match count, and each worker's current zone/cache source. The final record table is still printed normally on stdout after the progress view exits.
@@ -28,7 +34,7 @@ The worker state `Checking cache` covers the whole per-zone record load until th
 
 If many global-search workers sit at `Checking cache`, inspect whether most per-zone record caches are stale. A stale-but-inside-SWR cache hit returns cached records after local lease acquisition and detached subprocess launch, but it does not wait for Infoblox serial checks or `/allrecords`. The worker label remains visible while local cached data is read, JSON-decoded, normalized, de-duplicated, sorted, and handed to the matcher, so large cached zones can still spend noticeable time in this state without waiting on Infoblox.
 
-For non-interactive stderr, `-o jq`, or `-o csv`, the progress view is disabled so scripts and machine-readable output remain clean.
+For non-interactive stderr, `-o json`, or `-o csv`, the progress view is disabled so scripts and machine-readable output remain clean.
 
 ## DNS List and Search Scope
 
@@ -40,7 +46,7 @@ All `ib dns` subcommands inherit `--zone`/`-z` and `--view`/`-v`. These are per-
 
 DNS record table output always includes a `Current Context:` footer line. When the table has more than five records, the `Total records` badge is shown on the same line.
 
-`ib dns delete NAME` prompts with a Charmbracelet Huh confirmation before deleting a selected record. Use `-y` or `--yes` to skip the confirmation. If the user cancels either the duplicate-record picker or confirmation prompt, `ib` prints `INFO: delete cancelled` and exits without issuing DELETE. If multiple forward records match the same FQDN, interactive table mode first uses a Charmbracelet Huh select picker showing type, name, value, zone, comment, and `_ref`; the selected record is then confirmed before DELETE. Non-interactive mode and `-o jq`/`-o csv` fail safely unless `-y` is provided.
+`ib dns delete NAME` prompts with a Charmbracelet Huh confirmation before deleting a selected record. Use `-y` or `--yes` to skip the confirmation. If the user cancels either the duplicate-record picker or confirmation prompt, `ib` prints `INFO: delete cancelled` and exits without issuing DELETE. If multiple forward records match the same FQDN, interactive table mode first uses a Charmbracelet Huh select picker showing type, name, value, zone, comment, and `_ref`; the selected record is then confirmed before DELETE. Non-interactive mode and `-o json`/`-o csv` fail safely unless `-y` is provided.
 
 ## Shell Completion
 
@@ -54,11 +60,13 @@ For Bash, `ib dns create <tab><tab>` prints the `dns create` usage/help under th
 
 Global options still complete while using `ib dns create`: `ib dns create -<tab>` offers options such as `--output`, `-o`, and `--help`, and output format values complete after `--output` or `-o`.
 
-For `ib config new` and `ib config edit`, question 7 (`Default DNS Zone`) uses the Bubble Tea filter list and keeps an eight-row zone list area visible even when fewer rows are currently matched. Question 6 (`Default DNS View`) still sizes to the available DNS view choices.
+For `ib config new` and `ib config edit`, question 7 (`Default DNS Zone`) uses the Bubble Tea filter list when there are multiple choices and keeps an eight-row zone list area visible even when fewer rows are currently matched. Question 6 (`Default DNS View`) still sizes to the available DNS view choices when a picker is needed.
 
 ## Zone Record Cache Workflow
 
 Zone record data is cached per profile, DNS view, and zone in the local SQLite cache.
+
+Successful `ib dns create`, `ib dns edit`, and `ib dns delete` operations remove the affected zone's record-cache row and synchronously launch the detached refresh subprocess when no matching refresh lease is active. The write command does not wait for `/allrecords`; the subprocess repopulates the cache in the background. A/AAAA workflows that also create or update PTR records queue refreshes for both the forward zone and the reverse zone. Successful DNS zone create/delete operations also clear and refresh the zone-list cache in the background; deleting a zone removes that zone's record cache instead of trying to refresh records for a zone that no longer exists.
 
 When a command queries zone records:
 
@@ -69,7 +77,7 @@ When a command queries zone records:
 5. The stale response does not wait for Infoblox serial checks, `/allrecords`, or subprocess completion.
 6. The background subprocess asks Infoblox for the zone SOA serial number.
 7. If the cached serial matches the server serial, `ib` treats the cached data as still valid, renews the cached age timestamp, recomputes normal freshness from `cached_at + cache_ttl`, and extends the stale expiry by `records_cache_swr_ttl`.
-8. If the serial changed, or if the cache entry has no serial to compare, the background subprocess downloads fresh `/allrecords` data, stores the new serial when available, and resets all record-cache timestamps.
+8. If the serial changed, if the cache entry is missing, or if the cache entry has no serial to compare, the background subprocess downloads fresh `/allrecords` data, stores the new serial when available, and resets all record-cache timestamps.
 9. If an expired entry is already outside `records_cache_swr_ttl`, `ib` performs the serial check in the foreground. Matching serials renew `cached_at`, making the cache fresh again under the current `cache_ttl`; changed or missing serials refresh from `/allrecords`.
 
 The in-flight background refresh marker is stored in the local SQLite cache and expires automatically after 300 seconds. This prevents repeated `ib dns list` or `ib dns search` calls from starting duplicate refreshes while still allowing recovery if a refresh subprocess exits unexpectedly.

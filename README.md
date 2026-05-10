@@ -22,7 +22,7 @@ ib config edit
 ib config list
 ```
 
-Profiles store the primary server, optional read server, credentials, WAPI version, DNS view, and default zone. Passwords are encrypted at rest. Do not commit `~/.ib/config`, `~/.ib/key`, or cache data.
+Profiles store the primary server, auto-detected GCM read endpoint when available, credentials, WAPI version, DNS view, and default zone. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Do not commit `~/.ib/config`, `~/.ib/key`, or cache data.
 
 ## DNS Context
 
@@ -58,11 +58,17 @@ ib dns delete app
 
 `ib dns delete` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records match, interactive table mode shows a Huh select list so one record can be chosen.
 
+Use `-o json` or `-o csv` for machine-readable output.
+
+During `ib config new` and `ib config edit`, Step 05 discovers Grid Master Candidates and saves `read_server` only when a candidate successfully answers a read-only WAPI GET probe. GET requests then use that GCM; create, update, and delete requests always use the primary server.
+
 ## Cache
 
 Zone and record caches are stored in `~/.ib/cache.sqlite3`.
 
 Record cache freshness uses `cached_at + cache_ttl`. Expired records inside `records_cache_swr_ttl` are returned immediately while a single background refresh process revalidates the zone serial and refreshes `/allrecords` when needed.
+
+Successful DNS record create, edit, and delete operations clear the affected zone's record cache and start a background refresh. DNS zone create/delete also refreshes the zone-list cache in the background; deleted zones have their record cache removed.
 
 Useful cache commands:
 

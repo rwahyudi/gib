@@ -113,6 +113,12 @@ func TestRunDNSCreateAManagesPTRUnlessNoPTR(t *testing.T) {
 	defer server.Close()
 
 	app := dnsCommandTestApp(t, server.URL, "example.com")
+	refreshes := make(chan string, 4)
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		refreshes <- zone
+		_ = app.releaseRecordRefreshLease(profile, zone)
+		return nil
+	}
 	if err := app.runDNSCreate("a", "app", "192.0.2.10", "", -1, false, ""); err != nil {
 		t.Fatalf("create a with ptr: %v", err)
 	}
@@ -122,6 +128,7 @@ func TestRunDNSCreateAManagesPTRUnlessNoPTR(t *testing.T) {
 	if postedPTR["ipv4addr"] != "192.0.2.10" || postedPTR["ptrdname"] != "app.example.com" {
 		t.Fatalf("ptr payload = %#v", postedPTR)
 	}
+	assertQueuedRecordRefreshes(t, refreshes, "example.com", "2.0.192.in-addr.arpa")
 
 	if err := app.runDNSCreate("a", "db", "192.0.2.11", "", -1, true, ""); err != nil {
 		t.Fatalf("create a with --noptr: %v", err)
@@ -129,6 +136,7 @@ func TestRunDNSCreateAManagesPTRUnlessNoPTR(t *testing.T) {
 	if createdA != 2 || createdPTR != 1 {
 		t.Fatalf("--noptr createdA=%d createdPTR=%d", createdA, createdPTR)
 	}
+	assertQueuedRecordRefreshes(t, refreshes, "example.com")
 }
 
 func TestSyncPTRForAddressUpdatesExistingPTR(t *testing.T) {
@@ -1328,4 +1336,18 @@ func dnsCommandTestApp(t *testing.T, serverURL, defaultZone string) *App {
 	app.Stderr = &bytes.Buffer{}
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 	return app
+}
+
+func assertQueuedRecordRefreshes(t *testing.T, refreshes <-chan string, wantZones ...string) {
+	t.Helper()
+	for _, wantZone := range wantZones {
+		select {
+		case zone := <-refreshes:
+			if zone != wantZone {
+				t.Fatalf("record refresh zone = %q, want %q", zone, wantZone)
+			}
+		default:
+			t.Fatalf("record refresh for %s was not queued", wantZone)
+		}
+	}
 }

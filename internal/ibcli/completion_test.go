@@ -212,9 +212,15 @@ func TestDNSCreateCompletesFlagsWhenRequested(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"--zone\tDNS zone override for this command",
+		"-z\tDNS zone override for this command",
 		"--view\tDNS view override for this command",
+		"-v\tDNS view override for this command",
 		"--ttl\toptional record TTL in seconds",
-		"--output\toutput format: table, jq, or csv",
+		"-t\toptional record TTL in seconds",
+		"--comment\trecord comment",
+		"-c\trecord comment",
+		"--noptr\tdo not manage PTR records for A/AAAA workflows",
+		"--output\toutput format: table, json, or csv",
 		":4",
 	} {
 		if !strings.Contains(output, want) {
@@ -234,8 +240,17 @@ func TestDNSCreateCompletesFlagsAfterPositionalArgs(t *testing.T) {
 		t.Fatalf("completion: %v", err)
 	}
 	output := stdout.String()
-	if !strings.Contains(output, "--zone\tDNS zone override for this command") || !strings.Contains(output, ":4") {
-		t.Fatalf("completion output missing flags after args:\n%s", output)
+	for _, want := range []string{
+		"-t\toptional record TTL in seconds",
+		"-c\trecord comment",
+		"-z\tDNS zone override for this command",
+		"-v\tDNS view override for this command",
+		"--noptr\tdo not manage PTR records for A/AAAA workflows",
+		":4",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion output missing flag %q after args:\n%s", want, output)
+		}
 	}
 }
 
@@ -292,7 +307,7 @@ func TestSearchCompletesFlagsAfterGlobalFlag(t *testing.T) {
 		"-g\tsearch across the selected DNS view",
 		"--recursive\tinclude child authoritative zones",
 		"-r\tinclude child authoritative zones",
-		"--output\toutput format: table, jq, or csv",
+		"--output\toutput format: table, json, or csv",
 		":4",
 	} {
 		if !strings.Contains(output, want) {
@@ -687,11 +702,11 @@ func TestDynamicBashCompletionCreatePreservesGlobalFlagCompletion(t *testing.T) 
 	fakeIB := filepath.Join(dir, "ib")
 	if err := os.WriteFile(fakeIB, []byte(`#!/bin/sh
 if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [ "$4" = "-" ]; then
-  printf '%s\n' --output -o --help -h --zone :4
+  printf '%s\n' --output -o --help -h --zone -z --view -v --ttl -t --comment -c --noptr :4
   exit 0
 fi
 if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [ "$7" = "--output" ]; then
-  printf '%s\n' table jq csv :4
+  printf '%s\n' table json csv :4
   exit 0
 fi
 printf ':4\n'
@@ -723,8 +738,8 @@ printf 'outputs:%s\n' "${COMPREPLY[*]}"
 	}
 	output := string(raw)
 	for _, want := range []string{
-		"flags:--output -o --help -h --zone",
-		"outputs:table jq csv",
+		"flags:--output -o --help -h --zone -z --view -v --ttl -t --comment -c --noptr",
+		"outputs:table json csv",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("generated bash completion missing %q:\n%s", want, output)

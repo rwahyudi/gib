@@ -47,7 +47,7 @@ func (a *App) printConfigEmptyState() {
 		[][]string{
 			{"Create profile", "ib config new [PROFILE]"},
 			{"Questions", "server, username, password, WAPI/TLS"},
-			{"DNS defaults", "read endpoint, DNS view, default zone"},
+			{"DNS defaults", "auto GCM read endpoint, DNS view, default zone"},
 			{"Connection test", "runs before saving; retry on failure"},
 			{"Shell completion", "ib config completion [bash|zsh|fish]"},
 			{"Cache tools", "ib config cache status|clear"},
@@ -126,6 +126,14 @@ func (a *App) printConfigureNote(message string) {
 func (a *App) printConfigureSuccess(message string) {
 	if !a.isTableOutput() {
 		a.PrintSuccess(message)
+		return
+	}
+	fmt.Fprintln(a.Stdout, "   "+successStyle.Render(message))
+}
+
+func (a *App) printConfigureInfo(message string) {
+	if !a.isTableOutput() {
+		fmt.Fprintln(a.Stdout, successStyle.Render(message))
 		return
 	}
 	fmt.Fprintln(a.Stdout, "   "+successStyle.Render(message))
