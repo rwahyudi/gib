@@ -6,6 +6,10 @@ Keep code comments focused on behavior that is easy to break or misunderstand: W
 
 When changing one of those flows, update the nearby code comment in the same patch. Comments should explain why the behavior exists and what must stay in sync, not restate obvious Go statements.
 
+## README Maintenance
+
+The README includes a concise Features section with current capabilities and suggested next features. Keep it in sync when adding or removing major CLI behavior, but avoid duplicating the detailed command reference.
+
 ## Global Cache and Search Settings
 
 The config file stores global cache/search tuning in the `[meta]` section:

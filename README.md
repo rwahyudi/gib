@@ -2,6 +2,26 @@
 
 Go implementation of the `ib` Infoblox DNS CLI.
 
+## Features
+
+| Feature | Description |
+| --- | --- |
+| Profile management | Create, edit, switch, and delete Infoblox profiles with encrypted local passwords. |
+| Read/write routing | Route GET requests to a validated GCM read endpoint while keeping writes on the primary Grid Master. |
+| DNS context | Use configured defaults, shell-session view/zone context, environment variables, or per-command `--view`/`--zone` overrides. |
+| Record operations | List, search, create, edit, and delete DNS records with interactive duplicate selection and confirmation. |
+| Fast large-zone access | Use `/allrecords`, local SQLite caching, worker-limited global search, and stale-while-revalidate refreshes. |
+| Dynamic completion | Complete profiles, views, zones, records, flags, record types, and output formats from the live `ib` binary. |
+| Operator output | Provide compact colorful tables, current-context footers, JSON/CSV output, and progress display for larger searches. |
+
+Suggested next features:
+
+- Cache-only completion mode for environments where tab completion must never contact Infoblox.
+- OS keychain support for profile passwords, with the current local key file as a fallback.
+- Custom CA bundle support so operators can verify private Infoblox certificates without disabling SSL verification.
+- Batch import/export for planned DNS changes, including dry-run and review output.
+- Audit-friendly change log output for create, edit, and delete workflows.
+
 ## Build And Test
 
 Use `/tmp` for Go caches in this sandboxed checkout:
