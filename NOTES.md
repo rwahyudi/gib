@@ -20,7 +20,7 @@ GitHub releases are tag-driven through GoReleaser. The release workflow publishe
 
 ## Performance and Caching Docs
 
-`docs/performance-caching.md` explains cache freshness, stale-while-revalidate, read/write routing, search workers, and SQLite cache tables. Keep that page and `docs/assets/cache-workers.svg` in sync when cache behavior, read-server routing, worker behavior, or cache schema changes.
+`docs/performance-caching.md` explains cache freshness, stale-while-revalidate, read/write routing, search workers, and SQLite cache tables. Keep that page and `docs/assets/cache-workers.svg` in sync when cache behavior, read-server routing, worker behavior, or cache schema changes. The SVG uses a dark, angular, gradient style with static worker boxes and small animated traffic markers.
 
 ## Global Cache and Search Settings
 

@@ -1,143 +1,160 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" role="img" aria-labelledby="title desc">
-  <title id="title">Animated ib cache, read endpoint, write endpoint, and worker flow</title>
-  <desc id="desc">Multiple search workers read from SQLite cache, GET traffic goes to a GCM read endpoint, write traffic goes to the primary Grid Master, and a background refresh updates the cache.</desc>
-  <style>
-    :root {
-      color-scheme: light dark;
-    }
-    .bg { fill: #f8fafc; }
-    .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; rx: 10; }
-    .server { fill: #eef2ff; stroke: #6366f1; stroke-width: 2; rx: 10; }
-    .primary { fill: #fff7ed; stroke: #f97316; }
-    .cache { fill: #ecfdf5; stroke: #10b981; stroke-width: 2; rx: 10; }
-    .worker { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; rx: 10; }
-    .refresh { fill: #fdf4ff; stroke: #c026d3; stroke-width: 2; rx: 10; }
-    .text { font: 600 17px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
-    .small { font: 500 13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #334155; }
-    .tiny { font: 500 12px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #475569; }
-    .line { fill: none; stroke: #94a3b8; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 8 8; }
-    .read-line { stroke: #6366f1; }
-    .write-line { stroke: #f97316; }
-    .cache-line { stroke: #10b981; }
-    .refresh-line { stroke: #c026d3; }
-    .dot-read { fill: #4f46e5; }
-    .dot-write { fill: #f97316; }
-    .dot-cache { fill: #059669; }
-    .dot-refresh { fill: #c026d3; }
-    .pulse { animation: pulse 2.4s ease-in-out infinite; transform-origin: center; }
-    .worker1 { animation-delay: 0s; }
-    .worker2 { animation-delay: .45s; }
-    .worker3 { animation-delay: .9s; }
-    @keyframes pulse {
-      0%, 100% { opacity: .72; transform: scale(1); }
-      50% { opacity: 1; transform: scale(1.025); }
-    }
-    @media (prefers-color-scheme: dark) {
-      .bg { fill: #020617; }
-      .panel { fill: #0f172a; stroke: #334155; }
-      .server { fill: #1e1b4b; stroke: #818cf8; }
-      .primary { fill: #431407; stroke: #fb923c; }
-      .cache { fill: #052e1a; stroke: #34d399; }
-      .worker { fill: #082f49; stroke: #38bdf8; }
-      .refresh { fill: #4a044e; stroke: #e879f9; }
-      .text { fill: #f8fafc; }
-      .small { fill: #cbd5e1; }
-      .tiny { fill: #94a3b8; }
-      .line { stroke: #64748b; }
-    }
-  </style>
-
+  <title id="title">Modern ib cache, read endpoint, write endpoint, and worker flow</title>
+  <desc id="desc">Static worker boxes read from SQLite cache in parallel. Small animated markers show read traffic to a GCM endpoint, write traffic to the primary Grid Master, and background refresh traffic updating the cache.</desc>
   <defs>
-    <path id="worker1-cache" d="M190 145 C290 145 335 250 445 250" />
-    <path id="worker2-cache" d="M190 255 C290 255 335 270 445 270" />
-    <path id="worker3-cache" d="M190 365 C290 365 335 290 445 290" />
-    <path id="cache-read" d="M575 230 C665 150 725 130 830 125" />
-    <path id="write-primary" d="M305 465 C495 500 690 500 830 410" />
-    <path id="refresh-cache" d="M720 315 C650 350 580 345 525 315" />
-    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    <linearGradient id="page-bg" x1="0" y1="0" x2="980" y2="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#020617" />
+      <stop offset=".55" stop-color="#0b1120" />
+      <stop offset="1" stop-color="#111827" />
+    </linearGradient>
+    <linearGradient id="panel-grad" x1="35" y1="40" x2="945" y2="515" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f172a" />
+      <stop offset="1" stop-color="#111827" />
+    </linearGradient>
+    <linearGradient id="worker-grad" x1="70" y1="0" x2="210" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f766e" />
+      <stop offset="1" stop-color="#0ea5e9" />
+    </linearGradient>
+    <linearGradient id="cache-grad" x1="420" y1="205" x2="610" y2="335" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#064e3b" />
+      <stop offset="1" stop-color="#15803d" />
+    </linearGradient>
+    <linearGradient id="read-grad" x1="790" y1="90" x2="930" y2="165" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#312e81" />
+      <stop offset="1" stop-color="#4f46e5" />
+    </linearGradient>
+    <linearGradient id="write-grad" x1="790" y1="380" x2="930" y2="455" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7c2d12" />
+      <stop offset="1" stop-color="#ea580c" />
+    </linearGradient>
+    <linearGradient id="refresh-grad" x1="610" y1="292" x2="760" y2="362" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#581c87" />
+      <stop offset="1" stop-color="#c026d3" />
+    </linearGradient>
+    <linearGradient id="write-box-grad" x1="70" y1="445" x2="315" y2="493" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1e293b" />
+      <stop offset="1" stop-color="#334155" />
+    </linearGradient>
+    <filter id="soft-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#020617" flood-opacity=".5" />
+      <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#38bdf8" flood-opacity=".16" />
+    </filter>
+    <path id="worker1-cache" d="M210 145 L360 145 L360 235 L420 235" />
+    <path id="worker2-cache" d="M210 255 L420 255" />
+    <path id="worker3-cache" d="M210 365 L360 365 L360 295 L420 295" />
+    <path id="cache-read" d="M610 230 L705 230 L705 125 L790 125" />
+    <path id="write-primary" d="M315 469 L485 469 L485 415 L790 415" />
+    <path id="refresh-cache" d="M610 330 L570 330 L570 315 L535 315" />
+    <marker id="arrow" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+      <path d="M 0 0 L 8 4 L 0 8 z" fill="#94a3b8" />
     </marker>
   </defs>
 
+  <style>
+    .bg { fill: url(#page-bg); }
+    .panel { fill: url(#panel-grad); stroke: #334155; stroke-width: 1.4; }
+    .worker { fill: url(#worker-grad); stroke: #67e8f9; stroke-width: 1.3; }
+    .cache { fill: url(#cache-grad); stroke: #86efac; stroke-width: 1.5; }
+    .server-read { fill: url(#read-grad); stroke: #a5b4fc; stroke-width: 1.4; }
+    .server-write { fill: url(#write-grad); stroke: #fdba74; stroke-width: 1.4; }
+    .refresh { fill: url(#refresh-grad); stroke: #f0abfc; stroke-width: 1.4; }
+    .write-box { fill: url(#write-box-grad); stroke: #94a3b8; stroke-width: 1.2; }
+    .text { font: 650 17px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f8fafc; }
+    .small { font: 520 13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #cbd5e1; }
+    .tiny { font: 520 12px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #94a3b8; }
+    .line { fill: none; stroke-width: 2.4; stroke-linecap: square; stroke-linejoin: miter; marker-end: url(#arrow); }
+    .cache-line { stroke: #22c55e; }
+    .read-line { stroke: #818cf8; }
+    .write-line { stroke: #fb923c; }
+    .refresh-line { stroke: #e879f9; }
+    .dot-read { fill: #a5b4fc; }
+    .dot-write { fill: #fdba74; }
+    .dot-cache { fill: #86efac; }
+    .dot-refresh { fill: #f0abfc; }
+    .badge { fill: #020617; stroke: #475569; stroke-width: 1; }
+    .node { filter: url(#soft-glow); }
+  </style>
+
   <rect class="bg" width="980" height="560" />
+  <rect class="panel" x="35" y="40" width="910" height="475" rx="6" />
 
-  <rect class="panel" x="35" y="40" width="910" height="475" rx="16" />
   <text class="text" x="65" y="80">ib DNS Search, Cache, and Infoblox Routing</text>
-  <text class="small" x="65" y="106">Workers return cached data quickly, read-only GETs can use GCM, and writes stay on the primary Grid Master.</text>
+  <text class="small" x="65" y="106">Parallel workers use local cache first. GET can use GCM. Writes stay on the primary Grid Master.</text>
 
-  <rect class="worker pulse worker1" x="70" y="120" width="120" height="50" rx="10" />
-  <text class="text" x="103" y="151">Worker 1</text>
-  <text class="tiny" x="82" y="168">zone A</text>
+  <rect class="worker node" x="70" y="120" width="140" height="50" rx="4" />
+  <text class="text" x="100" y="150">Worker 1</text>
+  <text class="tiny" x="84" y="167">zone A cache load</text>
 
-  <rect class="worker pulse worker2" x="70" y="230" width="120" height="50" rx="10" />
-  <text class="text" x="103" y="261">Worker 2</text>
-  <text class="tiny" x="82" y="278">zone B</text>
+  <rect class="worker node" x="70" y="230" width="140" height="50" rx="4" />
+  <text class="text" x="100" y="260">Worker 2</text>
+  <text class="tiny" x="84" y="277">zone B cache load</text>
 
-  <rect class="worker pulse worker3" x="70" y="340" width="120" height="50" rx="10" />
-  <text class="text" x="103" y="371">Worker 3</text>
-  <text class="tiny" x="82" y="388">zone C</text>
+  <rect class="worker node" x="70" y="340" width="140" height="50" rx="4" />
+  <text class="text" x="100" y="370">Worker 3</text>
+  <text class="tiny" x="84" y="387">zone C cache load</text>
 
-  <rect class="cache" x="445" y="210" width="150" height="120" rx="12" />
-  <text class="text" x="476" y="249">SQLite</text>
-  <text class="text" x="476" y="273">cache</text>
-  <text class="tiny" x="464" y="302">record_cache</text>
-  <text class="tiny" x="464" y="318">refresh_locks</text>
+  <rect class="cache node" x="420" y="205" width="190" height="130" rx="5" />
+  <text class="text" x="468" y="246">SQLite Cache</text>
+  <rect class="badge" x="446" y="266" width="137" height="23" rx="3" />
+  <text class="tiny" x="459" y="282">record_cache</text>
+  <rect class="badge" x="446" y="296" width="137" height="23" rx="3" />
+  <text class="tiny" x="459" y="312">refresh_locks</text>
 
-  <rect class="server" x="800" y="90" width="130" height="70" rx="12" />
-  <text class="text" x="823" y="123">GCM</text>
-  <text class="small" x="821" y="145">read endpoint</text>
+  <rect class="server-read node" x="790" y="90" width="140" height="75" rx="5" />
+  <text class="text" x="829" y="123">GCM</text>
+  <text class="small" x="813" y="145">read endpoint</text>
 
-  <rect class="server primary" x="800" y="380" width="130" height="70" rx="12" />
+  <rect class="server-write node" x="790" y="380" width="140" height="75" rx="5" />
   <text class="text" x="819" y="413">Primary</text>
-  <text class="small" x="815" y="435">Grid Master</text>
+  <text class="small" x="812" y="435">Grid Master</text>
 
-  <rect class="refresh pulse" x="610" y="300" width="140" height="60" rx="12" />
-  <text class="text" x="635" y="329">Refresh</text>
-  <text class="tiny" x="627" y="347">subprocess</text>
+  <rect class="refresh node" x="610" y="292" width="150" height="70" rx="5" />
+  <text class="text" x="638" y="326">Refresh</text>
+  <text class="small" x="632" y="346">subprocess</text>
 
-  <rect class="panel" x="70" y="445" width="235" height="48" rx="10" />
-  <text class="text" x="95" y="475">create/edit/delete</text>
+  <rect class="write-box node" x="70" y="445" width="245" height="48" rx="4" />
+  <text class="text" x="96" y="475">create / edit / delete</text>
 
-  <path class="line cache-line" d="M190 145 C290 145 335 250 445 250" marker-end="url(#arrow)" />
-  <path class="line cache-line" d="M190 255 C290 255 335 270 445 270" marker-end="url(#arrow)" />
-  <path class="line cache-line" d="M190 365 C290 365 335 290 445 290" marker-end="url(#arrow)" />
-  <path class="line read-line" d="M575 230 C665 150 725 130 830 125" marker-end="url(#arrow)" />
-  <path class="line write-line" d="M305 465 C495 500 690 500 830 410" marker-end="url(#arrow)" />
-  <path class="line refresh-line" d="M720 315 C650 350 580 345 525 315" marker-end="url(#arrow)" />
+  <path class="line cache-line" d="M210 145 L360 145 L360 235 L420 235" />
+  <path class="line cache-line" d="M210 255 L420 255" />
+  <path class="line cache-line" d="M210 365 L360 365 L360 295 L420 295" />
+  <path class="line read-line" d="M610 230 L705 230 L705 125 L790 125" />
+  <path class="line write-line" d="M315 469 L485 469 L485 415 L790 415" />
+  <path class="line refresh-line" d="M610 330 L570 330 L570 315 L535 315" />
 
-  <circle class="dot-cache" r="7">
-    <animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto">
+  <circle class="dot-cache" r="5">
+    <animateMotion dur="2.7s" repeatCount="indefinite" rotate="auto">
       <mpath href="#worker1-cache" />
     </animateMotion>
   </circle>
-  <circle class="dot-cache" r="7">
-    <animateMotion dur="2.6s" begin=".45s" repeatCount="indefinite" rotate="auto">
+  <circle class="dot-cache" r="5">
+    <animateMotion dur="2.7s" begin=".45s" repeatCount="indefinite" rotate="auto">
       <mpath href="#worker2-cache" />
     </animateMotion>
   </circle>
-  <circle class="dot-cache" r="7">
-    <animateMotion dur="2.6s" begin=".9s" repeatCount="indefinite" rotate="auto">
+  <circle class="dot-cache" r="5">
+    <animateMotion dur="2.7s" begin=".9s" repeatCount="indefinite" rotate="auto">
       <mpath href="#worker3-cache" />
     </animateMotion>
   </circle>
-  <circle class="dot-read" r="7">
-    <animateMotion dur="3s" begin=".4s" repeatCount="indefinite" rotate="auto">
+  <circle class="dot-read" r="5">
+    <animateMotion dur="3.1s" begin=".3s" repeatCount="indefinite" rotate="auto">
       <mpath href="#cache-read" />
     </animateMotion>
   </circle>
-  <circle class="dot-write" r="8">
+  <circle class="dot-write" r="5.5">
     <animateMotion dur="3.8s" begin=".2s" repeatCount="indefinite" rotate="auto">
       <mpath href="#write-primary" />
     </animateMotion>
   </circle>
-  <circle class="dot-refresh" r="7">
+  <circle class="dot-refresh" r="5">
     <animateMotion dur="3.2s" begin="1s" repeatCount="indefinite" rotate="auto">
       <mpath href="#refresh-cache" />
     </animateMotion>
   </circle>
 
-  <text class="tiny" x="235" y="174">parallel cache checks</text>
-  <text class="tiny" x="645" y="175">GET / SOA / allrecords</text>
-  <text class="tiny" x="532" y="502">POST / PUT / DELETE</text>
-  <text class="tiny" x="578" y="382">renew or replace cache</text>
+  <text class="tiny" x="245" y="135">parallel cache checks</text>
+  <text class="tiny" x="635" y="216">GET / SOA / allrecords</text>
+  <text class="tiny" x="515" y="489">POST / PUT / DELETE</text>
+  <text class="tiny" x="567" y="378">renew or replace cache</text>
 </svg>

@@ -101,7 +101,7 @@ DNS listing and search prefer local SQLite cache rows. Freshness is calculated f
 
 Code comments are intentionally concentrated around routing, config validation, cache/SWR, leases, completion, and background refresh handoff. Update those comments in the same change whenever the related behavior changes.
 
-For a deeper explanation with diagrams, see [Performance & Caching](docs/performance-caching.md).
+For a deeper explanation with diagrams, see [Performance & Caching](docs/performance-caching.md), which includes the dark read/write and worker-flow diagram.
 
 ## Command Reference
 
