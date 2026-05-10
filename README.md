@@ -40,7 +40,48 @@ ib dns --zone example.com create app host 192.0.2.10 -c "Application host"
 ib dns --view "DNS Zone View" search app
 ```
 
-## Common Commands
+## Modules
+
+| Module | Purpose | Start here |
+| --- | --- | --- |
+| `ib config` | Manage profiles, encrypted credentials, completion, and local cache. | `ib config new --default` |
+| `ib dns` | Manage Infoblox DNS views, zones, records, searches, and context overrides. | `ib dns list` |
+
+## Command Reference
+
+### Config
+
+| Command | Description |
+| --- | --- |
+| `ib config` | Show profile overview and short usage. |
+| `ib config new [PROFILE]` | Create a profile; validates primary access, auto-detects a usable GCM read endpoint, and selects single DNS view/zone choices automatically. |
+| `ib config edit [PROFILE]` | Edit an existing profile; leaving the password blank keeps the current encrypted password. |
+| `ib config list` | List configured profiles and their default/read endpoint context. |
+| `ib config use PROFILE` | Set the default profile. |
+| `ib config delete PROFILE` | Delete a non-default profile and clear its local cache rows. |
+| `ib config completion [bash\|zsh\|fish]` | Generate dynamic shell completion. |
+| `ib config cache status` | Show local SQLite cache entries. |
+| `ib config cache clear` | Clear local SQLite cache entries. |
+
+### DNS
+
+| Command | Description |
+| --- | --- |
+| `ib dns` | Show DNS help and the current profile/view/zone context. |
+| `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones. |
+| `ib dns search KEYWORD` | Search records by name, value, or comment. Use `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
+| `ib dns create NAME TYPE VALUE` | Create a DNS record, for example `ib dns create app host 192.0.2.10 -c "Application host"`. |
+| `ib dns edit NAME [TYPE] [VALUE]` | Edit an existing DNS record. |
+| `ib dns delete NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
+| `ib dns view list` | List DNS views. |
+| `ib dns view use VIEW` | Set the active DNS view for the current shell session. |
+| `ib dns zone create ZONE` | Create an authoritative DNS zone. |
+| `ib dns zone list [SEARCH]` | List authoritative DNS zones. |
+| `ib dns zone info ZONE` | Show DNS zone details. |
+| `ib dns zone delete ZONE` | Delete an authoritative DNS zone. |
+| `ib dns zone use ZONE` | Set the active DNS zone for the current shell session. |
+
+Common examples:
 
 ```bash
 ib dns view list
