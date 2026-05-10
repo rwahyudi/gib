@@ -216,6 +216,10 @@ func (a *App) cachedRecordNamesForCompletion(profile Profile, zone string) ([]Ty
 	if err == nil && entry.CacheFound && a.cacheEntryFresh(entry, time.Now()) {
 		return recordsFromAllRecordRows(entry.Rows), nil
 	}
+
+	// Completion is dynamic by design: when the local cache cannot satisfy a
+	// record-name request, fall back to the same cache/SWR loader used by dns
+	// list/search. Keep this in sync with README and NOTES if completion policy changes.
 	records, err := a.cachedRecordsForZone(profile, a.newClient(profile), zone)
 	if err != nil {
 		return nil, err
@@ -313,6 +317,8 @@ func (a *App) completeZoneNames(cmd *cobra.Command, toComplete string) []string 
 }
 
 func (a *App) cachedZoneNames(profile Profile) ([]string, error) {
+	// Zone completion shares the normal zone-list cache path so config changes,
+	// manual cache clears, and background refreshes behave the same as commands.
 	zones, err := a.cachedZones(profile, a.newClient(profile), "")
 	if err != nil {
 		return nil, err
@@ -369,6 +375,9 @@ func matchingZoneNames(zones []string, toComplete string) []string {
 }
 
 func dynamicBashCompletionScript() string {
+	// The Bash wrapper delegates completion to the current ib binary rather than
+	// embedding a static candidate list. Update this script and completion tests
+	// together whenever prompt-redraw or second-tab behavior changes.
 	return `# bash completion for ib
 
 __ib_create_usage_on_second_tab()

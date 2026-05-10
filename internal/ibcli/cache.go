@@ -71,6 +71,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_record_refresh_locks_scope_zone
 ON record_refresh_locks (profile, view, zone);
 `
 
+// cachedPayload is the common in-memory form for zone-list and record-cache
+// rows. Freshness is computed from CachedAt plus the current cache_ttl setting;
+// only record rows also carry a stale-while-revalidate deadline.
 type cachedPayload struct {
 	Rows           []map[string]any
 	Serial         string
@@ -92,6 +95,10 @@ func (a *App) openCacheDB() (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+
+	// The CLI can launch background refresh helpers while an interactive command
+	// is reading the cache. A single connection plus busy_timeout keeps SQLite
+	// locking predictable without surfacing transient "database is locked" errors.
 	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
 		db.Close()
 		return nil, err
@@ -328,6 +335,8 @@ func cacheScope(profile Profile) (string, string) {
 }
 
 func cacheKey(parts ...string) string {
+	// Use a non-printing separator so profile/view/zone values cannot collide
+	// when one value happens to contain another value's text.
 	return strings.Join(parts, "\x1f")
 }
 
@@ -336,6 +345,8 @@ func normalizeCacheZone(zone string) string {
 }
 
 func (a *App) cacheFreshUntil(cachedAt int64) int64 {
+	// Freshness is deliberately derived instead of stored. Changing cache_ttl in
+	// config immediately changes how existing cache rows are interpreted.
 	return cachedAt + int64(a.cacheTTL()/time.Second)
 }
 
@@ -420,6 +431,9 @@ func (a *App) readCachedRecords(profile Profile, zone string) (cachedPayload, er
 }
 
 func (a *App) writeCachedRecords(profile Profile, zone string, serial string, rows []map[string]any, now time.Time) error {
+	// A freshly downloaded zone gets a normal freshness window and a longer SWR
+	// window. After the normal window expires, list/search can still return this
+	// payload while a detached process checks the zone serial.
 	return a.writeCachedRecordsEntry(profile, zone, serial, rows, now.Unix(), now.Add(a.recordsCacheSWRTTL()).Unix())
 }
 
@@ -445,6 +459,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, key, profileName, view, zone, nullString(seria
 }
 
 func (a *App) renewCachedRecordsAge(profile Profile, zone string, cachedAt time.Time, staleExpiresAt time.Time) error {
+	// A matching server serial means the payload is still current. Move cached_at
+	// forward so age and cache_ttl-based freshness reflect that validation.
 	profileName, view := cacheScope(profile)
 	zone = normalizeCacheZone(zone)
 	key := cacheKey("records", profileName, view, zone)
@@ -539,6 +555,10 @@ func (a *App) tryAcquireRecordRefreshLease(profile Profile, zone string, now tim
 
 	nowUnix := now.Unix()
 	_, _ = db.Exec(`DELETE FROM record_refresh_locks WHERE expires_at <= ?`, nowUnix)
+
+	// The lease is advisory and local to the cache DB. It prevents a burst of
+	// list/search commands from spawning duplicate refresh subprocesses for the
+	// same profile, view, and zone while still expiring after crashes.
 	_, err = db.Exec(`
 INSERT INTO record_refresh_locks (cache_key, profile, view, zone, started_at, expires_at)
 VALUES (?, ?, ?, ?, ?, ?)`, key, profileName, view, zone, nowUnix, now.Add(ttl).Unix())

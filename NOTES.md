@@ -1,5 +1,11 @@
 # Notes
 
+## Code Comment Maintenance
+
+Keep code comments focused on behavior that is easy to break or misunderstand: WAPI GET-versus-write routing, config validation order, cache freshness and stale-while-revalidate decisions, refresh leases, dynamic completion, and detached refresh subprocess handoff.
+
+When changing one of those flows, update the nearby code comment in the same patch. Comments should explain why the behavior exists and what must stay in sync, not restate obvious Go statements.
+
 ## Global Cache and Search Settings
 
 The config file stores global cache/search tuning in the `[meta]` section:

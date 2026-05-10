@@ -28,6 +28,8 @@ Follow standard Go style: tabs from `gofmt`, short package-local helper names, a
 
 Preserve operator-facing conventions: compact help text, `Current Context: Profile: ... | View: ... | Zone: ...`, HOST-first create examples, and color-coded DNS record types in table output.
 
+Keep comments attached to non-obvious behavior such as WAPI read/write routing, config validation order, cache freshness/SWR, refresh leases, dynamic completion, and background subprocess handoff. When changing those flows, update nearby comments in the same patch so they describe the current behavior rather than historical intent.
+
 ## Testing Guidelines
 
 Add or update tests for behavior changes, especially config parsing, WAPI routing, DNS record normalization, completion, and help text. Keep tests deterministic and avoid live Infoblox calls in unit tests. Use fake data or local test servers where network behavior must be verified.

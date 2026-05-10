@@ -47,6 +47,14 @@ ib dns --view "DNS Zone View" search app
 | `ib config` | Manage profiles, encrypted credentials, completion, and local cache. | `ib config new --default` |
 | `ib dns` | Manage Infoblox DNS views, zones, records, searches, and context overrides. | `ib dns list` |
 
+## How It Works
+
+`cmd/ib/main.go` starts the Cobra CLI and hands command behavior to `internal/ibcli`. Profile loading decrypts the stored password, resolves the current DNS view/zone, and builds a WAPI client. GET requests can use a configured GCM read endpoint, while create, update, and delete requests always use the primary server.
+
+DNS listing and search prefer local SQLite cache rows. Freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` are returned immediately while one detached refresh process revalidates the zone serial and refreshes `/allrecords` when required.
+
+Code comments are intentionally concentrated around routing, config validation, cache/SWR, leases, completion, and background refresh handoff. Update those comments in the same change whenever the related behavior changes.
+
 ## Command Reference
 
 ### Config

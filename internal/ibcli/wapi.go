@@ -47,6 +47,9 @@ func (a *App) newClient(profile Profile) *WapiClient {
 	if !profile.VerifySSL {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // operator-controlled Infoblox profile setting
 	}
+
+	// read_server is intentionally optional. When config did not find a usable
+	// Grid Master Candidate, reads and writes both go to the primary server.
 	readServer := profile.ReadServer
 	if readServer == "" {
 		readServer = profile.Server
@@ -77,6 +80,9 @@ func normalizeServer(value string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", cliError("invalid Infoblox server URL: %s", value)
 	}
+
+	// Operators often paste a full WAPI URL. Store only the appliance base URL
+	// so versioned paths are generated consistently by endpoint().
 	parsed.Path = wapiSuffixRE.ReplaceAllString(strings.TrimRight(parsed.Path, "/"), "")
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
@@ -85,6 +91,9 @@ func normalizeServer(value string) (string, error) {
 
 func (c *WapiClient) Request(method, objectPath string, params url.Values, payload any) (any, error) {
 	method = strings.ToUpper(strings.TrimSpace(method))
+
+	// Only GET is allowed to use the read endpoint. All write verbs stay on the
+	// primary Grid Master because GCM read-only API support is not writable.
 	base := c.Server
 	if method == http.MethodGet && c.ReadServer != "" {
 		base = c.ReadServer
@@ -156,6 +165,9 @@ func formatWapiError(raw []byte) string {
 }
 
 func pagedQuery(client *WapiClient, objectType string, params url.Values) ([]map[string]any, error) {
+	// Infoblox returns either a plain list or an object with result/next_page_id
+	// depending on paging support and object type. Handle both shapes so callers
+	// can request "all rows" without duplicating pagination branches.
 	pageParams := cloneValues(params)
 	pageParams.Set("_paging", "1")
 	pageParams.Set("_return_as_object", "1")

@@ -688,6 +688,9 @@ func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault
 	}
 
 	for {
+		// Do not write partial profile updates when validation fails. The user can
+		// retry the same flow until the primary connection and selected defaults
+		// all validate successfully.
 		err := a.saveConfigInteractiveDetails(selected, defaultProfile, profiles, makeDefault, detailsStartStep)
 		if err == nil {
 			return nil
@@ -767,6 +770,8 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 
 	a.printConfigureStep(step, "Read Endpoint", "Automatically test Grid Master Candidates for read-only GET routing.")
 	step++
+	// read_server is saved only after a direct read-only GET probe succeeds.
+	// Otherwise leaving it blank keeps every request on the primary server.
 	readServer, _ := a.promptReadServer(probe, current.ReadServer)
 	probe.ReadServer = readServer
 	a.printConfigureStep(step, "DNS View", "Pick the default DNS view for DNS commands.")

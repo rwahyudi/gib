@@ -1300,6 +1300,9 @@ func recordsForZone(client *WapiClient, zoneName string) ([]TypedRecord, error) 
 }
 
 func allRecordRowsForZone(client *WapiClient, zoneName string, enrich bool) ([]map[string]any, error) {
+	// /allrecords is the fast path for large zones because it returns mixed
+	// record types in one paged query. Detail enrichment is optional because it
+	// requires per-record GETs and can be much slower.
 	rows, err := pagedQuery(client, allRecordsObject, allRecordsQueryParams(client, zoneName))
 	if err != nil {
 		return nil, err
@@ -1311,6 +1314,9 @@ func allRecordRowsForZone(client *WapiClient, zoneName string, enrich bool) ([]m
 }
 
 func enrichAllRecordRows(client *WapiClient, rows []map[string]any) bool {
+	// Infoblox omits some concrete-record fields from /allrecords. When callers
+	// ask for details, fetch only rows missing TTL/detail data and merge those
+	// fields back into the cached /allrecords shape.
 	changed := false
 	for _, item := range rows {
 		if recordHasTTLDetail(item) {
@@ -1445,6 +1451,7 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 	now := time.Now()
 	entry, err := a.readCachedRecords(profile, zoneName)
 	if err == nil && entry.CacheFound {
+		// Fast path: fresh cached rows are returned without touching Infoblox.
 		if a.cacheEntryFresh(entry, now) {
 			source := recordCacheSourceFreshCache
 			if enrich && enrichAllRecordRows(client, entry.Rows) {
@@ -1453,12 +1460,18 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 			}
 			return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: source}, nil
 		}
+
+		// Stale-while-revalidate path: return cached rows immediately, then start
+		// exactly one detached revalidation process for this profile/view/zone.
 		if now.Unix() < entry.StaleExpiresAt {
 			a.startRecordCacheRevalidationAsync(profile, zoneName)
 			return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: recordCacheSourceStaleCache}, nil
 		}
 	}
 
+	// Outside SWR, foreground work is required so callers do not see data older
+	// than the configured stale window. A matching SOA serial lets us renew the
+	// cache without downloading /allrecords again.
 	currentSerial, hasSerial, err := currentZoneSerial(client, zoneName)
 	if err != nil {
 		return cachedRecordLoadResult{}, err
@@ -1492,6 +1505,9 @@ func (a *App) queueRecordCacheRefreshAfterWrite(profile Profile, zoneName string
 	if err != nil {
 		return
 	}
+
+	// Writes make the affected zone cache immediately unsafe to serve as fresh.
+	// Delete it first, then let the same lease-protected background path repopulate it.
 	a.deleteRecordCacheEntry(profile, zoneName)
 	a.startRecordCacheRevalidationAsync(profile, zoneName)
 }
@@ -1517,6 +1533,9 @@ func (a *App) startRecordCacheRevalidation(profile Profile, zoneName string) err
 		_ = a.releaseRecordRefreshLease(profile, zoneName)
 		return err
 	}
+
+	// Start the helper synchronously so the parent knows the refresh was handed
+	// off, then return without waiting so list/search/edit remain responsive.
 	args := []string{
 		"config", "cache", "revalidate-record",
 		"--profile", firstNonEmpty(strings.TrimSpace(profile.Name), defaultProfileName),
@@ -1573,6 +1592,8 @@ func (a *App) revalidateRecordCache(profile Profile, client *WapiClient, zoneNam
 		return err
 	}
 	if entry.CacheFound && hasSerial && entry.Serial != "" && entry.Serial == currentSerial {
+		// Nothing changed on Infoblox. Renew timestamps only; the cached payload
+		// remains valid and avoids another large /allrecords download.
 		return a.renewCachedRecordsAge(profile, zoneName, now, now.Add(a.recordsCacheSWRTTL()))
 	}
 	rows, err := allRecordRowsForZone(client, zoneName, false)
