@@ -8,7 +8,7 @@ When changing one of those flows, update the nearby code comment in the same pat
 
 ## README Maintenance
 
-The README includes a concise Features section with current capabilities and suggested next features. Keep it in sync when adding or removing major CLI behavior, but avoid duplicating the detailed command reference.
+The README includes a concise product blurb, bullet-point Features section, module table, global-switch summary, library links, and security-scanner links. Keep it in sync when adding or removing major CLI behavior, but avoid duplicating the detailed command reference.
 
 ## Security Scanning
 
@@ -20,7 +20,7 @@ GitHub releases are tag-driven through GoReleaser. The release workflow publishe
 
 ## Performance and Caching Docs
 
-`docs/performance-caching.md` explains cache freshness, stale-while-revalidate, read/write routing, search workers, and SQLite cache tables. Keep that page and `docs/assets/cache-workers.svg` in sync when cache behavior, read-server routing, worker behavior, or cache schema changes. The diagrams use a dark, angular, gradient style with static worker boxes, small arrowheads, and small animated traffic markers.
+`docs/performance-caching.md` explains cache freshness, stale-while-revalidate, read/write routing, search workers, and SQLite cache tables. Keep that page plus `docs/assets/cache-decision-flow.svg`, `docs/assets/cache-workers.svg`, and `docs/assets/sqlite-cache-tables.svg` in sync when cache behavior, read-server routing, worker behavior, or cache schema changes. The diagrams use a dark Nord, angular, gradient style with compact boxes, small arrowheads, and small animated traffic markers only on the read/write worker flow.
 
 ## Global Cache and Search Settings
 

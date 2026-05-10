@@ -27,39 +27,7 @@ Default tuning in the profile config `[meta]` section:
 
 ## Cache Decision Flow
 
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#020617", "primaryColor": "#0f172a", "primaryBorderColor": "#38bdf8", "primaryTextColor": "#e5f4ff", "secondaryColor": "#111827", "secondaryBorderColor": "#22c55e", "tertiaryColor": "#172554", "tertiaryBorderColor": "#818cf8", "lineColor": "#94a3b8", "textColor": "#e5e7eb", "fontFamily": "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"}}}%%
-flowchart TD
-    A[ib dns list/search asks for zone records] --> B[Read record_cache by profile + view + zone]
-    B --> C{Cache row found?}
-    C -- No --> H[Foreground SOA serial check]
-    C -- Yes --> D{now < cached_at + cache_ttl?}
-    D -- Yes --> E[Return fresh cached records]
-    D -- No --> F{now < stale_expires_at?}
-    F -- Yes --> G[Return stale cached records immediately]
-    G --> G1[Try refresh lease]
-    G1 --> G2{Lease acquired?}
-    G2 -- Yes --> G3[Start detached revalidate-record subprocess]
-    G2 -- No --> G4[Existing refresh continues]
-    F -- No --> H
-    H --> I{Cached serial matches server serial?}
-    I -- Yes --> J[Renew cached_at and stale_expires_at]
-    J --> K[Return cached records]
-    I -- No --> L[Download fresh /allrecords]
-    L --> M[Store payload_json, serial, cached_at, stale_expires_at]
-    M --> N[Return fresh records]
-
-    classDef start fill:#111827,stroke:#38bdf8,color:#e0f2fe,stroke-width:1.2px
-    classDef cache fill:#052e2b,stroke:#22c55e,color:#dcfce7,stroke-width:1.2px
-    classDef decision fill:#1f2937,stroke:#f59e0b,color:#fffbeb,stroke-width:1.2px
-    classDef refresh fill:#312e81,stroke:#a5b4fc,color:#eef2ff,stroke-width:1.2px
-    classDef write fill:#4a044e,stroke:#e879f9,color:#fdf4ff,stroke-width:1.2px
-    class A start
-    class B,E,G,K,N cache
-    class C,D,F,I,G2 decision
-    class G1,G3,G4,H,J refresh
-    class L,M write
-```
+![Nord cache decision flow](assets/cache-decision-flow.svg)
 
 The important performance point is the stale-while-revalidate path: if a record
 cache row is expired but still inside `records_cache_swr_ttl`, the user gets
@@ -68,50 +36,7 @@ or already outside the stale window.
 
 ## Read, Write, And Worker Flow
 
-![Animated read/write and worker cache flow](assets/cache-workers.svg)
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#020617", "actorBkg": "#0f172a", "actorBorder": "#38bdf8", "actorTextColor": "#e0f2fe", "activationBkgColor": "#172554", "activationBorderColor": "#818cf8", "signalColor": "#94a3b8", "signalTextColor": "#e5e7eb", "labelBoxBkgColor": "#111827", "labelBoxBorderColor": "#475569", "labelTextColor": "#e5e7eb", "loopTextColor": "#e5e7eb", "noteBkgColor": "#1f2937", "noteBorderColor": "#22c55e", "noteTextColor": "#dcfce7", "fontFamily": "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"}}}%%
-sequenceDiagram
-    participant User
-    participant CLI as ib CLI
-    participant Cache as SQLite cache
-    participant Read as GCM read endpoint
-    participant Primary as Primary Grid Master
-    participant Refresh as Refresh subprocess
-
-    User->>CLI: ib dns search --global app
-    CLI->>Cache: load searchable zones and per-zone records
-    par Worker 1
-        CLI->>Cache: check zone A cache
-    and Worker 2
-        CLI->>Cache: check zone B cache
-    and Worker 3
-        CLI->>Cache: check zone C cache
-    end
-    alt fresh cache
-        Cache-->>CLI: records
-    else stale inside SWR
-        Cache-->>CLI: stale records immediately
-        CLI->>Refresh: start if refresh lease acquired
-        Refresh->>Read: GET zone SOA serial
-        alt serial changed
-            Refresh->>Read: GET /allrecords
-            Refresh->>Cache: replace record cache
-        else serial unchanged
-            Refresh->>Cache: renew cached_at and stale_expires_at
-        end
-    else cache missing or outside SWR
-        CLI->>Read: GET zone SOA serial
-        CLI->>Read: GET /allrecords when needed
-        CLI->>Cache: write record cache
-    end
-
-    User->>CLI: ib dns edit app host 192.0.2.20
-    CLI->>Primary: PUT record
-    CLI->>Cache: delete affected zone cache
-    CLI->>Refresh: start background refresh
-```
+![Nord read/write and worker cache flow](assets/cache-workers.svg)
 
 Read-only traffic can use a Grid Master Candidate when `ib config new/edit`
 finds one that supports read-only WAPI access. Writes never use that endpoint:
@@ -136,46 +61,12 @@ normalization happen before matching.
 
 ## SQLite Cache Tables
 
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#020617", "primaryColor": "#0f172a", "primaryBorderColor": "#38bdf8", "primaryTextColor": "#e5f4ff", "secondaryColor": "#052e2b", "secondaryBorderColor": "#22c55e", "tertiaryColor": "#111827", "tertiaryBorderColor": "#818cf8", "lineColor": "#94a3b8", "textColor": "#e5e7eb", "fontFamily": "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"}}}%%
-erDiagram
-    CACHE_META {
-        text key PK
-        text value
-    }
-    ZONE_CACHE {
-        text cache_key PK
-        text profile
-        text view
-        integer cached_at
-        text payload_json
-    }
-    RECORD_CACHE {
-        text cache_key PK
-        text profile
-        text view
-        text zone
-        text zone_serial
-        integer cached_at
-        integer stale_expires_at
-        text payload_json
-    }
-    RECORD_REFRESH_LOCKS {
-        text cache_key PK
-        text profile
-        text view
-        text zone
-        integer started_at
-        integer expires_at
-    }
-```
+![Nord SQLite cache table diagram](assets/sqlite-cache-tables.svg)
 
-| Table | Purpose | Key columns |
-| --- | --- | --- |
-| `cache_meta` | Stores cache schema metadata. | `key`, `value` |
-| `zone_cache` | Caches authoritative zone list payloads per profile/view. | `profile`, `view`, `cached_at`, `payload_json` |
-| `record_cache` | Caches `/allrecords` payloads per profile/view/zone. | `profile`, `view`, `zone`, `zone_serial`, `cached_at`, `stale_expires_at`, `payload_json` |
-| `record_refresh_locks` | Prevents duplicate background refreshes for the same profile/view/zone. | `profile`, `view`, `zone`, `started_at`, `expires_at` |
+`cache_meta` stores cache schema metadata. `zone_cache` caches authoritative
+zone list payloads per profile and view. `record_cache` stores `/allrecords`
+payloads per profile, view, and zone. `record_refresh_locks` prevents duplicate
+background refreshes for the same profile, view, and zone.
 
 `zone_cache` and `record_cache` store Infoblox payloads as JSON text. The CLI
 normalizes those payloads into typed records when listing, searching, completing,

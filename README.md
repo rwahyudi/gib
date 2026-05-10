@@ -1,22 +1,43 @@
 # gib
 
-Go implementation of the `ib` Infoblox DNS CLI.
+`gib` builds the `ib` command, a fast operator-focused CLI for managing
+Infoblox DNS records without living in the web UI. It keeps day-to-day DNS work
+close to the shell: profile setup, view and zone context, record search, record
+changes, cache inspection, and shell completion all happen from one compact
+command surface.
+
+The CLI is designed for large Infoblox environments. Read-heavy workflows use a
+validated Grid Master Candidate when available, record listing and search use a
+local SQLite cache backed by `/allrecords`, and stale-while-revalidate keeps
+search responsive while background refreshes check zone serials and update
+cache rows.
 
 ## Features
 
-| Feature | Description |
-| --- | --- |
-| Profile management | Create, edit, switch, and delete Infoblox profiles with encrypted local passwords. |
-| Read/write routing | Route GET requests to a validated GCM read endpoint while keeping writes on the primary Grid Master. |
-| DNS context | Use configured defaults, shell-session view/zone context, environment variables, or per-command `--view`/`--zone` overrides. |
-| Record operations | List, search, create, edit, and delete DNS records with interactive duplicate selection and confirmation. |
-| Fast large-zone access | Use `/allrecords`, local SQLite caching, worker-limited global search, and stale-while-revalidate refreshes. |
-| Dynamic completion | Complete profiles, views, zones, records, flags, record types, and output formats from the live `ib` binary. |
-| Operator output | Provide compact colorful tables, current-context footers, JSON/CSV output, and progress display for larger searches. |
+- Profile management for creating, editing, switching, and deleting Infoblox
+  profiles with encrypted local passwords.
+- Safe read/write routing: GET requests can use a validated GCM read endpoint,
+  while POST, PUT, and DELETE stay on the primary Grid Master.
+- DNS context from configured defaults, shell-session view/zone context,
+  environment variables, or one-command `--view` and `--zone` overrides.
+- DNS record workflows for listing, searching, creating, editing, and deleting
+  records, including interactive duplicate selection and confirmation.
+- Large-zone performance through `/allrecords`, local SQLite caching,
+  worker-limited global search, and stale-while-revalidate refreshes.
+- Dynamic shell completion for profiles, views, zones, records, flags, record
+  types, and output formats from the live `ib` binary.
+- Compact operator output with colorful tables, current-context footers,
+  JSON/CSV output, and progress display for larger searches.
 
 ## Security Scanning
 
-GitHub Actions runs tests, Go vulnerability checks, Go static security checks, and Trivy filesystem scans on pushes, pull requests, and a weekly schedule. Dependabot monitors Go modules and GitHub Actions updates weekly.
+GitHub Actions runs tests,
+[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck),
+[gosec](https://github.com/securego/gosec), and
+[Trivy](https://github.com/aquasecurity/trivy) filesystem scans on pushes,
+pull requests, and a weekly schedule.
+[Dependabot](https://docs.github.com/en/code-security/dependabot) monitors Go
+modules and GitHub Actions updates weekly.
 
 Run the same checks locally when the tools are installed:
 
@@ -86,12 +107,21 @@ ib dns --zone example.com create app host 192.0.2.10 -c "Application host"
 ib dns --view "DNS Zone View" search app
 ```
 
+## Global Switches
+
+- `-o, --output table|json|csv` is available from the root command and applies
+  to every command. Use `json` or `csv` for scripts.
+- `-z, --zone ZONE` and `-v, --view VIEW` are available on `ib dns` and its
+  subcommands. They override the current DNS context for one command only.
+- `-g, --global` is a search scope switch for `ib dns search`; it searches every
+  searchable zone in the selected DNS view.
+
 ## Modules
 
 | Module | Purpose | Start here |
 | --- | --- | --- |
-| `ib config` | Manage profiles, encrypted credentials, completion, and local cache. | `ib config new --default` |
-| `ib dns` | Manage Infoblox DNS views, zones, records, searches, and context overrides. | `ib dns list` |
+| `config` | Manage profiles, encrypted credentials, completion, and local cache. | `ib config new --default` |
+| `dns` | Manage Infoblox DNS views, zones, records, searches, and context overrides. | `ib dns list` |
 
 ## How It Works
 
@@ -101,7 +131,27 @@ DNS listing and search prefer local SQLite cache rows. Freshness is calculated f
 
 Code comments are intentionally concentrated around routing, config validation, cache/SWR, leases, completion, and background refresh handoff. Update those comments in the same change whenever the related behavior changes.
 
-For a deeper explanation with diagrams, see [Performance & Caching](docs/performance-caching.md), which includes the dark read/write and worker-flow diagram.
+For a deeper explanation with diagrams, see [Performance & Caching](docs/performance-caching.md), which includes Nord-styled cache decision, read/write worker-flow, and SQLite table diagrams.
+
+## Libraries Used
+
+- [Cobra](https://github.com/spf13/cobra) provides the command tree, flags, and
+  shell completion protocol.
+- [pflag](https://github.com/spf13/pflag) handles POSIX-style long and short
+  flags underneath Cobra.
+- [Lipgloss](https://github.com/charmbracelet/lipgloss) styles tables, context
+  footers, and operator-facing messages.
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) and
+  [Bubbles](https://github.com/charmbracelet/bubbles) power interactive progress
+  and list-style terminal UI.
+- [Huh](https://github.com/charmbracelet/huh) provides confirmation and select
+  prompts for destructive or ambiguous actions.
+- [go-sqlite3](https://github.com/mattn/go-sqlite3) stores local zone and record
+  cache data in SQLite.
+- [go-isatty](https://github.com/mattn/go-isatty) detects interactive terminals
+  so scripts keep clean output.
+- [GoReleaser](https://goreleaser.com/) builds release binaries plus RPM and DEB
+  packages.
 
 ## Command Reference
 
