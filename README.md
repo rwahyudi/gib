@@ -1,20 +1,22 @@
 # gib
 
-`gib` builds the `ib` command, a fast operator-focused CLI for managing
+`ib` a fast, lightweight , operator-focused single binary CLI for managing
 Infoblox DNS records without living in the web UI. It keeps day-to-day DNS work
 close to the shell: profile setup, view and zone context, record search, record
 changes, cache inspection, and shell completion all happen from one compact
 command surface.
 
+![ib cli preview](docs/assets/go-record1.gif)
+
 The CLI is designed for large Infoblox environments. Read-heavy workflows use a
-validated Grid Master Candidate when available, record listing and search use a
+validated Grid Master Candidate when available.  Record listing and search use a
 local SQLite cache backed by `/allrecords`, and stale-while-revalidate keeps
 search responsive while background refreshes check zone serials and update
 cache rows.
 
 ## Features
 
-- Profile management for creating, editing, switching, and deleting Infoblox
+- Profile management for creating, editing, switching, and deleting multiple Infoblox
   profiles with encrypted local passwords.
 - Safe read/write routing: GET requests can use a validated GCM read endpoint,
   while POST, PUT, and DELETE stay on the primary Grid Master.
@@ -91,7 +93,7 @@ ib config list
 
 Profiles store the primary server, auto-detected GCM read endpoint when available, credentials, WAPI version, DNS view, and default zone. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Do not commit `~/.ib/config`, `~/.ib/key`, or cache data.
 
-## DNS Context
+## DNS 
 
 DNS commands use this context order:
 
@@ -207,7 +209,7 @@ ib dns delete app
 
 Use `-o json` or `-o csv` for machine-readable output.
 
-During `ib config new` and `ib config edit`, Step 05 discovers Grid Master Candidates and saves `read_server` only when a candidate successfully answers a read-only WAPI GET probe. GET requests then use that GCM; create, update, and delete requests always use the primary server.
+
 
 ## Cache
 
@@ -236,5 +238,5 @@ ib config completion bash > ~/.ib-complete.bash
 ```
 
 The generated completion calls the live `ib` binary, so profiles, zones, records, flags, and output formats are resolved dynamically.
+Installing from RPM will put bash completion file in /etc/bash_completion.d/ 
 
-In Bash, pressing `<tab><tab>` after `ib dns create ` prints the create usage and redraws `ib dns create ` so the empty name slot is still clear.
