@@ -18,6 +18,10 @@ Security scanning lives in GitHub Actions and Dependabot. Keep README security c
 
 GitHub releases are tag-driven through GoReleaser. The release workflow publishes Linux amd64 tarball, RPM, DEB, and checksum assets. RPM and DEB packages install `/usr/local/bin/ib` and `/etc/bash_completion.d/ib`. Keep README install commands, `.goreleaser.yaml`, and packaged completion paths in sync when changing release behavior.
 
+## Performance and Caching Docs
+
+`docs/performance-caching.md` explains cache freshness, stale-while-revalidate, read/write routing, search workers, and SQLite cache tables. Keep that page and `docs/assets/cache-workers.svg` in sync when cache behavior, read-server routing, worker behavior, or cache schema changes.
+
 ## Global Cache and Search Settings
 
 The config file stores global cache/search tuning in the `[meta]` section:
