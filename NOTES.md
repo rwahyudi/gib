@@ -14,6 +14,10 @@ The README includes a concise Features section with current capabilities and sug
 
 Security scanning lives in GitHub Actions and Dependabot. Keep README security commands in sync when adding or changing `go test`, `govulncheck`, `gosec`, Trivy, or dependency update automation.
 
+## Release Maintenance
+
+GitHub releases are tag-driven through GoReleaser. The release workflow publishes Linux amd64 tarball, RPM, DEB, and checksum assets. RPM and DEB packages install `/usr/local/bin/ib` and `/etc/bash_completion.d/ib`. Keep README install commands, `.goreleaser.yaml`, and packaged completion paths in sync when changing release behavior.
+
 ## Global Cache and Search Settings
 
 The config file stores global cache/search tuning in the `[meta]` section:

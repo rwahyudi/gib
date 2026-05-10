@@ -27,6 +27,37 @@ gosec ./...
 trivy fs --scanners vuln,secret,license .
 ```
 
+## Installation From GitHub Release
+
+Download packages from the [latest GitHub release](https://github.com/rwahyudi/gib/releases/latest).
+
+Standalone binary:
+
+```bash
+curl -LO https://github.com/rwahyudi/gib/releases/download/v0.1.0/ib_0.1.0_linux_amd64.tar.gz
+tar -xzf ib_0.1.0_linux_amd64.tar.gz ib
+sudo install -m 0755 ib /usr/local/bin/ib
+ib --help
+```
+
+RHEL derivatives:
+
+```bash
+curl -LO https://github.com/rwahyudi/gib/releases/download/v0.1.0/ib_0.1.0_linux_amd64.rpm
+sudo dnf install ./ib_0.1.0_linux_amd64.rpm
+ib --help
+```
+
+Debian derivatives:
+
+```bash
+curl -LO https://github.com/rwahyudi/gib/releases/download/v0.1.0/ib_0.1.0_linux_amd64.deb
+sudo apt install ./ib_0.1.0_linux_amd64.deb
+ib --help
+```
+
+RPM and DEB packages install `ib` to `/usr/local/bin/ib` and install Bash completion to `/etc/bash_completion.d/ib`. Open a new shell after package installation to load completion.
+
 ## Setup
 
 Create or edit an Infoblox profile:

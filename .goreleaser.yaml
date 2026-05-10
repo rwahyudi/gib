@@ -1,0 +1,56 @@
+version: 2
+
+project_name: ib
+
+builds:
+  - id: ib
+    main: ./cmd/ib
+    binary: ib
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+
+archives:
+  - id: ib-linux
+    ids:
+      - ib
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+nfpms:
+  - id: ib-linux-packages
+    ids:
+      - ib
+    package_name: ib
+    vendor: rwahyudi
+    homepage: https://github.com/rwahyudi/gib
+    maintainer: rwahyudi
+    description: Infoblox DNS command line client.
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: packaging/bash_completion/ib
+        dst: /etc/bash_completion.d/ib
+        file_info:
+          mode: 0644
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: rwahyudi
+    name: gib

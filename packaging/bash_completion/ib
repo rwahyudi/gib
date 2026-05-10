@@ -1,0 +1,5 @@
+# bash completion loader for packaged ib installs
+
+if [[ -n ${BASH_VERSION:-} && -x /usr/local/bin/ib ]]; then
+  source <(/usr/local/bin/ib config completion bash 2>/dev/null)
+fi
