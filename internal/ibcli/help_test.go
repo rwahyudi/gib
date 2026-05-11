@@ -221,6 +221,9 @@ func TestConfigCacheAndCompletionHelpCoversOperationalDetails(t *testing.T) {
 			want: []string{
 				"Cache Status",
 				"kind, profile, view, zone, serial, items, age, stale_expires",
+				"table output adds a colored summary footer",
+				"returns statistics and entries",
+				"keeps row-only output for scripts",
 				"-o table, -o json, or -o csv",
 			},
 		},

@@ -166,7 +166,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib config use PROFILE` | Set the default profile. |
 | `ib config delete PROFILE` | Delete a non-default profile and clear its local cache rows. |
 | `ib config completion [bash\|zsh\|fish]` | Generate dynamic shell completion. |
-| `ib config cache status` | Show local SQLite cache entries. |
+| `ib config cache status` | Show local SQLite cache entries with table statistics, or structured statistics with `-o json`. |
 | `ib config cache clear` | Clear local SQLite cache entries. |
 
 ### DNS
@@ -214,6 +214,12 @@ During `ib config new` and `ib config edit`, Step 05 discovers Grid Master Candi
 Zone and record caches are stored in `~/.ib/cache.sqlite3`.
 
 Record cache freshness uses `cached_at + cache_ttl`. Expired records inside `records_cache_swr_ttl` are returned immediately while a single background refresh process revalidates the zone serial and refreshes `/allrecords` when needed.
+
+`ib config cache status` keeps the detailed cache row table and adds a colored
+summary footer for table output: cache entries, cached records, fresh entries,
+SWR-stale entries, expired entries, and active refreshes. With `-o json`, it
+returns `statistics` and `entries`; with `-o csv`, output remains row-only for
+scripts.
 
 Successful DNS record create, edit, and delete operations clear the affected zone's record cache and start a background refresh. DNS zone create/delete also refreshes the zone-list cache in the background; deleted zones have their record cache removed.
 

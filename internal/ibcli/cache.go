@@ -3,12 +3,14 @@ package ibcli
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -71,6 +73,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_record_refresh_locks_scope_zone
 ON record_refresh_locks (profile, view, zone);
 `
 
+var (
+	cacheStatsEntryStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5E9F0")).Background(lipgloss.Color("#5E81AC")).Padding(0, 1)
+	cacheStatsRecordStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#2E3440")).Background(lipgloss.Color("#A3BE8C")).Padding(0, 1)
+	cacheStatsFreshStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#2E3440")).Background(lipgloss.Color("#8FBCBB")).Padding(0, 1)
+	cacheStatsStaleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#2E3440")).Background(lipgloss.Color("#EBCB8B")).Padding(0, 1)
+	cacheStatsExpiredStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ECEFF4")).Background(lipgloss.Color("#BF616A")).Padding(0, 1)
+	cacheStatsRefreshingStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ECEFF4")).Background(lipgloss.Color("#B48EAD")).Padding(0, 1)
+)
+
 // cachedPayload is the common in-memory form for zone-list and record-cache
 // rows. Freshness is computed from CachedAt plus the current cache_ttl setting;
 // only record rows also carry a stale-while-revalidate deadline.
@@ -80,6 +91,22 @@ type cachedPayload struct {
 	CachedAt       int64
 	StaleExpiresAt int64
 	CacheFound     bool
+}
+
+type cacheStatusSnapshot struct {
+	Statistics cacheStatusStatistics `json:"statistics"`
+	Entries    []map[string]any      `json:"entries"`
+}
+
+type cacheStatusStatistics struct {
+	CacheEntries    int `json:"cache_entries"`
+	ZoneEntries     int `json:"zone_entries"`
+	RecordEntries   int `json:"record_entries"`
+	CachedRecords   int `json:"cached_records"`
+	FreshEntries    int `json:"fresh_entries"`
+	SWRStaleEntries int `json:"swr_stale_entries"`
+	ExpiredEntries  int `json:"expired_entries"`
+	ActiveRefreshes int `json:"active_refreshes"`
 }
 
 func (a *App) cachePath() string {
@@ -593,9 +620,17 @@ func (a *App) releaseZoneRefreshLease(profile Profile) error {
 }
 
 func (a *App) cacheStatusRows() ([]map[string]any, error) {
-	db, err := a.openCacheDB()
+	snapshot, err := a.cacheStatusSnapshot()
 	if err != nil {
 		return nil, err
+	}
+	return snapshot.Entries, nil
+}
+
+func (a *App) cacheStatusSnapshot() (cacheStatusSnapshot, error) {
+	db, err := a.openCacheDB()
+	if err != nil {
+		return cacheStatusSnapshot{}, err
 	}
 	defer db.Close()
 
@@ -607,35 +642,102 @@ SELECT 'records' AS kind, profile, view, zone, COALESCE(zone_serial, '') AS seri
 FROM record_cache
 ORDER BY kind, profile, view, zone`)
 	if err != nil {
-		return nil, err
+		return cacheStatusSnapshot{}, err
 	}
 	defer rows.Close()
 
-	now := time.Now().Unix()
-	var output []map[string]any
+	nowTime := time.Now()
+	now := nowTime.Unix()
+	snapshot := cacheStatusSnapshot{Entries: []map[string]any{}}
 	for rows.Next() {
 		var kind, profile, view, zone, serial string
 		var cachedAt, staleExpiresAt int64
 		var raw string
 		if err := rows.Scan(&kind, &profile, &view, &zone, &serial, &cachedAt, &staleExpiresAt, &raw); err != nil {
-			return nil, err
+			return cacheStatusSnapshot{}, err
 		}
+		itemCount := payloadItemCount(raw)
 		staleExpiry := ""
 		if kind == "records" {
 			staleExpiry = cacheExpiryText(now, staleExpiresAt)
 		}
-		output = append(output, map[string]any{
+		snapshot.Entries = append(snapshot.Entries, map[string]any{
 			"kind":          kind,
 			"profile":       profile,
 			"view":          view,
 			"zone":          zone,
 			"serial":        cleanIntegerString(serial),
-			"items":         strconv.Itoa(payloadItemCount(raw)),
+			"items":         strconv.Itoa(itemCount),
 			"age":           cacheRelativeDuration(now - cachedAt),
 			"stale_expires": staleExpiry,
 		})
+		snapshot.Statistics.addEntry(kind, itemCount, staleExpiresAt, a.cacheFreshUntil(cachedAt), nowTime)
 	}
-	return output, rows.Err()
+	if err := rows.Err(); err != nil {
+		return cacheStatusSnapshot{}, err
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM record_refresh_locks WHERE expires_at > ?`, now).Scan(&snapshot.Statistics.ActiveRefreshes); err != nil {
+		return cacheStatusSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (s *cacheStatusStatistics) addEntry(kind string, itemCount int, staleExpiresAt, freshUntil int64, now time.Time) {
+	s.CacheEntries++
+	nowUnix := now.Unix()
+	switch kind {
+	case "zones":
+		s.ZoneEntries++
+	case "records":
+		s.RecordEntries++
+		s.CachedRecords += itemCount
+	}
+	if nowUnix < freshUntil {
+		s.FreshEntries++
+		return
+	}
+	if kind == "records" && nowUnix < staleExpiresAt {
+		s.SWRStaleEntries++
+		return
+	}
+	s.ExpiredEntries++
+}
+
+func (a *App) emitCacheStatus(snapshot cacheStatusSnapshot) error {
+	fields := []string{"kind", "profile", "view", "zone", "serial", "items", "age", "stale_expires"}
+	switch a.Output {
+	case "", tableOutput:
+		if err := a.emitRows("Cache Status", fields, snapshot.Entries); err != nil {
+			return err
+		}
+		fmt.Fprintln(a.Stdout)
+		fmt.Fprintln(a.Stdout, renderCacheStatusStatistics(snapshot.Statistics))
+		return nil
+	case jsonOutput:
+		encoder := json.NewEncoder(a.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(snapshot)
+	case csvOutput:
+		return a.emitRows("Cache Status", fields, snapshot.Entries)
+	default:
+		return fmt.Errorf("unsupported output format %q", a.Output)
+	}
+}
+
+func renderCacheStatusStatistics(stats cacheStatusStatistics) string {
+	badges := []string{
+		renderCacheStatusBadge(cacheStatsEntryStyle, "Cache entries", stats.CacheEntries),
+		renderCacheStatusBadge(cacheStatsRecordStyle, "Cached records", stats.CachedRecords),
+		renderCacheStatusBadge(cacheStatsFreshStyle, "Fresh", stats.FreshEntries),
+		renderCacheStatusBadge(cacheStatsStaleStyle, "SWR stale", stats.SWRStaleEntries),
+		renderCacheStatusBadge(cacheStatsExpiredStyle, "Expired", stats.ExpiredEntries),
+		renderCacheStatusBadge(cacheStatsRefreshingStyle, "Refreshing", stats.ActiveRefreshes),
+	}
+	return strings.Join(badges, "  ")
+}
+
+func renderCacheStatusBadge(style lipgloss.Style, label string, value int) string {
+	return style.Render(fmt.Sprintf("%s %d", label, value))
 }
 
 func rowsFromJSON(raw string) ([]map[string]any, error) {

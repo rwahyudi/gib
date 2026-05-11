@@ -1,6 +1,7 @@
 package ibcli
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -69,6 +70,89 @@ func TestCacheStatusNormalizesScientificSerial(t *testing.T) {
 	}
 	if rows[0]["serial"] != "2025093010" {
 		t.Fatalf("serial = %#v, want integer text", rows[0]["serial"])
+	}
+}
+
+func TestCacheStatusStatisticsFooterAndMachineReadableOutput(t *testing.T) {
+	app := testApp(t)
+	writeConfigForSettings(t, app, ConfigSettings{
+		CacheTTLSeconds:        3600,
+		DNSSearchWorkerLimit:   defaultDNSSearchWorkerLimit,
+		RecordsCacheSWRSeconds: 7200,
+	})
+	profile := Profile{Name: "default", DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedZones(profile, []map[string]any{{"fqdn": "example.com"}}, now.Add(-time.Minute)); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "fresh.example.com", "2026050801", []map[string]any{{"name": "app1"}, {"name": "app2"}}, now.Add(-time.Minute)); err != nil {
+		t.Fatalf("write fresh record cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "stale.example.com", "2026050802", []map[string]any{{"name": "old1"}}, now.Add(-4000*time.Second)); err != nil {
+		t.Fatalf("write stale record cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "expired.example.com", "2026050803", []map[string]any{{"name": "dead1"}, {"name": "dead2"}, {"name": "dead3"}}, now.Add(-8000*time.Second)); err != nil {
+		t.Fatalf("write expired record cache: %v", err)
+	}
+	acquired, err := app.tryAcquireRecordRefreshLease(profile, "stale.example.com", now, recordRefreshLeaseTTL)
+	if err != nil {
+		t.Fatalf("acquire refresh lease: %v", err)
+	}
+	if !acquired {
+		t.Fatal("refresh lease was not acquired")
+	}
+
+	snapshot, err := app.cacheStatusSnapshot()
+	if err != nil {
+		t.Fatalf("cache status snapshot: %v", err)
+	}
+	stats := snapshot.Statistics
+	if stats.CacheEntries != 4 || stats.ZoneEntries != 1 || stats.RecordEntries != 3 {
+		t.Fatalf("entry stats = %#v, want 4 total, 1 zone, 3 record", stats)
+	}
+	if stats.CachedRecords != 6 {
+		t.Fatalf("cached records = %d, want 6", stats.CachedRecords)
+	}
+	if stats.FreshEntries != 2 || stats.SWRStaleEntries != 1 || stats.ExpiredEntries != 1 || stats.ActiveRefreshes != 1 {
+		t.Fatalf("state stats = %#v, want fresh=2 stale=1 expired=1 active=1", stats)
+	}
+
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	if err := app.Execute([]string{"config", "cache", "status"}); err != nil {
+		t.Fatalf("cache status table: %v", err)
+	}
+	tableOutput := stdout.String()
+	for _, want := range []string{"Cache Status", "Cache entries 4", "Cached records 6", "Fresh 2", "SWR stale 1", "Expired 1", "Refreshing 1"} {
+		if !strings.Contains(tableOutput, want) {
+			t.Fatalf("table output missing %q:\n%s", want, tableOutput)
+		}
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"-o", "json", "config", "cache", "status"}); err != nil {
+		t.Fatalf("cache status json: %v", err)
+	}
+	var payload cacheStatusSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode cache status json: %v\n%s", err, stdout.String())
+	}
+	if payload.Statistics.CachedRecords != 6 || len(payload.Entries) != 4 {
+		t.Fatalf("json payload = %#v", payload)
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"-o", "csv", "config", "cache", "status"}); err != nil {
+		t.Fatalf("cache status csv: %v", err)
+	}
+	csvOutput := stdout.String()
+	if strings.Contains(csvOutput, "Cache entries") || strings.Contains(csvOutput, "Cached records") {
+		t.Fatalf("csv output should stay row-only:\n%s", csvOutput)
+	}
+	if !strings.HasPrefix(csvOutput, "kind,profile,view,zone,serial,items,age,stale_expires\n") {
+		t.Fatalf("csv output missing row header:\n%s", csvOutput)
 	}
 }
 

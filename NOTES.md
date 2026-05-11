@@ -108,7 +108,7 @@ The in-flight background refresh marker is stored in the local SQLite cache and 
 
 `ib dns search` uses the same record-cache workflow. It first loads the searchable zone list, skips secondary zones, then loads records from cache or `/allrecords` for the current zone, recursive child-zone scope, or global scope. Multi-zone searches use `dns_search_worker_limit` to bound parallel zone loading.
 
-`ib config cache status` shows cache age and record stale expiry, but not a `fresh_until` column. Freshness is calculated dynamically from each row's `cached_at` timestamp and the current `cache_ttl` setting.
+`ib config cache status` shows cache age and record stale expiry, but not a `fresh_until` column. Freshness is calculated dynamically from each row's `cached_at` timestamp and the current `cache_ttl` setting. Table output keeps the detailed row table and adds a colored statistics footer with cache entries, cached records, fresh entries, SWR-stale entries, expired entries, and active refreshes. JSON output returns `statistics` plus `entries`; CSV output remains row-only for scripts.
 
 ## Notes Maintenance
 

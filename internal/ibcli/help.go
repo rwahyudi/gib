@@ -208,6 +208,9 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib config cache status":
 		return sectionWithRows("Cache Status", [][]string{
 			{"shows", "kind, profile, view, zone, serial, items, age, stale_expires"},
+			{"stats", "table output adds a colored summary footer"},
+			{"json", "returns statistics and entries"},
+			{"csv", "keeps row-only output for scripts"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib config cache clear":

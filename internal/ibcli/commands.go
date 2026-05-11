@@ -93,14 +93,14 @@ func (a *App) cacheCommand() *cobra.Command {
 		Short: "Show local cache status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rows, err := a.cacheStatusRows()
+			snapshot, err := a.cacheStatusSnapshot()
 			if err != nil {
 				return err
 			}
-			if len(rows) == 0 && a.isTableOutput() {
+			if len(snapshot.Entries) == 0 && a.isTableOutput() {
 				a.PrintWarning("No cache entries found.")
 			}
-			return a.emitRows("Cache Status", []string{"kind", "profile", "view", "zone", "serial", "items", "age", "stale_expires"}, rows)
+			return a.emitCacheStatus(snapshot)
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
