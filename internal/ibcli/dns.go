@@ -32,6 +32,7 @@ const (
 	dnsSearchWorkerLimit   = defaultDNSSearchWorkerLimit
 	recordValueWrapWidth   = 48
 	recordCommentWrapWidth = 40
+	defaultRecordSortField = "name"
 )
 
 var (
@@ -51,6 +52,8 @@ var (
 		"unsupported": "#ef4444",
 	}
 	defaultRecordTypeColor = lipgloss.Color("#94a3b8")
+
+	recordSortFields = []string{"name", "type", "value", "zone", "ttl", "comment"}
 )
 
 type RecordSpec struct {
@@ -1645,6 +1648,112 @@ func sortRecords(records []TypedRecord) {
 	})
 }
 
+type RecordSort struct {
+	Enabled bool
+	Field   string
+	Desc    bool
+}
+
+func parseRecordSort(raw string, enabled bool) (RecordSort, error) {
+	if !enabled {
+		return RecordSort{}, nil
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = defaultRecordSortField
+	}
+
+	desc := strings.HasPrefix(raw, "-")
+	if desc {
+		raw = strings.TrimPrefix(raw, "-")
+	}
+	field := strings.ToLower(strings.TrimSpace(raw))
+	if !isRecordSortField(field) {
+		return RecordSort{}, cliError("unsupported sort field %q. Supported: %s", field, strings.Join(recordSortFields, ", "))
+	}
+	return RecordSort{Enabled: true, Field: field, Desc: desc}, nil
+}
+
+func isRecordSortField(field string) bool {
+	field = strings.ToLower(strings.TrimSpace(field))
+	for _, candidate := range recordSortFields {
+		if field == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func applyRecordSort(records []TypedRecord, option RecordSort) {
+	if !option.Enabled || len(records) < 2 {
+		return
+	}
+	// The caller applies the historical zone/name/type sort first. This stable
+	// sort then groups by the selected field without losing deterministic ties.
+	sort.SliceStable(records, func(i, j int) bool {
+		result := compareRecordSort(records[i], records[j], option.Field)
+		if result == 0 {
+			return false
+		}
+		if option.Desc {
+			return result > 0
+		}
+		return result < 0
+	})
+}
+
+func compareRecordSort(left TypedRecord, right TypedRecord, field string) int {
+	if field == "ttl" {
+		return compareRecordTTL(recordTTL(left.Item), recordTTL(right.Item))
+	}
+	leftValue := recordSortValue(left, field)
+	rightValue := recordSortValue(right, field)
+	return strings.Compare(strings.ToLower(leftValue), strings.ToLower(rightValue))
+}
+
+func recordSortValue(record TypedRecord, field string) string {
+	switch field {
+	case "name":
+		return recordName(record.Item, record.Type)
+	case "type":
+		return canonicalDisplayRecordType(record.Type)
+	case "value":
+		return recordValue(record.Type, record.Item)
+	case "zone":
+		return cleanString(record.Item["zone"])
+	case "comment":
+		return cleanString(record.Item["comment"])
+	default:
+		return ""
+	}
+}
+
+func compareRecordTTL(left string, right string) int {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	leftTTL, leftErr := strconv.Atoi(left)
+	rightTTL, rightErr := strconv.Atoi(right)
+	leftOK := leftErr == nil
+	rightOK := rightErr == nil
+	if !leftOK && !rightOK {
+		return strings.Compare(strings.ToLower(left), strings.ToLower(right))
+	}
+	if !leftOK {
+		return 1
+	}
+	if !rightOK {
+		return -1
+	}
+	switch {
+	case leftTTL < rightTTL:
+		return -1
+	case leftTTL > rightTTL:
+		return 1
+	default:
+		return 0
+	}
+}
+
 func (r TypedRecord) ItemString(key string) string {
 	return cleanString(r.Item[key])
 }
@@ -1727,6 +1836,7 @@ type SearchOptions struct {
 	View          string
 	Types         []string
 	Exclude       []string
+	Sort          RecordSort
 	Progress      SearchProgressFunc
 }
 
@@ -1841,6 +1951,7 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 		reportSearchProgress(options.Progress, SearchProgressEvent{Kind: searchProgressZoneMatched, Zone: batch.ZoneName, Matches: matches})
 	}
 	sortRecords(records)
+	applyRecordSort(records, options.Sort)
 	reportSearchProgress(options.Progress, SearchProgressEvent{Kind: searchProgressStage, Stage: "Search complete", TotalZones: len(zones), Matches: len(records)})
 	return records, nil
 }

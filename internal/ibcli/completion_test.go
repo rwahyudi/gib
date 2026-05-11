@@ -254,6 +254,48 @@ func TestDNSCreateCompletesFlagsAfterPositionalArgs(t *testing.T) {
 	}
 }
 
+func TestDNSRecordSortCompletesValues(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"__complete", "dns", "list", "--sort", ""}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"name\trecord name ascending",
+		"-name\trecord name descending",
+		"ttl\trecord TTL ascending",
+		"-ttl\trecord TTL descending",
+		":4",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion output missing %q:\n%s", want, output)
+		}
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"__complete", "dns", "search", "test", "-s", "-"}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output = stdout.String()
+	for _, want := range []string{
+		"-name\trecord name descending",
+		"-comment\trecord comment descending",
+		":4",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "\nname\trecord name ascending") {
+		t.Fatalf("descending completion included ascending name:\n%s", output)
+	}
+}
+
 func TestDNSDeleteCompletesRecordNames(t *testing.T) {
 	app, stdout := completionAppWithRecords(t)
 	if err := app.Execute([]string{"__complete", "dns", "delete", "ap"}); err != nil {

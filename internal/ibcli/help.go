@@ -180,7 +180,15 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"scope", "current zone by default; use -r to include child zones"},
 			{"type", "-t host or --type a,txt filters record types"},
 			{"exclude", "-e keyword excludes matching name, value, or comment"},
+			{"sort", "-s name or --sort=-name sorts by field; blank --sort uses name"},
 			{"details", "--details loads explicit TTL/detail fields and can be slower"},
+		})
+	case "ib dns search":
+		return sectionWithRows("Search Records Usage", [][]string{
+			{"scope", "current zone by default; use -r for child zones or -g for view-wide search"},
+			{"type", "-t host or --type a,txt filters record types"},
+			{"exclude", "-e keyword excludes matching name, value, or comment"},
+			{"sort", "-s name or --sort=-name sorts by field; blank --sort uses name"},
 		})
 	case "ib dns delete":
 		return sectionWithRows("Delete Record Usage", [][]string{

@@ -428,6 +428,7 @@ func (a *App) dnsListCommand() *cobra.Command {
 	var recursive bool
 	var typeFilter string
 	var exclude []string
+	var sortRaw string
 	cmd := &cobra.Command{
 		Use:   "list [ZONE]",
 		Short: "List DNS records in a zone",
@@ -440,6 +441,10 @@ func (a *App) dnsListCommand() *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			types, err := parseRecordTypes(typeFilter)
+			if err != nil {
+				return err
+			}
+			recordSort, err := parseRecordSort(sortRaw, cmd.Flags().Changed("sort"))
 			if err != nil {
 				return err
 			}
@@ -464,6 +469,7 @@ func (a *App) dnsListCommand() *cobra.Command {
 				return err
 			}
 			records = filterListedRecords(records, SearchOptions{Types: types, Exclude: exclude})
+			applyRecordSort(records, recordSort)
 			if len(records) == 0 && a.isTableOutput() {
 				scope := "zone " + target
 				if recursive {
@@ -479,12 +485,14 @@ func (a *App) dnsListCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&typeFilter, "type", "t", "", "record type filter, comma-separated")
 	_ = cmd.RegisterFlagCompletionFunc("type", recordTypeFlagCompletion)
 	cmd.Flags().StringArrayVarP(&exclude, "exclude", "e", nil, "exclude records matching keyword")
+	addRecordSortFlag(cmd, &sortRaw)
 	return cmd
 }
 
 func (a *App) dnsSearchCommand() *cobra.Command {
 	var options SearchOptions
 	var typeFilter string
+	var sortRaw string
 	cmd := &cobra.Command{
 		Use:   "search <keyword>",
 		Short: "Search DNS records by name, value, or comment",
@@ -501,7 +509,12 @@ ib dns search app --global`),
 			if err != nil {
 				return err
 			}
+			recordSort, err := parseRecordSort(sortRaw, cmd.Flags().Changed("sort"))
+			if err != nil {
+				return err
+			}
 			options.Types = types
+			options.Sort = recordSort
 			options.Zone = strings.TrimSpace(a.dnsZoneOverride)
 			options.View = strings.TrimSpace(a.dnsViewOverride)
 			profile, err := a.loadConfig(true)
@@ -526,7 +539,13 @@ ib dns search app --global`),
 	cmd.Flags().StringVarP(&typeFilter, "type", "t", "", "record type filter, comma-separated")
 	_ = cmd.RegisterFlagCompletionFunc("type", recordTypeFlagCompletion)
 	cmd.Flags().StringArrayVarP(&options.Exclude, "exclude", "e", nil, "exclude records matching keyword")
+	addRecordSortFlag(cmd, &sortRaw)
 	return cmd
+}
+
+func addRecordSortFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "sort", "s", "", "sort records by field: name, type, value, zone, ttl, or comment; prefix with - for descending")
+	_ = cmd.RegisterFlagCompletionFunc("sort", recordSortFlagCompletion)
 }
 
 func (a *App) dnsDeleteCommand() *cobra.Command {

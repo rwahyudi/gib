@@ -724,6 +724,55 @@ func TestSearchableRecordZonesSkipsSecondaryPrimaryTypes(t *testing.T) {
 	}
 }
 
+func TestSearchSortsByType(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{
+		Name:        defaultProfileName,
+		Server:      "https://infoblox.invalid",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		DefaultZone: "example.com",
+	}
+	if err := app.writeCachedZones(profile, []map[string]any{
+		{"fqdn": "example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:txt", "name": "txt.example.com", "text": "match", "zone": "example.com"},
+		{"type": "record:a", "name": "a.example.com", "address": "192.0.2.10", "zone": "example.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	records, err := app.collectSearchResults(profile, &WapiClient{View: "default"}, SearchOptions{
+		Keyword: "example.com",
+		Sort:    RecordSort{Enabled: true, Field: "type"},
+	})
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2: %#v", len(records), records)
+	}
+	if got := canonicalDisplayRecordType(records[0].Type) + "," + canonicalDisplayRecordType(records[1].Type); got != "a,txt" {
+		t.Fatalf("record types = %s, want a,txt", got)
+	}
+}
+
+func TestRecordSortRejectsUnsupportedField(t *testing.T) {
+	app := testApp(t)
+	err := app.Execute([]string{"dns", "list", "--sort", "owner"})
+	if err == nil {
+		t.Fatal("dns list accepted unsupported sort field")
+	}
+	for _, want := range []string{`unsupported sort field "owner"`, "name, type, value, zone, ttl, comment"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error missing %q: %v", want, err)
+		}
+	}
+}
+
 func TestSearchDefaultsToCurrentZoneOnly(t *testing.T) {
 	zones := []map[string]any{
 		{"fqdn": "example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},

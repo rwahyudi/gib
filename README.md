@@ -21,7 +21,8 @@ cache rows.
 - DNS context from configured defaults, shell-session view/zone context,
   environment variables, or one-command `--view` and `--zone` overrides.
 - DNS record workflows for listing, searching, creating, editing, and deleting
-  records, including interactive duplicate selection and confirmation.
+  records, including filtering, field sorting, interactive duplicate selection,
+  and confirmation.
 - Large-zone performance through `/allrecords`, local SQLite caching,
   worker-limited global search, and stale-while-revalidate refreshes.
 - Dynamic shell completion for profiles, views, zones, records, flags, record
@@ -174,8 +175,8 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | Command | Description |
 | --- | --- |
 | `ib dns` | Show DNS help and the current profile/view/zone context. |
-| `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones, `-t/--type` to filter record types, or `-e/--exclude` to hide matching records. |
-| `ib dns search KEYWORD` | Search records by name, value, or comment. Use `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
+| `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones, `-t/--type` to filter record types, `-e/--exclude` to hide matching records, or `-s/--sort FIELD` to sort. |
+| `ib dns search KEYWORD` | Search records by name, value, or comment. Use `--global` for all searchable zones, `-r` for child zones under the current/root zone, or `-s/--sort FIELD` to sort. |
 | `ib dns create NAME TYPE VALUE` | Create a DNS record, for example `ib dns create app host 192.0.2.10 -c "Application host"`. |
 | `ib dns edit NAME [TYPE] [VALUE]` | Edit an existing DNS record. |
 | `ib dns delete NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
@@ -201,7 +202,7 @@ ib dns edit app host 192.0.2.20 -t 300 -c "Application host"
 ib dns delete app
 ```
 
-`ib dns list` and `ib dns search` operate on the current zone by default. Add `-r` or `--recursive` to include child zones. `ib dns list` also supports `-t/--type` and `-e/--exclude` filters like search. `ib dns search --global` searches every searchable zone in the selected view.
+`ib dns list` and `ib dns search` operate on the current zone by default. Add `-r` or `--recursive` to include child zones. `ib dns list` also supports `-t/--type` and `-e/--exclude` filters like search. Add `-s` or `--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`; a blank `--sort` sorts by name, and a leading minus sorts descending, for example `--sort=-name`. `ib dns search --global` searches every searchable zone in the selected view.
 
 `ib dns delete` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records match, interactive table mode shows a Huh select list so one record can be chosen.
 

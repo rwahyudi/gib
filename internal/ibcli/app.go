@@ -89,11 +89,14 @@ func NewDefaultApp() (*App, error) {
 }
 
 func (a *App) Execute(args []string) error {
+	if a.completeRecordSortValue(args) {
+		return nil
+	}
 	root := a.RootCommand()
 	root.SetOut(a.Stdout)
 	root.SetErr(a.Stderr)
 	root.SetIn(a.Stdin)
-	root.SetArgs(args)
+	root.SetArgs(normalizeRecordSortArgs(args))
 	cmd, err := root.ExecuteC()
 	if err == nil {
 		return nil
@@ -158,6 +161,66 @@ Common usage:
 	root.AddCommand(a.dnsCommand())
 	a.installHelp(root)
 	return root
+}
+
+func normalizeRecordSortArgs(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	if strings.HasPrefix(args[0], "__complete") {
+		return normalizeRecordSortCompletionArgs(args)
+	}
+	// pflag treats a value like "-name" as another flag. Normalize the record
+	// sort flag before Cobra parses args so operators can type `--sort -name`.
+	normalized := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--sort" || arg == "-s" {
+			if i+1 < len(args) {
+				next := args[i+1]
+				if strings.TrimSpace(next) == "" {
+					normalized = append(normalized, "--sort="+defaultRecordSortField)
+					i++
+					continue
+				}
+				if shouldConsumeRecordSortValue(next) {
+					normalized = append(normalized, "--sort="+next)
+					i++
+					continue
+				}
+			}
+			normalized = append(normalized, "--sort="+defaultRecordSortField)
+			continue
+		}
+		normalized = append(normalized, arg)
+	}
+	return normalized
+}
+
+func normalizeRecordSortCompletionArgs(args []string) []string {
+	if len(args) < 4 || args[1] != "dns" || (args[2] != "list" && args[2] != "search") {
+		return args
+	}
+	normalized := append([]string(nil), args...)
+	for i := 3; i < len(normalized)-1; i++ {
+		// Cobra can complete values after `--sort`, but a bare short value flag
+		// such as `-s <tab>` is parsed as missing its argument before completion.
+		if normalized[i] == "-s" {
+			normalized[i] = "--sort"
+		}
+	}
+	return normalized
+}
+
+func shouldConsumeRecordSortValue(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(value, "--") {
+		return false
+	}
+	if strings.HasPrefix(value, "-") {
+		return isRecordSortField(strings.TrimPrefix(value, "-"))
+	}
+	return true
 }
 
 func (a *App) PrintError(err error) {

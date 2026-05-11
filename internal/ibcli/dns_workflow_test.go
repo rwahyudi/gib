@@ -621,6 +621,40 @@ func TestDNSListFiltersByTypeAndExclude(t *testing.T) {
 	}
 }
 
+func TestDNSListSortsRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns list should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "bravo.example.com", "address": "192.0.2.20", "zone": "example.com"},
+		{"type": "record:a", "name": "alpha.example.com", "address": "192.0.2.10", "zone": "example.com"},
+		{"type": "record:a", "name": "charlie.example.com", "address": "192.0.2.30", "zone": "example.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "--sort", "name"}); err != nil {
+		t.Fatalf("dns list ascending sort: %v\nstdout:\n%s", err, stdout.String())
+	}
+	assertJSONRecordNames(t, stdout.String(), []string{"alpha.example.com", "bravo.example.com", "charlie.example.com"})
+
+	stdout.Reset()
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "--sort", "-name"}); err != nil {
+		t.Fatalf("dns list descending sort: %v\nstdout:\n%s", err, stdout.String())
+	}
+	assertJSONRecordNames(t, stdout.String(), []string{"charlie.example.com", "bravo.example.com", "alpha.example.com"})
+
+	stdout.Reset()
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "--sort"}); err != nil {
+		t.Fatalf("dns list default sort field: %v\nstdout:\n%s", err, stdout.String())
+	}
+	assertJSONRecordNames(t, stdout.String(), []string{"alpha.example.com", "bravo.example.com", "charlie.example.com"})
+}
+
 func TestDNSSearchKeepsBufferedStderrClean(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -669,6 +703,21 @@ func TestDNSSearchKeepsBufferedStderrClean(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "app.example.com") {
 		t.Fatalf("search output missing record:\n%s", stdout.String())
+	}
+}
+
+func assertJSONRecordNames(t *testing.T, output string, want []string) {
+	t.Helper()
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(output), &rows); err != nil {
+		t.Fatalf("decode records JSON: %v\n%s", err, output)
+	}
+	var got []string
+	for _, row := range rows {
+		got = append(got, cleanString(row["name"]))
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("record names = %#v, want %#v\noutput:\n%s", got, want, output)
 	}
 }
 

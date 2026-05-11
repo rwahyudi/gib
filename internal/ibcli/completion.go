@@ -1,6 +1,7 @@
 package ibcli
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -179,6 +180,83 @@ func recordTypeFilterCompletions(toComplete string) []string {
 		rows = append(rows, candidate+"\t"+description)
 	}
 	return rows
+}
+
+var recordSortDescriptions = map[string]string{
+	"name":    "record name",
+	"type":    "record type",
+	"value":   "record value",
+	"zone":    "DNS zone",
+	"ttl":     "record TTL",
+	"comment": "record comment",
+}
+
+func recordSortFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return recordSortCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func (a *App) completeRecordSortValue(args []string) bool {
+	prefix, ok := recordSortCompletionPrefix(args)
+	if !ok {
+		return false
+	}
+	rows := recordSortCompletions(prefix)
+	noDescriptions := args[0] == "__completeNoDesc"
+	for _, row := range rows {
+		if noDescriptions {
+			row = strings.SplitN(row, "\t", 2)[0]
+		}
+		fmt.Fprintln(a.Stdout, row)
+	}
+	fmt.Fprintln(a.Stdout, ":4")
+	return true
+}
+
+func recordSortCompletionPrefix(args []string) (string, bool) {
+	if len(args) < 4 || !strings.HasPrefix(args[0], "__complete") {
+		return "", false
+	}
+	if args[1] != "dns" || (args[2] != "list" && args[2] != "search") {
+		return "", false
+	}
+	current := args[len(args)-1]
+	if current == "--sort" || current == "-s" {
+		return "", true
+	}
+	if value, ok := strings.CutPrefix(current, "--sort="); ok {
+		return value, true
+	}
+	if value, ok := strings.CutPrefix(current, "-s="); ok {
+		return value, true
+	}
+	previous := args[len(args)-2]
+	if previous == "--sort" || previous == "-s" {
+		return current, true
+	}
+	return "", false
+}
+
+func recordSortCompletions(toComplete string) []string {
+	prefix := strings.ToLower(strings.TrimSpace(toComplete))
+	var rows []string
+	for _, field := range recordSortFields {
+		appendRecordSortCompletion(&rows, field, "ascending", prefix)
+		appendRecordSortCompletion(&rows, "-"+field, "descending", prefix)
+	}
+	return rows
+}
+
+func appendRecordSortCompletion(rows *[]string, value string, direction string, prefix string) {
+	if prefix != "" && !strings.HasPrefix(value, prefix) {
+		return
+	}
+	field := strings.TrimPrefix(value, "-")
+	description := recordSortDescriptions[field]
+	if description == "" {
+		*rows = append(*rows, value)
+		return
+	}
+	*rows = append(*rows, value+"\t"+description+" "+direction)
 }
 
 func commandZoneFlag(cmd *cobra.Command) string {
