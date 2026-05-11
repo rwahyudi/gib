@@ -426,6 +426,8 @@ func (a *App) dnsEditCommand() *cobra.Command {
 func (a *App) dnsListCommand() *cobra.Command {
 	var details bool
 	var recursive bool
+	var typeFilter string
+	var exclude []string
 	cmd := &cobra.Command{
 		Use:   "list [ZONE]",
 		Short: "List DNS records in a zone",
@@ -437,6 +439,10 @@ func (a *App) dnsListCommand() *cobra.Command {
 			return a.zoneArgCompletion(cmd, args, toComplete)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			types, err := parseRecordTypes(typeFilter)
+			if err != nil {
+				return err
+			}
 			zone := ""
 			if len(args) > 0 {
 				zone = args[0]
@@ -457,6 +463,7 @@ func (a *App) dnsListCommand() *cobra.Command {
 			}); err != nil {
 				return err
 			}
+			records = filterListedRecords(records, SearchOptions{Types: types, Exclude: exclude})
 			if len(records) == 0 && a.isTableOutput() {
 				scope := "zone " + target
 				if recursive {
@@ -469,6 +476,9 @@ func (a *App) dnsListCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&details, "details", false, "load per-record details such as explicit TTLs; slower for large zones")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "include child authoritative zones")
+	cmd.Flags().StringVarP(&typeFilter, "type", "t", "", "record type filter, comma-separated")
+	_ = cmd.RegisterFlagCompletionFunc("type", recordTypeFlagCompletion)
+	cmd.Flags().StringArrayVarP(&exclude, "exclude", "e", nil, "exclude records matching keyword")
 	return cmd
 }
 

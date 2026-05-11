@@ -94,6 +94,31 @@ func TestDNSDeleteHelpShowsConfirmationSkip(t *testing.T) {
 	}
 }
 
+func TestDNSListHelpShowsFilters(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"dns", "list", "--help"}); err != nil {
+		t.Fatalf("dns list help: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"List Records Usage",
+		"-t host or --type a,txt filters record types",
+		"-e keyword excludes matching name, value, or comment",
+		"--details loads explicit TTL/detail fields",
+		"-t, --type STRING",
+		"-e, --exclude STRINGARRAY",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dns list help output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestConfigHelpCoversWorkflowAndStorage(t *testing.T) {
 	app := testApp(t)
 	var stdout bytes.Buffer

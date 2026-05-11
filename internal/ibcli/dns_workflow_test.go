@@ -591,6 +591,36 @@ func TestDNSListUsesFreshCacheWithoutSerialValidation(t *testing.T) {
 	}
 }
 
+func TestDNSListFiltersByTypeAndExclude(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns list should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "app.example.com", "address": "192.0.2.10", "zone": "example.com", "comment": "keep"},
+		{"type": "record:a", "name": "skip.example.com", "address": "192.0.2.11", "zone": "example.com", "comment": "remove me"},
+		{"type": "record:txt", "name": "txt.example.com", "text": "keep me", "zone": "example.com", "comment": "keep"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"dns", "list", "--type", "a", "--exclude", "remove"}); err != nil {
+		t.Fatalf("dns list filter: %v\nstdout:\n%s", err, stdout.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "app.example.com") {
+		t.Fatalf("filtered list missing included record:\n%s", output)
+	}
+	for _, unwanted := range []string{"skip.example.com", "txt.example.com"} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("filtered list included %q:\n%s", unwanted, output)
+		}
+	}
+}
+
 func TestDNSSearchKeepsBufferedStderrClean(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

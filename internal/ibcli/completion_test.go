@@ -316,6 +316,25 @@ func TestSearchCompletesFlagsAfterGlobalFlag(t *testing.T) {
 	}
 }
 
+func TestDNSListCompletesTypeFlagValues(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"__complete", "dns", "list", "-t", "h"}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "host\thost record") || strings.Contains(output, "txt\ttext record") {
+		t.Fatalf("list type completion output =\n%s", output)
+	}
+	if !strings.Contains(output, ":4") {
+		t.Fatalf("completion did not disable file completion:\n%s", output)
+	}
+}
+
 func TestDNSSearchCompletesTypeFlagValues(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -175,6 +175,13 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"example", `ib dns create app host 192.0.2.10 -c "Application host"`},
 			{"creates", "HOST app.example.com with IPv4 address 192.0.2.10"},
 		})
+	case "ib dns list":
+		return sectionWithRows("List Records Usage", [][]string{
+			{"scope", "current zone by default; use -r to include child zones"},
+			{"type", "-t host or --type a,txt filters record types"},
+			{"exclude", "-e keyword excludes matching name, value, or comment"},
+			{"details", "--details loads explicit TTL/detail fields and can be slower"},
+		})
 	case "ib dns delete":
 		return sectionWithRows("Delete Record Usage", [][]string{
 			{"forward", "ib dns delete <record-name> [zone]"},

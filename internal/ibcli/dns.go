@@ -2020,6 +2020,30 @@ func recordMatches(record TypedRecord, options SearchOptions) bool {
 	return searchValuesMatch(values, options.Keyword, options.CaseSensitive, options.Fuzzy)
 }
 
+func filterListedRecords(records []TypedRecord, options SearchOptions) []TypedRecord {
+	typeFilter := map[string]bool{}
+	for _, item := range options.Types {
+		if item == "" {
+			continue
+		}
+		typeFilter[strings.ToLower(item)] = true
+	}
+	if len(typeFilter) == 0 && len(options.Exclude) == 0 {
+		return records
+	}
+	filtered := make([]TypedRecord, 0, len(records))
+	for _, record := range records {
+		if len(typeFilter) > 0 && !typeFilter[strings.ToLower(record.Type)] {
+			continue
+		}
+		if !recordMatches(record, options) {
+			continue
+		}
+		filtered = append(filtered, record)
+	}
+	return filtered
+}
+
 func searchValuesMatch(values []string, keyword string, caseSensitive bool, fuzzy bool) bool {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
