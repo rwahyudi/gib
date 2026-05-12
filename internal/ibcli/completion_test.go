@@ -947,6 +947,83 @@ printf 'outputs:%s\n' "${COMPREPLY[*]}"
 	}
 }
 
+func TestDynamicBashCompletionZoneListOptions(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	dir := t.TempDir()
+	fakeIB := filepath.Join(dir, "ib")
+	if err := os.WriteFile(fakeIB, []byte(`#!/bin/sh
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "zone" ] && [ "$4" = "list" ] && [ "$5" = "-" ]; then
+  printf '%s\n' --type -t --exclude -e --sort -s --columns -C :4
+  exit 0
+fi
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "zone" ] && [ "$4" = "list" ] && [ "$5" = "--type" ]; then
+  printf '%s\n' FORWARD IPV4 IPV6 :4
+  exit 0
+fi
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "zone" ] && [ "$4" = "list" ] && [ "$5" = "-s" ]; then
+  printf '%s\n' zone -zone comment -comment :4
+  exit 0
+fi
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "zone" ] && [ "$4" = "list" ] && [ "$5" = "-C" ]; then
+  printf '%s\n' zone,view zone,format zone,comment :4
+  exit 0
+fi
+printf ':4\n'
+`), 0o755); err != nil {
+		t.Fatalf("write fake ib: %v", err)
+	}
+	scriptPath := filepath.Join(dir, "ib-complete.bash")
+	if err := os.WriteFile(scriptPath, []byte(dynamicBashCompletionScript()), 0o644); err != nil {
+		t.Fatalf("write completion script: %v", err)
+	}
+	cmd := exec.Command("bash", "-lc", `source "$1"
+COMP_WORDS=("$2" "dns" "zone" "list" "-")
+COMP_CWORD=4
+COMP_LINE="$2 dns zone list -"
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'flags:%s\n' "${COMPREPLY[*]}"
+COMPREPLY=()
+COMP_WORDS=("$2" "dns" "zone" "list" "--type" "")
+COMP_CWORD=5
+COMP_LINE="$2 dns zone list --type "
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'types:%s\n' "${COMPREPLY[*]}"
+COMPREPLY=()
+COMP_WORDS=("$2" "dns" "zone" "list" "-s" "-")
+COMP_CWORD=5
+COMP_LINE="$2 dns zone list -s -"
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'sorts:%s\n' "${COMPREPLY[*]}"
+COMPREPLY=()
+COMP_WORDS=("$2" "dns" "zone" "list" "-C" "zone,")
+COMP_CWORD=5
+COMP_LINE="$2 dns zone list -C zone,"
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'columns:%s\n' "${COMPREPLY[*]}"
+`, "bash", scriptPath, fakeIB)
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run bash completion simulation: %v\n%s", err, raw)
+	}
+	output := string(raw)
+	for _, want := range []string{
+		"flags:--type -t --exclude -e --sort -s --columns -C",
+		"types:FORWARD IPV4 IPV6",
+		"sorts:-zone -comment",
+		"columns:zone,view zone,format zone,comment",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("generated bash completion missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestDynamicBashCompletionCompletesRootCommands(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
