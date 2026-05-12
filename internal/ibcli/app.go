@@ -89,14 +89,14 @@ func NewDefaultApp() (*App, error) {
 }
 
 func (a *App) Execute(args []string) error {
-	if a.completeRecordSortValue(args) {
+	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) {
 		return nil
 	}
 	root := a.RootCommand()
 	root.SetOut(a.Stdout)
 	root.SetErr(a.Stderr)
 	root.SetIn(a.Stdin)
-	root.SetArgs(normalizeRecordSortArgs(args))
+	root.SetArgs(normalizeSortArgs(args))
 	cmd, err := root.ExecuteC()
 	if err == nil {
 		return nil
@@ -163,15 +163,16 @@ Common usage:
 	return root
 }
 
-func normalizeRecordSortArgs(args []string) []string {
+func normalizeSortArgs(args []string) []string {
 	if len(args) == 0 {
 		return args
 	}
 	if strings.HasPrefix(args[0], "__complete") {
-		return normalizeRecordSortCompletionArgs(args)
+		return normalizeSortCompletionArgs(args)
 	}
-	// pflag treats a value like "-name" as another flag. Normalize the record
-	// sort flag before Cobra parses args so operators can type `--sort -name`.
+	// pflag treats a value like "-name" as another flag. Normalize known sort
+	// flags before Cobra parses args so operators can type `--sort -name`.
+	defaultField := defaultSortFieldForArgs(args)
 	normalized := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -179,17 +180,17 @@ func normalizeRecordSortArgs(args []string) []string {
 			if i+1 < len(args) {
 				next := args[i+1]
 				if strings.TrimSpace(next) == "" {
-					normalized = append(normalized, "--sort="+defaultRecordSortField)
+					normalized = append(normalized, "--sort="+defaultField)
 					i++
 					continue
 				}
-				if shouldConsumeRecordSortValue(next) {
+				if shouldConsumeSortValue(args, next) {
 					normalized = append(normalized, "--sort="+next)
 					i++
 					continue
 				}
 			}
-			normalized = append(normalized, "--sort="+defaultRecordSortField)
+			normalized = append(normalized, "--sort="+defaultField)
 			continue
 		}
 		normalized = append(normalized, arg)
@@ -197,8 +198,8 @@ func normalizeRecordSortArgs(args []string) []string {
 	return normalized
 }
 
-func normalizeRecordSortCompletionArgs(args []string) []string {
-	if len(args) < 4 || args[1] != "dns" || (args[2] != "list" && args[2] != "search") {
+func normalizeSortCompletionArgs(args []string) []string {
+	if len(args) < 4 || (!isRecordListOrSearchArgs(args) && !isZoneListArgs(args)) {
 		return args
 	}
 	normalized := append([]string(nil), args...)
@@ -212,15 +213,53 @@ func normalizeRecordSortCompletionArgs(args []string) []string {
 	return normalized
 }
 
-func shouldConsumeRecordSortValue(value string) bool {
+func defaultSortFieldForArgs(args []string) string {
+	if isZoneListArgs(args) {
+		return defaultZoneSortField
+	}
+	return defaultRecordSortField
+}
+
+func shouldConsumeSortValue(args []string, value string) bool {
 	value = strings.TrimSpace(value)
 	if value == "" || strings.HasPrefix(value, "--") {
 		return false
 	}
 	if strings.HasPrefix(value, "-") {
-		return isRecordSortField(strings.TrimPrefix(value, "-"))
+		field := strings.TrimPrefix(value, "-")
+		if isZoneListArgs(args) {
+			return isZoneSortField(field)
+		}
+		return isRecordSortField(field)
 	}
 	return true
+}
+
+func isRecordListOrSearchArgs(args []string) bool {
+	return containsArgSequence(args, []string{"dns", "list"}) || containsArgSequence(args, []string{"dns", "search"})
+}
+
+func isZoneListArgs(args []string) bool {
+	return containsArgSequence(args, []string{"dns", "zone", "list"})
+}
+
+func containsArgSequence(args []string, sequence []string) bool {
+	if len(sequence) == 0 || len(args) < len(sequence) {
+		return false
+	}
+	for index := 0; index <= len(args)-len(sequence); index++ {
+		matches := true
+		for offset, want := range sequence {
+			if args[index+offset] != want {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) PrintError(err error) {

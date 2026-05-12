@@ -183,7 +183,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib dns view list` | List DNS views. |
 | `ib dns view use VIEW` | Set the active DNS view for the current shell session. |
 | `ib dns zone create ZONE` | Create an authoritative DNS zone. |
-| `ib dns zone list [SEARCH]` | List authoritative DNS zones. |
+| `ib dns zone list [SEARCH]` | List authoritative DNS zones. Add `-t/--type` to filter zone formats, `-e/--exclude` to hide matches, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns zone info ZONE` | Show DNS zone details, with SOA serial rendered as an integer. |
 | `ib dns zone delete ZONE` | Delete an authoritative DNS zone. |
 | `ib dns zone use ZONE` | Set the active DNS zone for the current shell session. |
@@ -203,6 +203,8 @@ ib dns delete app
 ```
 
 `ib dns list` and `ib dns search` operate on the current zone by default. Add `-r` or `--recursive` to include child zones. `ib dns list` also supports `-t/--type` and `-e/--exclude` filters like search. Add `-s` or `--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`; a blank `--sort` sorts by name, and a leading minus sorts descending, for example `--sort=-name`. Add `-C` or `--columns` to print selected columns from `type`, `name`, `value`, `zone`, `ttl`, and `comment`, for example `--columns name,value`. `ib dns search --global` searches every searchable zone in the selected view.
+
+`ib dns zone list` supports the same output control pattern for zones. `--type` filters zone formats `FORWARD`, `IPV4`, or `IPV6`; `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment`; and `--columns` selects from the same zone fields.
 
 `ib dns delete` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records match, interactive table mode shows a Huh select list so one record can be chosen.
 

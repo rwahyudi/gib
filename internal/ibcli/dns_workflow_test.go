@@ -700,6 +700,29 @@ func TestDNSSearchColumnsLimitJSONOutput(t *testing.T) {
 	assertJSONRecordColumns(t, stdout.String(), []string{"name", "comment"})
 }
 
+func TestDNSZoneListFiltersSortsAndSelectsColumns(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns zone list should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedZones(profile, []map[string]any{
+		{"fqdn": "alpha.example.com", "view": "default", "zone_format": "FORWARD", "ns_group": "default", "comment": "keep"},
+		{"fqdn": "beta.example.com", "view": "default", "zone_format": "IPV4", "ns_group": "default", "comment": "keep"},
+		{"fqdn": "zeta.example.com", "view": "default", "zone_format": "FORWARD", "ns_group": "default", "comment": "keep"},
+		{"fqdn": "skip.example.com", "view": "default", "zone_format": "FORWARD", "ns_group": "default", "comment": "skip this"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "zone", "list", "--type", "FORWARD", "--exclude", "skip", "--sort", "-zone", "--columns", "zone,format"}); err != nil {
+		t.Fatalf("dns zone list: %v\nstdout:\n%s", err, stdout.String())
+	}
+	assertJSONZoneRows(t, stdout.String(), []string{"zeta.example.com", "alpha.example.com"}, []string{"zone", "format"})
+}
+
 func TestDNSSearchKeepsBufferedStderrClean(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -763,6 +786,34 @@ func assertJSONRecordNames(t *testing.T, output string, want []string) {
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("record names = %#v, want %#v\noutput:\n%s", got, want, output)
+	}
+}
+
+func assertJSONZoneRows(t *testing.T, output string, wantZones []string, wantColumns []string) {
+	t.Helper()
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(output), &rows); err != nil {
+		t.Fatalf("decode zones JSON: %v\n%s", err, output)
+	}
+	if len(rows) != len(wantZones) {
+		t.Fatalf("zone rows = %d, want %d: %#v", len(rows), len(wantZones), rows)
+	}
+	wantSet := map[string]bool{}
+	for _, column := range wantColumns {
+		wantSet[column] = true
+	}
+	for index, row := range rows {
+		if cleanString(row["zone"]) != wantZones[index] {
+			t.Fatalf("row %d zone = %q, want %q: %#v", index, cleanString(row["zone"]), wantZones[index], rows)
+		}
+		if len(row) != len(wantSet) {
+			t.Fatalf("row columns = %#v, want %#v", row, wantColumns)
+		}
+		for column := range wantSet {
+			if _, ok := row[column]; !ok {
+				t.Fatalf("row missing column %q: %#v", column, row)
+			}
+		}
 	}
 }
 

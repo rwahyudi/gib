@@ -699,6 +699,95 @@ func TestEmitZonesJSONDoesNotPrintTableTotal(t *testing.T) {
 	}
 }
 
+func TestZoneListOptionHelpers(t *testing.T) {
+	formats, err := parseZoneFormats("forward,IPV4")
+	if err != nil {
+		t.Fatalf("parse formats: %v", err)
+	}
+	if got := strings.Join(formats, ","); got != "FORWARD,IPV4" {
+		t.Fatalf("formats = %q, want FORWARD,IPV4", got)
+	}
+	if _, err := parseZoneFormats("external"); err == nil || !strings.Contains(err.Error(), `unsupported zone type "EXTERNAL"`) {
+		t.Fatalf("parse invalid format error = %v", err)
+	}
+
+	zoneSort, err := parseZoneSort("-comment", true)
+	if err != nil {
+		t.Fatalf("parse zone sort: %v", err)
+	}
+	if !zoneSort.Enabled || zoneSort.Field != "comment" || !zoneSort.Desc {
+		t.Fatalf("zone sort = %#v", zoneSort)
+	}
+	if _, err := parseZoneSort("serial", true); err == nil || !strings.Contains(err.Error(), `unsupported zone sort field "serial"`) {
+		t.Fatalf("parse invalid sort error = %v", err)
+	}
+
+	columns, err := parseZoneColumns("zone,comment")
+	if err != nil {
+		t.Fatalf("parse zone columns: %v", err)
+	}
+	if got := strings.Join(columns, ","); got != "zone,comment" {
+		t.Fatalf("columns = %q, want zone,comment", got)
+	}
+	if _, err := parseZoneColumns("zone,zone"); err == nil || !strings.Contains(err.Error(), `duplicate zone column "zone"`) {
+		t.Fatalf("parse duplicate columns error = %v", err)
+	}
+}
+
+func TestFilterAndSortListedZones(t *testing.T) {
+	zones := []map[string]any{
+		{"fqdn": "alpha.example.com", "zone_format": "FORWARD", "comment": "keep"},
+		{"fqdn": "beta.example.com", "zone_format": "IPV4", "comment": "keep"},
+		{"fqdn": "zeta.example.com", "zone_format": "FORWARD", "comment": "skip me"},
+		{"fqdn": "delta.example.com", "zone_format": "FORWARD", "comment": "keep"},
+	}
+	filtered := filterListedZones(zones, []string{"FORWARD"}, []string{"skip"})
+	applyZoneSort(filtered, ZoneSort{Enabled: true, Field: "zone", Desc: true})
+	var names []string
+	for _, zone := range filtered {
+		names = append(names, cleanString(zone["fqdn"]))
+	}
+	if got := strings.Join(names, ","); got != "delta.example.com,alpha.example.com" {
+		t.Fatalf("filtered zones = %q", got)
+	}
+}
+
+func TestEmitZonesWithSelectedColumns(t *testing.T) {
+	zones := []map[string]any{{
+		"fqdn":        "example.com",
+		"view":        "default",
+		"zone_format": "FORWARD",
+		"ns_group":    "default",
+		"comment":     "primary",
+	}}
+
+	t.Run("json", func(t *testing.T) {
+		var stdout bytes.Buffer
+		app := &App{Output: jsonOutput, Stdout: &stdout}
+		if err := app.emitZones(zones, []string{"zone", "comment"}); err != nil {
+			t.Fatalf("emit zones: %v", err)
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
+			t.Fatalf("decode zones JSON: %v\n%s", err, stdout.String())
+		}
+		if len(rows) != 1 || len(rows[0]) != 2 || cleanString(rows[0]["zone"]) != "example.com" || cleanString(rows[0]["comment"]) != "primary" {
+			t.Fatalf("rows = %#v", rows)
+		}
+	})
+
+	t.Run("csv", func(t *testing.T) {
+		var stdout bytes.Buffer
+		app := &App{Output: csvOutput, Stdout: &stdout}
+		if err := app.emitZones(zones, []string{"zone", "format"}); err != nil {
+			t.Fatalf("emit zones: %v", err)
+		}
+		if got, want := stdout.String(), "zone,format\nexample.com,FORWARD\n"; got != want {
+			t.Fatalf("csv output = %q, want %q", got, want)
+		}
+	})
+}
+
 func TestRunZoneInfoTablePrintsFieldsAsRows(t *testing.T) {
 	app, stdout := zoneInfoTestApp(t, tableOutput)
 	if err := app.runZoneInfo("example.com"); err != nil {

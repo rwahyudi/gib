@@ -307,6 +307,171 @@ func recordColumnCompletions(toComplete string) []string {
 	return rows
 }
 
+var zoneFormatDescriptions = map[string]string{
+	"FORWARD": "forward DNS zone",
+	"IPV4":    "IPv4 reverse DNS zone",
+	"IPV6":    "IPv6 reverse DNS zone",
+}
+
+func zoneFormatFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return zoneFormatCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func zoneFormatCompletions(toComplete string) []string {
+	raw := strings.ToUpper(strings.TrimSpace(toComplete))
+	parts := strings.Split(raw, ",")
+	prefix := parts[len(parts)-1]
+	selected := map[string]bool{}
+	for _, part := range parts[:len(parts)-1] {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			selected[part] = true
+		}
+	}
+	base := ""
+	if len(parts) > 1 {
+		base = strings.Join(parts[:len(parts)-1], ",") + ","
+	}
+
+	var rows []string
+	for _, format := range zoneFormatTypes {
+		if selected[format] {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(format, prefix) {
+			continue
+		}
+		candidate := base + format
+		description := zoneFormatDescriptions[format]
+		if description == "" {
+			rows = append(rows, candidate)
+			continue
+		}
+		rows = append(rows, candidate+"\t"+description)
+	}
+	return rows
+}
+
+var zoneSortDescriptions = map[string]string{
+	"zone":     "zone name",
+	"view":     "DNS view",
+	"format":   "zone format",
+	"ns_group": "name server group",
+	"comment":  "zone comment",
+}
+
+func zoneSortFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return zoneSortCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func (a *App) completeZoneSortValue(args []string) bool {
+	prefix, ok := zoneSortCompletionPrefix(args)
+	if !ok {
+		return false
+	}
+	rows := zoneSortCompletions(prefix)
+	noDescriptions := args[0] == "__completeNoDesc"
+	for _, row := range rows {
+		if noDescriptions {
+			row = strings.SplitN(row, "\t", 2)[0]
+		}
+		fmt.Fprintln(a.Stdout, row)
+	}
+	fmt.Fprintln(a.Stdout, ":4")
+	return true
+}
+
+func zoneSortCompletionPrefix(args []string) (string, bool) {
+	if len(args) < 5 || !strings.HasPrefix(args[0], "__complete") || !isZoneListArgs(args) {
+		return "", false
+	}
+	current := args[len(args)-1]
+	if current == "--sort" || current == "-s" {
+		return "", true
+	}
+	if value, ok := strings.CutPrefix(current, "--sort="); ok {
+		return value, true
+	}
+	if value, ok := strings.CutPrefix(current, "-s="); ok {
+		return value, true
+	}
+	previous := args[len(args)-2]
+	if previous == "--sort" || previous == "-s" {
+		return current, true
+	}
+	return "", false
+}
+
+func zoneSortCompletions(toComplete string) []string {
+	prefix := strings.ToLower(strings.TrimSpace(toComplete))
+	var rows []string
+	for _, field := range zoneSortFields {
+		appendZoneSortCompletion(&rows, field, "ascending", prefix)
+		appendZoneSortCompletion(&rows, "-"+field, "descending", prefix)
+	}
+	return rows
+}
+
+func appendZoneSortCompletion(rows *[]string, value string, direction string, prefix string) {
+	if prefix != "" && !strings.HasPrefix(value, prefix) {
+		return
+	}
+	field := strings.TrimPrefix(value, "-")
+	description := zoneSortDescriptions[field]
+	if description == "" {
+		*rows = append(*rows, value)
+		return
+	}
+	*rows = append(*rows, value+"\t"+description+" "+direction)
+}
+
+var zoneColumnDescriptions = map[string]string{
+	"zone":     "zone name",
+	"view":     "DNS view",
+	"format":   "zone format",
+	"ns_group": "name server group",
+	"comment":  "zone comment",
+}
+
+func zoneColumnFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return zoneColumnCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func zoneColumnCompletions(toComplete string) []string {
+	raw := strings.ToLower(strings.TrimSpace(toComplete))
+	parts := strings.Split(raw, ",")
+	prefix := parts[len(parts)-1]
+	selected := map[string]bool{}
+	for _, part := range parts[:len(parts)-1] {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			selected[part] = true
+		}
+	}
+	base := ""
+	if len(parts) > 1 {
+		base = strings.Join(parts[:len(parts)-1], ",") + ","
+	}
+
+	var rows []string
+	for _, column := range zoneOutputColumns {
+		if selected[column] {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(column, prefix) {
+			continue
+		}
+		candidate := base + column
+		description := zoneColumnDescriptions[column]
+		if description == "" {
+			rows = append(rows, candidate)
+			continue
+		}
+		rows = append(rows, candidate+"\t"+description)
+	}
+	return rows
+}
+
 func commandZoneFlag(cmd *cobra.Command) string {
 	if flag := cmd.Flags().Lookup("zone"); flag != nil {
 		return strings.TrimSpace(flag.Value.String())

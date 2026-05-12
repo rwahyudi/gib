@@ -279,12 +279,28 @@ func (a *App) dnsZoneCommand() *cobra.Command {
 	createCmd.Flags().String("comment", "", "zone comment")
 	createCmd.Flags().String("ns-group", "", "name server group")
 	cmd.AddCommand(createCmd)
+	var zoneTypeFilter string
+	var zoneExclude []string
+	var zoneSortRaw string
+	var zoneColumnsRaw string
 	listCmd := &cobra.Command{
 		Use:               "list [SEARCH]",
 		Short:             "List DNS zones",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeFlagsAfterArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			formats, err := parseZoneFormats(zoneTypeFilter)
+			if err != nil {
+				return err
+			}
+			zoneSort, err := parseZoneSort(zoneSortRaw, cmd.Flags().Changed("sort"))
+			if err != nil {
+				return err
+			}
+			zoneColumns, err := parseZoneColumns(zoneColumnsRaw)
+			if err != nil {
+				return err
+			}
 			search := ""
 			if len(args) > 0 {
 				search = args[0]
@@ -304,12 +320,19 @@ func (a *App) dnsZoneCommand() *cobra.Command {
 			}); err != nil {
 				return err
 			}
+			zones = filterListedZones(zones, formats, zoneExclude)
+			applyZoneSort(zones, zoneSort)
 			if len(zones) == 0 && a.isTableOutput() {
 				a.PrintWarning("No zones found.")
 			}
-			return a.emitZones(zones)
+			return a.emitZones(zones, zoneColumns)
 		},
 	}
+	listCmd.Flags().StringVarP(&zoneTypeFilter, "type", "t", "", "zone format filter, comma-separated")
+	_ = listCmd.RegisterFlagCompletionFunc("type", zoneFormatFlagCompletion)
+	listCmd.Flags().StringArrayVarP(&zoneExclude, "exclude", "e", nil, "exclude zones matching keyword")
+	addZoneSortFlag(listCmd, &zoneSortRaw)
+	addZoneColumnsFlag(listCmd, &zoneColumnsRaw)
 	cmd.AddCommand(listCmd)
 	infoCmd := &cobra.Command{
 		Use:   "info ZONE",
@@ -563,6 +586,16 @@ func addRecordSortFlag(cmd *cobra.Command, target *string) {
 func addRecordColumnsFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVarP(target, "columns", "C", "", "record output columns, comma-separated")
 	_ = cmd.RegisterFlagCompletionFunc("columns", recordColumnFlagCompletion)
+}
+
+func addZoneSortFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "sort", "s", "", "sort zones by field: zone, view, format, ns_group, or comment; prefix with - for descending")
+	_ = cmd.RegisterFlagCompletionFunc("sort", zoneSortFlagCompletion)
+}
+
+func addZoneColumnsFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "columns", "C", "", "zone output columns, comma-separated")
+	_ = cmd.RegisterFlagCompletionFunc("columns", zoneColumnFlagCompletion)
 }
 
 func (a *App) dnsDeleteCommand() *cobra.Command {

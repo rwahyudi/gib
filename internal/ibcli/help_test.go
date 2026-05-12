@@ -147,6 +147,34 @@ func TestDNSSearchHelpShowsSort(t *testing.T) {
 	}
 }
 
+func TestDNSZoneListHelpShowsFilters(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"dns", "zone", "list", "--help"}); err != nil {
+		t.Fatalf("dns zone list help: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"Zone List Usage",
+		"-t FORWARD or --type IPV4,IPV6 filters zone formats",
+		"-e keyword excludes matching zone name or comment",
+		"-s zone or --sort=-comment sorts by field",
+		"-C zone,comment prints selected output columns",
+		"-C, --columns STRING",
+		"-e, --exclude STRINGARRAY",
+		"-s, --sort STRING",
+		"-t, --type STRING",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dns zone list help output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestConfigHelpCoversWorkflowAndStorage(t *testing.T) {
 	app := testApp(t)
 	var stdout bytes.Buffer

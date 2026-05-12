@@ -445,6 +445,77 @@ func TestDNSRecordColumnsCompleteValues(t *testing.T) {
 	}
 }
 
+func TestDNSZoneListCompletesFilterSortAndColumns(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wants    []string
+		notWants []string
+	}{
+		{
+			name: "type",
+			args: []string{"__complete", "dns", "zone", "list", "-t", "I"},
+			wants: []string{
+				"IPV4\tIPv4 reverse DNS zone",
+				"IPV6\tIPv6 reverse DNS zone",
+				":4",
+			},
+			notWants: []string{
+				"FORWARD\tforward DNS zone",
+			},
+		},
+		{
+			name: "sort descending",
+			args: []string{"__complete", "dns", "zone", "list", "-s", "-"},
+			wants: []string{
+				"-zone\tzone name descending",
+				"-comment\tzone comment descending",
+				":4",
+			},
+			notWants: []string{
+				"\nzone\tzone name ascending",
+			},
+		},
+		{
+			name: "columns",
+			args: []string{"__complete", "dns", "zone", "list", "--columns", "zone,"},
+			wants: []string{
+				"zone,view\tDNS view",
+				"zone,format\tzone format",
+				":4",
+			},
+			notWants: []string{
+				"zone,zone\tzone name",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := testApp(t)
+			var stdout bytes.Buffer
+			app.Stdout = &stdout
+			app.Stderr = &bytes.Buffer{}
+			app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+			if err := app.Execute(tt.args); err != nil {
+				t.Fatalf("completion: %v", err)
+			}
+			output := stdout.String()
+			for _, want := range tt.wants {
+				if !strings.Contains(output, want) {
+					t.Fatalf("completion output missing %q:\n%s", want, output)
+				}
+			}
+			for _, notWant := range tt.notWants {
+				if strings.Contains(output, notWant) {
+					t.Fatalf("completion output contains %q:\n%s", notWant, output)
+				}
+			}
+		})
+	}
+}
+
 func TestDNSSearchCompletesTypeFlagValues(t *testing.T) {
 	tests := []struct {
 		name     string

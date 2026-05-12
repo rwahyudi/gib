@@ -192,6 +192,14 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"sort", "-s name or --sort=-name sorts by field; blank --sort uses name"},
 			{"columns", "-C name,value prints selected output columns"},
 		})
+	case "ib dns zone list":
+		return sectionWithRows("Zone List Usage", [][]string{
+			{"search", "optional positional search matches zone name or comment"},
+			{"type", "-t FORWARD or --type IPV4,IPV6 filters zone formats"},
+			{"exclude", "-e keyword excludes matching zone name or comment"},
+			{"sort", "-s zone or --sort=-comment sorts by field; blank --sort uses zone"},
+			{"columns", "-C zone,comment prints selected output columns"},
+		})
 	case "ib dns delete":
 		return sectionWithRows("Delete Record Usage", [][]string{
 			{"forward", "ib dns delete <record-name> [zone]"},

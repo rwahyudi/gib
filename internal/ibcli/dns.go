@@ -33,6 +33,7 @@ const (
 	recordValueWrapWidth   = 48
 	recordCommentWrapWidth = 40
 	defaultRecordSortField = "name"
+	defaultZoneSortField   = "zone"
 )
 
 var (
@@ -41,6 +42,8 @@ var (
 	// recordOutputColumns is the public column contract for dns list/search
 	// across table, JSON, CSV, sorting, and shell completion.
 	recordOutputColumns = []string{"type", "name", "value", "zone", "ttl", "comment"}
+	zoneOutputColumns   = []string{"zone", "view", "format", "ns_group", "comment"}
+	zoneFormatTypes     = []string{"FORWARD", "IPV4", "IPV6"}
 
 	recordTypeColors = map[string]lipgloss.Color{
 		"a":           "#22c55e",
@@ -58,6 +61,7 @@ var (
 	defaultRecordTypeColor = lipgloss.Color("#94a3b8")
 
 	recordSortFields = []string{"name", "type", "value", "zone", "ttl", "comment"}
+	zoneSortFields   = []string{"zone", "view", "format", "ns_group", "comment"}
 )
 
 type RecordSpec struct {
@@ -545,6 +549,186 @@ func sortZones(zones []map[string]any) {
 	sort.Slice(zones, func(i, j int) bool {
 		return strings.ToLower(fmt.Sprint(zones[i]["fqdn"])) < strings.ToLower(fmt.Sprint(zones[j]["fqdn"]))
 	})
+}
+
+type ZoneSort struct {
+	Enabled bool
+	Field   string
+	Desc    bool
+}
+
+func parseZoneFormats(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var formats []string
+	for _, item := range strings.Split(raw, ",") {
+		format := strings.ToUpper(strings.TrimSpace(item))
+		if !isZoneFormatType(format) {
+			return nil, cliError("unsupported zone type %q. Supported: %s", format, strings.Join(zoneFormatTypes, ", "))
+		}
+		formats = append(formats, format)
+	}
+	return formats, nil
+}
+
+func isZoneFormatType(format string) bool {
+	format = strings.ToUpper(strings.TrimSpace(format))
+	for _, candidate := range zoneFormatTypes {
+		if format == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func parseZoneSort(raw string, enabled bool) (ZoneSort, error) {
+	if !enabled {
+		return ZoneSort{}, nil
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = defaultZoneSortField
+	}
+	desc := strings.HasPrefix(raw, "-")
+	if desc {
+		raw = strings.TrimPrefix(raw, "-")
+	}
+	field := strings.ToLower(strings.TrimSpace(raw))
+	if !isZoneSortField(field) {
+		return ZoneSort{}, cliError("unsupported zone sort field %q. Supported: %s", field, strings.Join(zoneSortFields, ", "))
+	}
+	return ZoneSort{Enabled: true, Field: field, Desc: desc}, nil
+}
+
+func isZoneSortField(field string) bool {
+	field = strings.ToLower(strings.TrimSpace(field))
+	for _, candidate := range zoneSortFields {
+		if field == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func applyZoneSort(zones []map[string]any, option ZoneSort) {
+	if !option.Enabled || len(zones) < 2 {
+		return
+	}
+	sort.SliceStable(zones, func(i, j int) bool {
+		result := strings.Compare(strings.ToLower(zoneOutputValue(zones[i], option.Field)), strings.ToLower(zoneOutputValue(zones[j], option.Field)))
+		if result == 0 {
+			return false
+		}
+		if option.Desc {
+			return result > 0
+		}
+		return result < 0
+	})
+}
+
+func filterListedZones(zones []map[string]any, formats []string, excludes []string) []map[string]any {
+	formatFilter := map[string]bool{}
+	for _, format := range formats {
+		if format != "" {
+			formatFilter[strings.ToUpper(format)] = true
+		}
+	}
+	if len(formatFilter) == 0 && len(excludes) == 0 {
+		return zones
+	}
+	filtered := make([]map[string]any, 0, len(zones))
+	for _, zone := range zones {
+		if len(formatFilter) > 0 && !formatFilter[strings.ToUpper(cleanString(zone["zone_format"]))] {
+			continue
+		}
+		values := []string{cleanString(zone["fqdn"]), cleanString(zone["comment"])}
+		excluded := false
+		for _, exclude := range excludes {
+			if searchValuesMatch(values, exclude, false, false) {
+				excluded = true
+				break
+			}
+		}
+		if excluded {
+			continue
+		}
+		filtered = append(filtered, zone)
+	}
+	return filtered
+}
+
+func defaultZoneColumns() []string {
+	return append([]string(nil), zoneOutputColumns...)
+}
+
+func parseZoneColumns(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultZoneColumns(), nil
+	}
+	seen := map[string]bool{}
+	var columns []string
+	for _, part := range strings.Split(raw, ",") {
+		column := strings.ToLower(strings.TrimSpace(part))
+		if column == "" {
+			return nil, cliError("zone column cannot be empty. Supported: %s", strings.Join(zoneOutputColumns, ", "))
+		}
+		if !isZoneOutputColumn(column) {
+			return nil, cliError("unsupported zone column %q. Supported: %s", column, strings.Join(zoneOutputColumns, ", "))
+		}
+		if seen[column] {
+			return nil, cliError("duplicate zone column %q", column)
+		}
+		seen[column] = true
+		columns = append(columns, column)
+	}
+	return columns, nil
+}
+
+func isZoneOutputColumn(column string) bool {
+	column = strings.ToLower(strings.TrimSpace(column))
+	for _, candidate := range zoneOutputColumns {
+		if column == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func zoneOutputRow(zone map[string]any) map[string]any {
+	return map[string]any{
+		"zone":     zoneOutputValue(zone, "zone"),
+		"view":     zoneOutputValue(zone, "view"),
+		"format":   zoneOutputValue(zone, "format"),
+		"ns_group": zoneOutputValue(zone, "ns_group"),
+		"comment":  zoneOutputValue(zone, "comment"),
+	}
+}
+
+func zoneOutputValue(zone map[string]any, field string) string {
+	switch field {
+	case "zone":
+		return cleanString(zone["fqdn"])
+	case "view":
+		return cleanString(zone["view"])
+	case "format":
+		return cleanString(zone["zone_format"])
+	case "ns_group":
+		return cleanString(zone["ns_group"])
+	case "comment":
+		return cleanString(zone["comment"])
+	default:
+		return ""
+	}
+}
+
+func selectZoneOutputColumns(row map[string]any, columns []string) map[string]any {
+	selected := make(map[string]any, len(columns))
+	for _, column := range columns {
+		selected[column] = row[column]
+	}
+	return selected
 }
 
 func zoneKey(zone map[string]any) string {
@@ -1312,33 +1496,29 @@ func splitDisplayWidth(value string, width int) (string, string) {
 	return value, ""
 }
 
-func (a *App) emitZones(zones []map[string]any) error {
+func (a *App) emitZones(zones []map[string]any, selectedColumns ...[]string) error {
+	columns := defaultZoneColumns()
+	if len(selectedColumns) > 0 && len(selectedColumns[0]) > 0 {
+		columns = selectedColumns[0]
+	}
 	rows := make([]map[string]any, 0, len(zones))
 	for _, zone := range zones {
-		rows = append(rows, map[string]any{
-			"zone":     cleanString(zone["fqdn"]),
-			"view":     cleanString(zone["view"]),
-			"format":   cleanString(zone["zone_format"]),
-			"ns_group": cleanString(zone["ns_group"]),
-			"comment":  cleanString(zone["comment"]),
-		})
+		rows = append(rows, selectZoneOutputColumns(zoneOutputRow(zone), columns))
 	}
 	if a.isTableOutput() {
 		displayRows := make([][]string, 0, len(rows))
 		for _, row := range rows {
-			displayRows = append(displayRows, []string{
-				stringify(row["zone"]),
-				stringify(row["view"]),
-				stringify(row["format"]),
-				stringify(row["ns_group"]),
-				stringify(row["comment"]),
-			})
+			display := make([]string, 0, len(columns))
+			for _, field := range columns {
+				display = append(display, stringify(row[field]))
+			}
+			displayRows = append(displayRows, display)
 		}
-		fmt.Fprintln(a.Stdout, renderTable("DNS Zones", []string{"Zone", "View", "Format", "Ns Group", "Comment"}, displayRows))
+		fmt.Fprintln(a.Stdout, renderTable("DNS Zones", titleCaseFields(columns), displayRows))
 		a.printTableTotal("zones", len(rows))
 		return nil
 	}
-	return a.emitRows(fmt.Sprintf("DNS Zones (%d)", len(rows)), []string{"zone", "view", "format", "ns_group", "comment"}, rows)
+	return a.emitRows(fmt.Sprintf("DNS Zones (%d)", len(rows)), columns, rows)
 }
 
 func (a *App) printTableTotal(label string, count int) {
