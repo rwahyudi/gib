@@ -395,6 +395,41 @@ func TestRecordTTLEmptyWhenDefault(t *testing.T) {
 	}
 }
 
+func TestParseRecordColumns(t *testing.T) {
+	columns, err := parseRecordColumns("name,value,ttl")
+	if err != nil {
+		t.Fatalf("parse columns: %v", err)
+	}
+	if got := strings.Join(columns, ","); got != "name,value,ttl" {
+		t.Fatalf("columns = %q, want name,value,ttl", got)
+	}
+
+	defaultColumns, err := parseRecordColumns("")
+	if err != nil {
+		t.Fatalf("parse default columns: %v", err)
+	}
+	if got := strings.Join(defaultColumns, ","); got != "type,name,value,zone,ttl,comment" {
+		t.Fatalf("default columns = %q", got)
+	}
+
+	for _, tt := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "duplicate", raw: "name,name", want: `duplicate column "name"`},
+		{name: "unsupported", raw: "name,owner", want: `unsupported column "owner"`},
+		{name: "empty", raw: "name,", want: "record column cannot be empty"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseRecordColumns(tt.raw)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("parse columns error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestEmitRecordsJSONKeepsPlainType(t *testing.T) {
 	var stdout bytes.Buffer
 	app := &App{Output: jsonOutput, Stdout: &stdout}
@@ -412,6 +447,59 @@ func TestEmitRecordsJSONKeepsPlainType(t *testing.T) {
 	if strings.Contains(output, "Total records:") {
 		t.Fatalf("json output contains table total footer: %s", output)
 	}
+}
+
+func TestEmitRecordsWithSelectedColumns(t *testing.T) {
+	t.Run("json", func(t *testing.T) {
+		var stdout bytes.Buffer
+		app := &App{Output: jsonOutput, Stdout: &stdout}
+		if err := app.emitRecordsWithContext(testRecords(1), false, []string{"name", "value"}); err != nil {
+			t.Fatalf("emit records: %v", err)
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
+			t.Fatalf("decode json: %v\n%s", err, stdout.String())
+		}
+		if len(rows) != 1 {
+			t.Fatalf("rows = %d, want 1", len(rows))
+		}
+		if len(rows[0]) != 2 || cleanString(rows[0]["name"]) != "app1.example.com" || cleanString(rows[0]["value"]) != "192.0.2.1" {
+			t.Fatalf("row = %#v", rows[0])
+		}
+		if _, ok := rows[0]["type"]; ok {
+			t.Fatalf("json row included unselected type: %#v", rows[0])
+		}
+	})
+
+	t.Run("csv", func(t *testing.T) {
+		var stdout bytes.Buffer
+		app := &App{Output: csvOutput, Stdout: &stdout}
+		if err := app.emitRecordsWithContext(testRecords(1), false, []string{"type", "name"}); err != nil {
+			t.Fatalf("emit records: %v", err)
+		}
+		if got, want := stdout.String(), "type,name\nHOST,app1.example.com\n"; got != want {
+			t.Fatalf("csv output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("table", func(t *testing.T) {
+		var stdout bytes.Buffer
+		app := &App{Output: tableOutput, Stdout: &stdout}
+		if err := app.emitRecordsWithContext(testRecords(1), false, []string{"name", "value"}); err != nil {
+			t.Fatalf("emit records: %v", err)
+		}
+		output := stdout.String()
+		for _, want := range []string{"Name", "Value", "app1.example.com", "192.0.2.1"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("table output missing %q:\n%s", want, output)
+			}
+		}
+		for _, unwanted := range []string{"Type", "Zone", "Comment"} {
+			if strings.Contains(output, unwanted) {
+				t.Fatalf("table output included unselected %q:\n%s", unwanted, output)
+			}
+		}
+	})
 }
 
 func TestEmitRecordsTablePrintsTotalOnlyAboveFive(t *testing.T) {

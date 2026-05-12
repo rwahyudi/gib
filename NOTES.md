@@ -60,11 +60,13 @@ For non-interactive stderr, `-o json`, or `-o csv`, the progress view is disable
 
 ## DNS List and Search Scope
 
-`ib dns list [ZONE]` lists only the resolved current zone by default. Use `-r` or `--recursive` to include child authoritative zones under that zone. Use `-t`/`--type` to filter comma-separated record types, `-e`/`--exclude` to hide records whose name, value, or comment matches the excluded keyword, and `-s`/`--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`.
+`ib dns list [ZONE]` lists only the resolved current zone by default. Use `-r` or `--recursive` to include child authoritative zones under that zone. Use `-t`/`--type` to filter comma-separated record types, `-e`/`--exclude` to hide records whose name, value, or comment matches the excluded keyword, `-s`/`--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`, and `-C`/`--columns` to print selected output columns.
 
-`ib dns search KEY` searches only the resolved current zone by default. Use `-z ZONE` to choose a different root zone, and add `-r` or `--recursive` to include child authoritative zones under that root. `--global` still searches every searchable zone in the selected DNS view and cannot be combined with `--recursive`. Search supports the same `-t`/`--type`, `-e`/`--exclude`, and `-s`/`--sort` record filters as list.
+`ib dns search KEY` searches only the resolved current zone by default. Use `-z ZONE` to choose a different root zone, and add `-r` or `--recursive` to include child authoritative zones under that root. `--global` still searches every searchable zone in the selected DNS view and cannot be combined with `--recursive`. Search supports the same `-t`/`--type`, `-e`/`--exclude`, `-s`/`--sort`, and `-C`/`--columns` record filters as list.
 
 For record sorting, a blank `--sort` uses `name`, and a leading minus sorts descending, for example `--sort=-name` or `-s -ttl`. The default sort order is unchanged when `--sort` is omitted.
+
+For record columns, the default output remains `type,name,value,zone,ttl,comment`. `--columns name,value` filters and orders output fields for table, JSON, and CSV. Duplicate or unknown column names are rejected.
 
 All `ib dns` subcommands inherit `--zone`/`-z` and `--view`/`-v`. These are per-command context overrides and take precedence over `ib dns zone use`, `ib dns view use`, `IB_ZONE`, `IB_VIEW`, and configured defaults without saving anything to the profile.
 
@@ -81,6 +83,8 @@ When WAPI returns HTML or another non-JSON payload with a successful HTTP status
 `ib dns search KEY -t <tab><tab>` and `ib dns list -t <tab><tab>` complete supported record type filters such as `a`, `host`, and `txt`. Comma-separated filters are completed from the current segment, so `-t a,` offers remaining types as `a,host`, `a,txt`, and so on.
 
 `ib dns search KEY -s <tab><tab>` and `ib dns list -s <tab><tab>` complete sort fields in ascending and descending forms, including `name`, `type`, `value`, `zone`, `ttl`, `comment`, `-name`, and `-ttl`.
+
+`ib dns search KEY -C <tab><tab>` and `ib dns list --columns <tab><tab>` complete record output columns. Comma-separated completion skips already selected columns, so `--columns name,` offers `name,type`, `name,value`, and the remaining columns.
 
 For Bash, `ib <tab><tab>` should complete root commands such as `config`, `dns`, and `help`. If it does not, regenerate and reload the shell integration with `ib config completion bash > ~/.ib-complete.bash` and start a new shell or run `. ~/.ib-complete.bash`.
 

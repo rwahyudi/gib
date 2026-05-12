@@ -655,6 +655,51 @@ func TestDNSListSortsRecords(t *testing.T) {
 	assertJSONRecordNames(t, stdout.String(), []string{"alpha.example.com", "bravo.example.com", "charlie.example.com"})
 }
 
+func TestDNSListColumnsLimitJSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns list should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "app.example.com", "address": "192.0.2.10", "zone": "example.com", "comment": "selected"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "--columns", "name,value"}); err != nil {
+		t.Fatalf("dns list columns: %v\nstdout:\n%s", err, stdout.String())
+	}
+	assertJSONRecordColumns(t, stdout.String(), []string{"name", "value"})
+}
+
+func TestDNSSearchColumnsLimitJSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns search should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedZones(profile, []map[string]any{
+		{"fqdn": "example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "app.example.com", "address": "192.0.2.10", "zone": "example.com", "comment": "search hit"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "search", "app", "--columns", "name,comment"}); err != nil {
+		t.Fatalf("dns search columns: %v\nstdout:\n%s", err, stdout.String())
+	}
+	assertJSONRecordColumns(t, stdout.String(), []string{"name", "comment"})
+}
+
 func TestDNSSearchKeepsBufferedStderrClean(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -718,6 +763,31 @@ func assertJSONRecordNames(t *testing.T, output string, want []string) {
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("record names = %#v, want %#v\noutput:\n%s", got, want, output)
+	}
+}
+
+func assertJSONRecordColumns(t *testing.T, output string, want []string) {
+	t.Helper()
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(output), &rows); err != nil {
+		t.Fatalf("decode records JSON: %v\n%s", err, output)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("no JSON rows in output:\n%s", output)
+	}
+	wantSet := map[string]bool{}
+	for _, column := range want {
+		wantSet[column] = true
+	}
+	for _, row := range rows {
+		if len(row) != len(wantSet) {
+			t.Fatalf("row columns = %#v, want %#v\noutput:\n%s", row, want, output)
+		}
+		for column := range wantSet {
+			if _, ok := row[column]; !ok {
+				t.Fatalf("row missing column %q: %#v", column, row)
+			}
+		}
 	}
 }
 

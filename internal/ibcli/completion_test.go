@@ -377,6 +377,74 @@ func TestDNSListCompletesTypeFlagValues(t *testing.T) {
 	}
 }
 
+func TestDNSRecordColumnsCompleteValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wants    []string
+		notWants []string
+	}{
+		{
+			name: "empty",
+			args: []string{"__complete", "dns", "list", "--columns", ""},
+			wants: []string{
+				"type\trecord type",
+				"name\trecord name",
+				"value\trecord value",
+				":4",
+			},
+		},
+		{
+			name: "prefix",
+			args: []string{"__complete", "dns", "search", "test", "-C", "c"},
+			wants: []string{
+				"comment\trecord comment",
+				":4",
+			},
+			notWants: []string{
+				"name\trecord name",
+			},
+		},
+		{
+			name: "comma separated",
+			args: []string{"__complete", "dns", "list", "--columns", "name,"},
+			wants: []string{
+				"name,type\trecord type",
+				"name,value\trecord value",
+				":4",
+			},
+			notWants: []string{
+				"name,name\trecord name",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := testApp(t)
+			var stdout bytes.Buffer
+			app.Stdout = &stdout
+			app.Stderr = &bytes.Buffer{}
+			app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+			if err := app.Execute(tt.args); err != nil {
+				t.Fatalf("completion: %v", err)
+			}
+			output := stdout.String()
+			for _, want := range tt.wants {
+				if !strings.Contains(output, want) {
+					t.Fatalf("completion output missing %q:\n%s", want, output)
+				}
+			}
+			for _, notWant := range tt.notWants {
+				if strings.Contains(output, notWant) {
+					t.Fatalf("completion output contains %q:\n%s", notWant, output)
+				}
+			}
+		})
+	}
+}
+
 func TestDNSSearchCompletesTypeFlagValues(t *testing.T) {
 	tests := []struct {
 		name     string

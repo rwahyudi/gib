@@ -429,6 +429,7 @@ func (a *App) dnsListCommand() *cobra.Command {
 	var typeFilter string
 	var exclude []string
 	var sortRaw string
+	var columnsRaw string
 	cmd := &cobra.Command{
 		Use:   "list [ZONE]",
 		Short: "List DNS records in a zone",
@@ -445,6 +446,10 @@ func (a *App) dnsListCommand() *cobra.Command {
 				return err
 			}
 			recordSort, err := parseRecordSort(sortRaw, cmd.Flags().Changed("sort"))
+			if err != nil {
+				return err
+			}
+			recordColumns, err := parseRecordColumns(columnsRaw)
 			if err != nil {
 				return err
 			}
@@ -477,7 +482,7 @@ func (a *App) dnsListCommand() *cobra.Command {
 				}
 				a.PrintWarning("No records found in " + scope + ".")
 			}
-			return a.emitRecordsWithContext(records, true)
+			return a.emitRecordsWithContext(records, true, recordColumns)
 		},
 	}
 	cmd.Flags().BoolVar(&details, "details", false, "load per-record details such as explicit TTLs; slower for large zones")
@@ -486,6 +491,7 @@ func (a *App) dnsListCommand() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("type", recordTypeFlagCompletion)
 	cmd.Flags().StringArrayVarP(&exclude, "exclude", "e", nil, "exclude records matching keyword")
 	addRecordSortFlag(cmd, &sortRaw)
+	addRecordColumnsFlag(cmd, &columnsRaw)
 	return cmd
 }
 
@@ -493,6 +499,7 @@ func (a *App) dnsSearchCommand() *cobra.Command {
 	var options SearchOptions
 	var typeFilter string
 	var sortRaw string
+	var columnsRaw string
 	cmd := &cobra.Command{
 		Use:   "search <keyword>",
 		Short: "Search DNS records by name, value, or comment",
@@ -513,6 +520,10 @@ ib dns search app --global`),
 			if err != nil {
 				return err
 			}
+			recordColumns, err := parseRecordColumns(columnsRaw)
+			if err != nil {
+				return err
+			}
 			options.Types = types
 			options.Sort = recordSort
 			options.Zone = strings.TrimSpace(a.dnsZoneOverride)
@@ -529,7 +540,7 @@ ib dns search app --global`),
 			if len(records) == 0 && a.isTableOutput() {
 				a.PrintWarning("No records found.")
 			}
-			return a.emitRecordsWithContext(records, true)
+			return a.emitRecordsWithContext(records, true, recordColumns)
 		},
 	}
 	cmd.Flags().BoolVarP(&options.CaseSensitive, "case-sensitive", "i", false, "use case-sensitive matching")
@@ -540,12 +551,18 @@ ib dns search app --global`),
 	_ = cmd.RegisterFlagCompletionFunc("type", recordTypeFlagCompletion)
 	cmd.Flags().StringArrayVarP(&options.Exclude, "exclude", "e", nil, "exclude records matching keyword")
 	addRecordSortFlag(cmd, &sortRaw)
+	addRecordColumnsFlag(cmd, &columnsRaw)
 	return cmd
 }
 
 func addRecordSortFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVarP(target, "sort", "s", "", "sort records by field: name, type, value, zone, ttl, or comment; prefix with - for descending")
 	_ = cmd.RegisterFlagCompletionFunc("sort", recordSortFlagCompletion)
+}
+
+func addRecordColumnsFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "columns", "C", "", "record output columns, comma-separated")
+	_ = cmd.RegisterFlagCompletionFunc("columns", recordColumnFlagCompletion)
 }
 
 func (a *App) dnsDeleteCommand() *cobra.Command {

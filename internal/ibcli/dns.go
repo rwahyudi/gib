@@ -38,6 +38,10 @@ const (
 var (
 	commentAllowedRE = regexp.MustCompile(`^[A-Za-z0-9 .,_:;@#%+=/()[\]'&-]*$`)
 
+	// recordOutputColumns is the public column contract for dns list/search
+	// across table, JSON, CSV, sorting, and shell completion.
+	recordOutputColumns = []string{"type", "name", "value", "zone", "ttl", "comment"}
+
 	recordTypeColors = map[string]lipgloss.Color{
 		"a":           "#22c55e",
 		"aaaa":        "#16a34a",
@@ -1097,6 +1101,65 @@ func recordOutputRow(recordType string, item map[string]any) map[string]any {
 	}
 }
 
+func defaultRecordColumns() []string {
+	return append([]string(nil), recordOutputColumns...)
+}
+
+func parseRecordColumns(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultRecordColumns(), nil
+	}
+	seen := map[string]bool{}
+	var columns []string
+	for _, part := range strings.Split(raw, ",") {
+		column := strings.ToLower(strings.TrimSpace(part))
+		if column == "" {
+			return nil, cliError("record column cannot be empty. Supported: %s", strings.Join(recordOutputColumns, ", "))
+		}
+		if !isRecordOutputColumn(column) {
+			return nil, cliError("unsupported column %q. Supported: %s", column, strings.Join(recordOutputColumns, ", "))
+		}
+		if seen[column] {
+			return nil, cliError("duplicate column %q", column)
+		}
+		seen[column] = true
+		columns = append(columns, column)
+	}
+	return columns, nil
+}
+
+func isRecordOutputColumn(column string) bool {
+	column = strings.ToLower(strings.TrimSpace(column))
+	for _, candidate := range recordOutputColumns {
+		if column == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func selectRecordOutputColumns(row map[string]any, columns []string) map[string]any {
+	selected := make(map[string]any, len(columns))
+	for _, column := range columns {
+		selected[column] = row[column]
+	}
+	return selected
+}
+
+func recordTableValue(field string, row map[string]any) string {
+	switch field {
+	case "type":
+		return styledRecordType(stringify(row[field]))
+	case "value":
+		return wrapRecordTableCell(stringify(row[field]), recordValueWrapWidth)
+	case "comment":
+		return wrapRecordTableCell(stringify(row[field]), recordCommentWrapWidth)
+	default:
+		return stringify(row[field])
+	}
+}
+
 func recordTypeColor(recordType string) lipgloss.Color {
 	recordType = canonicalDisplayRecordType(recordType)
 	if color, ok := recordTypeColors[recordType]; ok {
@@ -1149,28 +1212,29 @@ func (a *App) emitRecords(records []TypedRecord) error {
 	return a.emitRecordsWithContext(records, true)
 }
 
-func (a *App) emitRecordsWithContext(records []TypedRecord, showContext bool) error {
+func (a *App) emitRecordsWithContext(records []TypedRecord, showContext bool, selectedColumns ...[]string) error {
+	columns := defaultRecordColumns()
+	if len(selectedColumns) > 0 && len(selectedColumns[0]) > 0 {
+		columns = selectedColumns[0]
+	}
 	rows := make([]map[string]any, 0, len(records))
 	for _, record := range records {
-		rows = append(rows, recordOutputRow(record.Type, record.Item))
+		rows = append(rows, selectRecordOutputColumns(recordOutputRow(record.Type, record.Item), columns))
 	}
 	if a.isTableOutput() {
 		displayRows := make([][]string, 0, len(rows))
 		for _, row := range rows {
-			displayRows = append(displayRows, []string{
-				styledRecordType(stringify(row["type"])),
-				stringify(row["name"]),
-				wrapRecordTableCell(stringify(row["value"]), recordValueWrapWidth),
-				stringify(row["zone"]),
-				stringify(row["ttl"]),
-				wrapRecordTableCell(stringify(row["comment"]), recordCommentWrapWidth),
-			})
+			display := make([]string, 0, len(columns))
+			for _, field := range columns {
+				display = append(display, recordTableValue(field, row))
+			}
+			displayRows = append(displayRows, display)
 		}
-		fmt.Fprintln(a.Stdout, renderTable("DNS Records", []string{"Type", "Name", "Value", "Zone", "Ttl", "Comment"}, displayRows))
+		fmt.Fprintln(a.Stdout, renderTable("DNS Records", titleCaseFields(columns), displayRows))
 		a.printRecordTableFooter(showContext, len(rows))
 		return nil
 	}
-	return a.emitRows(fmt.Sprintf("DNS Records (%d)", len(rows)), []string{"type", "name", "value", "zone", "ttl", "comment"}, rows)
+	return a.emitRows(fmt.Sprintf("DNS Records (%d)", len(rows)), columns, rows)
 }
 
 func (a *App) printRecordTableFooter(showContext bool, count int) {

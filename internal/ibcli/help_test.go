@@ -110,7 +110,9 @@ func TestDNSListHelpShowsFilters(t *testing.T) {
 		"-t host or --type a,txt filters record types",
 		"-e keyword excludes matching name, value, or comment",
 		"-s name or --sort=-name sorts by field",
+		"-C name,value prints selected output columns",
 		"--details loads explicit TTL/detail fields",
+		"-C, --columns STRING",
 		"-t, --type STRING",
 		"-e, --exclude STRINGARRAY",
 		"-s, --sort STRING",
@@ -135,6 +137,8 @@ func TestDNSSearchHelpShowsSort(t *testing.T) {
 	for _, want := range []string{
 		"Search Records Usage",
 		"-s name or --sort=-name sorts by field",
+		"-C name,value prints selected output columns",
+		"-C, --columns STRING",
 		"-s, --sort STRING",
 	} {
 		if !strings.Contains(output, want) {

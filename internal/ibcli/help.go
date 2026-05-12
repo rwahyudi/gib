@@ -181,6 +181,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"type", "-t host or --type a,txt filters record types"},
 			{"exclude", "-e keyword excludes matching name, value, or comment"},
 			{"sort", "-s name or --sort=-name sorts by field; blank --sort uses name"},
+			{"columns", "-C name,value prints selected output columns"},
 			{"details", "--details loads explicit TTL/detail fields and can be slower"},
 		})
 	case "ib dns search":
@@ -189,6 +190,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"type", "-t host or --type a,txt filters record types"},
 			{"exclude", "-e keyword excludes matching name, value, or comment"},
 			{"sort", "-s name or --sort=-name sorts by field; blank --sort uses name"},
+			{"columns", "-C name,value prints selected output columns"},
 		})
 	case "ib dns delete":
 		return sectionWithRows("Delete Record Usage", [][]string{

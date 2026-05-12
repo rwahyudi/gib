@@ -259,6 +259,54 @@ func appendRecordSortCompletion(rows *[]string, value string, direction string, 
 	*rows = append(*rows, value+"\t"+description+" "+direction)
 }
 
+var recordColumnDescriptions = map[string]string{
+	"type":    "record type",
+	"name":    "record name",
+	"value":   "record value",
+	"zone":    "DNS zone",
+	"ttl":     "record TTL",
+	"comment": "record comment",
+}
+
+func recordColumnFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return recordColumnCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func recordColumnCompletions(toComplete string) []string {
+	raw := strings.ToLower(strings.TrimSpace(toComplete))
+	parts := strings.Split(raw, ",")
+	prefix := parts[len(parts)-1]
+	selected := map[string]bool{}
+	for _, part := range parts[:len(parts)-1] {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			selected[part] = true
+		}
+	}
+	base := ""
+	if len(parts) > 1 {
+		base = strings.Join(parts[:len(parts)-1], ",") + ","
+	}
+
+	var rows []string
+	for _, column := range recordOutputColumns {
+		if selected[column] {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(column, prefix) {
+			continue
+		}
+		candidate := base + column
+		description := recordColumnDescriptions[column]
+		if description == "" {
+			rows = append(rows, candidate)
+			continue
+		}
+		rows = append(rows, candidate+"\t"+description)
+	}
+	return rows
+}
+
 func commandZoneFlag(cmd *cobra.Command) string {
 	if flag := cmd.Flags().Lookup("zone"); flag != nil {
 		return strings.TrimSpace(flag.Value.String())
