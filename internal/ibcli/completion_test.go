@@ -516,6 +516,58 @@ func TestDNSZoneListCompletesFilterSortAndColumns(t *testing.T) {
 	}
 }
 
+func TestDNSZoneListCompletionSuppressesZoneOverride(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"__complete", "dns", "zone", "list", "-"}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"--view\tDNS view override for this command",
+		"-v\tDNS view override for this command",
+		"--type\tzone format filter, comma-separated",
+		"-t\tzone format filter, comma-separated",
+		"--exclude\texclude zones matching keyword",
+		"-e\texclude zones matching keyword",
+		"--sort\tsort zones by field",
+		"-s\tsort zones by field",
+		"--columns\tzone output columns, comma-separated",
+		"-C\tzone output columns, comma-separated",
+		":4",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion output missing %q:\n%s", want, output)
+		}
+	}
+	for _, unwanted := range []string{
+		"--zone\tDNS zone override for this command",
+		"-z\tDNS zone override for this command",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("completion output contains disabled zone override %q:\n%s", unwanted, output)
+		}
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"__complete", "dns", "--view", "DNS Zone View", "zone", "list", "-"}); err != nil {
+		t.Fatalf("completion with view override: %v", err)
+	}
+	output = stdout.String()
+	for _, unwanted := range []string{
+		"--zone\tDNS zone override for this command",
+		"-z\tDNS zone override for this command",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("completion with view override contains disabled zone override %q:\n%s", unwanted, output)
+		}
+	}
+}
+
 func TestDNSSearchCompletesTypeFlagValues(t *testing.T) {
 	tests := []struct {
 		name     string

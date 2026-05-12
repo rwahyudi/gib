@@ -68,9 +68,9 @@ For record sorting, a blank `--sort` uses `name`, and a leading minus sorts desc
 
 For record columns, the default output remains `type,name,value,zone,ttl,comment`. `--columns name,value` filters and orders output fields for table, JSON, and CSV. Duplicate or unknown column names are rejected.
 
-`ib dns zone list [SEARCH]` supports the same output-control pattern for authoritative zones. `--type` filters zone formats (`FORWARD`, `IPV4`, `IPV6`), `--exclude` hides zones whose name or comment matches a keyword, `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment` with `-field` for descending order, and `--columns` selects and orders zone output fields for table, JSON, and CSV.
+`ib dns zone list [SEARCH]` supports the same output-control pattern for authoritative zones. `--type` filters zone formats (`FORWARD`, `IPV4`, `IPV6`), `--exclude` hides zones whose name or comment matches a keyword, `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment` with `-field` for descending order, and `--columns` selects and orders zone output fields for table, JSON, and CSV. It accepts `--view`/`-v` for listing another DNS view, but does not accept `--zone`/`-z` because the command lists zones rather than records inside a selected zone.
 
-All `ib dns` subcommands inherit `--zone`/`-z` and `--view`/`-v`. These are per-command context overrides and take precedence over `ib dns zone use`, `ib dns view use`, `IB_ZONE`, `IB_VIEW`, and configured defaults without saving anything to the profile.
+Most `ib dns` subcommands inherit `--zone`/`-z` and `--view`/`-v`. These are per-command context overrides and take precedence over `ib dns zone use`, `ib dns view use`, `IB_ZONE`, `IB_VIEW`, and configured defaults without saving anything to the profile. `ib dns zone list` suppresses the zone override in help and completion and rejects it if typed manually.
 
 DNS record table output always includes a `Current Context:` footer line. When the table has more than five records, the `Total records` badge is shown on the same line.
 
@@ -90,7 +90,7 @@ When WAPI returns HTML or another non-JSON payload with a successful HTTP status
 
 `ib dns search KEY -C <tab><tab>` and `ib dns list --columns <tab><tab>` complete record output columns. Comma-separated completion skips already selected columns, so `--columns name,` offers `name,type`, `name,value`, and the remaining columns.
 
-`ib dns zone list -t <tab><tab>`, `ib dns zone list -s <tab><tab>`, and `ib dns zone list -C <tab><tab>` complete zone formats, sort fields, and output columns.
+`ib dns zone list -t <tab><tab>`, `ib dns zone list -s <tab><tab>`, and `ib dns zone list -C <tab><tab>` complete zone formats, sort fields, and output columns. `ib dns zone list -<tab><tab>` completes `--view`/`-v` and zone-list filters, but not `--zone`/`-z`.
 
 For Bash, `ib <tab><tab>` should complete root commands such as `config`, `dns`, and `help`. If it does not, regenerate and reload the shell integration with `ib config completion bash > ~/.ib-complete.bash` and start a new shell or run `. ~/.ib-complete.bash`.
 

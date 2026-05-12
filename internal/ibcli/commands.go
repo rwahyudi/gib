@@ -286,8 +286,9 @@ func (a *App) dnsZoneCommand() *cobra.Command {
 	listCmd := &cobra.Command{
 		Use:               "list [SEARCH]",
 		Short:             "List DNS zones",
+		Annotations:       map[string]string{disableZoneOverrideAnnotation: "true"},
 		Args:              cobra.MaximumNArgs(1),
-		ValidArgsFunction: completeFlagsAfterArgs(1),
+		ValidArgsFunction: zoneListArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			formats, err := parseZoneFormats(zoneTypeFilter)
 			if err != nil {

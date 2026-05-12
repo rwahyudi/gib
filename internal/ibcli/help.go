@@ -305,7 +305,7 @@ func localOptionsBlock(cmd *cobra.Command) string {
 	if cmd == cmd.Root() {
 		return ""
 	}
-	rows := flagRowsForSets(false, cmd.NonInheritedFlags(), cmd.PersistentFlags())
+	rows := flagRowsForCommand(cmd, false, cmd.NonInheritedFlags(), cmd.PersistentFlags())
 	if len(rows) == 0 {
 		return ""
 	}
@@ -318,7 +318,7 @@ func globalOptionsBlock(cmd *cobra.Command) string {
 	if cmd == cmd.Root() {
 		flags = cmd.PersistentFlags()
 	}
-	rows = append(rows, flagRows(flags, false)...)
+	rows = append(rows, flagRowsForCommand(cmd, false, flags)...)
 	return sectionWithRows("Global Options", rows)
 }
 
@@ -338,6 +338,10 @@ func flagRows(flags *pflag.FlagSet, includeHelp bool) [][]string {
 }
 
 func flagRowsForSets(includeHelp bool, sets ...*pflag.FlagSet) [][]string {
+	return flagRowsForCommand(nil, includeHelp, sets...)
+}
+
+func flagRowsForCommand(cmd *cobra.Command, includeHelp bool, sets ...*pflag.FlagSet) [][]string {
 	var rows [][]string
 	seen := map[string]bool{}
 	for _, flags := range sets {
@@ -345,7 +349,7 @@ func flagRowsForSets(includeHelp bool, sets ...*pflag.FlagSet) [][]string {
 			continue
 		}
 		flags.VisitAll(func(flag *pflag.Flag) {
-			if seen[flag.Name] || flag.Hidden || (!includeHelp && flag.Name == "help") {
+			if seen[flag.Name] || flag.Hidden || (!includeHelp && flag.Name == "help") || suppressFlagForCommand(cmd, flag.Name) {
 				return
 			}
 			seen[flag.Name] = true

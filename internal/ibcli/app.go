@@ -10,27 +10,29 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 const (
-	configDirName         = ".ib"
-	configFileName        = "config"
-	configKeyFileName     = "key"
-	defaultWAPIVersion    = "v2.12.3"
-	defaultTimeoutSeconds = 30
-	defaultProfileName    = "default"
-	defaultZoneEnv        = "IB_ZONE"
-	defaultViewEnv        = "IB_VIEW"
-	tableOutput           = "table"
-	jsonOutput            = "json"
-	csvOutput             = "csv"
-	recordOutputType      = "RECORD"
-	zoneObject            = "zone_auth"
-	viewObject            = "view"
-	gridObject            = "grid"
-	memberObject          = "member"
-	allRecordsObject      = "allrecords"
-	wapiPageSize          = 2000
+	configDirName                 = ".ib"
+	configFileName                = "config"
+	configKeyFileName             = "key"
+	defaultWAPIVersion            = "v2.12.3"
+	defaultTimeoutSeconds         = 30
+	defaultProfileName            = "default"
+	defaultZoneEnv                = "IB_ZONE"
+	defaultViewEnv                = "IB_VIEW"
+	disableZoneOverrideAnnotation = "ibcli/disable-zone-override"
+	tableOutput                   = "table"
+	jsonOutput                    = "json"
+	csvOutput                     = "csv"
+	recordOutputType              = "RECORD"
+	zoneObject                    = "zone_auth"
+	viewObject                    = "view"
+	gridObject                    = "grid"
+	memberObject                  = "member"
+	allRecordsObject              = "allrecords"
+	wapiPageSize                  = 2000
 )
 
 var (
@@ -89,7 +91,7 @@ func NewDefaultApp() (*App, error) {
 }
 
 func (a *App) Execute(args []string) error {
-	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) {
+	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeZoneListFlagNames(args) {
 		return nil
 	}
 	root := a.RootCommand()
@@ -154,6 +156,9 @@ Common usage:
 		default:
 			return fmt.Errorf("unsupported output format %q; use table, json, or csv", a.Output)
 		}
+		if commandDisablesZoneOverride(cmd) && commandFlagChanged(cmd, "zone") {
+			return cliError("--zone/-z cannot be used with ib dns zone list; use --view to choose a DNS view")
+		}
 		return nil
 	}
 
@@ -161,6 +166,34 @@ Common usage:
 	root.AddCommand(a.dnsCommand())
 	a.installHelp(root)
 	return root
+}
+
+func commandDisablesZoneOverride(cmd *cobra.Command) bool {
+	// Zone-list is grouped under `ib dns`, but it scopes by DNS view instead of
+	// a single active zone. The annotation lets help, completion, and execution
+	// share the same command-specific suppression rule.
+	for current := cmd; current != nil; current = current.Parent() {
+		if current.Annotations != nil && current.Annotations[disableZoneOverrideAnnotation] == "true" {
+			return true
+		}
+	}
+	return false
+}
+
+func commandFlagChanged(cmd *cobra.Command, name string) bool {
+	for _, flags := range []*pflag.FlagSet{cmd.Flags(), cmd.InheritedFlags(), cmd.PersistentFlags()} {
+		if flags == nil {
+			continue
+		}
+		if flag := flags.Lookup(name); flag != nil && flag.Changed {
+			return true
+		}
+	}
+	return false
+}
+
+func suppressFlagForCommand(cmd *cobra.Command, name string) bool {
+	return name == "zone" && commandDisablesZoneOverride(cmd)
 }
 
 func normalizeSortArgs(args []string) []string {

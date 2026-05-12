@@ -173,6 +173,28 @@ func TestDNSZoneListHelpShowsFilters(t *testing.T) {
 			t.Fatalf("dns zone list help output missing %q:\n%s", want, output)
 		}
 	}
+	for _, unwanted := range []string{
+		"-z, --zone STRING",
+		"--zone/-z",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("dns zone list help output contains disabled zone override %q:\n%s", unwanted, output)
+		}
+	}
+}
+
+func TestDNSZoneListRejectsZoneOverride(t *testing.T) {
+	app := testApp(t)
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	err := app.Execute([]string{"dns", "--zone", "example.com", "zone", "list"})
+	if err == nil {
+		t.Fatal("dns zone list accepted --zone override")
+	}
+	if !strings.Contains(err.Error(), "--zone/-z cannot be used with ib dns zone list") {
+		t.Fatalf("dns zone list error = %v", err)
+	}
 }
 
 func TestConfigHelpCoversWorkflowAndStorage(t *testing.T) {

@@ -71,6 +71,13 @@ func completeFlagsAfterArgs(minArgs int) func(*cobra.Command, []string, string) 
 	}
 }
 
+func zoneListArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 || strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
+		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
 func createArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
@@ -402,6 +409,57 @@ func zoneSortCompletionPrefix(args []string) (string, bool) {
 	return "", false
 }
 
+func (a *App) completeZoneListFlagNames(args []string) bool {
+	if len(args) < 5 || !strings.HasPrefix(args[0], "__complete") || !completionArgsContainDNSZoneList(args) {
+		return false
+	}
+	if zoneListZoneOverrideValueCompletion(args) {
+		fmt.Fprintln(a.Stdout, ":4")
+		return true
+	}
+	current := args[len(args)-1]
+	if !strings.HasPrefix(strings.TrimSpace(current), "-") {
+		return false
+	}
+	root := a.RootCommand()
+	cmd, _, err := root.Find([]string{"dns", "zone", "list"})
+	if err != nil || cmd == nil {
+		return false
+	}
+	noDescriptions := args[0] == "__completeNoDesc"
+	for _, row := range flagCompletions(cmd, current) {
+		if noDescriptions {
+			row = strings.SplitN(row, "\t", 2)[0]
+		}
+		fmt.Fprintln(a.Stdout, row)
+	}
+	fmt.Fprintln(a.Stdout, ":4")
+	return true
+}
+
+func completionArgsContainDNSZoneList(args []string) bool {
+	sawDNS := false
+	for index, arg := range args {
+		if arg == "dns" {
+			sawDNS = true
+			continue
+		}
+		if sawDNS && arg == "zone" && index+1 < len(args) && args[index+1] == "list" {
+			return true
+		}
+	}
+	return false
+}
+
+func zoneListZoneOverrideValueCompletion(args []string) bool {
+	current := args[len(args)-1]
+	if strings.HasPrefix(current, "--zone=") || strings.HasPrefix(current, "-z=") {
+		return true
+	}
+	previous := args[len(args)-2]
+	return previous == "--zone" || previous == "-z"
+}
+
 func zoneSortCompletions(toComplete string) []string {
 	prefix := strings.ToLower(strings.TrimSpace(toComplete))
 	var rows []string
@@ -554,20 +612,20 @@ func flagCompletions(cmd *cobra.Command, toComplete string) []string {
 	}
 	seen := map[string]bool{}
 	var rows []string
-	addFlagCompletions(&rows, seen, cmd.InheritedFlags(), prefix)
-	addFlagCompletions(&rows, seen, cmd.Flags(), prefix)
+	addFlagCompletions(&rows, seen, cmd.InheritedFlags(), prefix, cmd)
+	addFlagCompletions(&rows, seen, cmd.Flags(), prefix, cmd)
 	sort.Slice(rows, func(i, j int) bool {
 		return flagCompletionName(rows[i]) < flagCompletionName(rows[j])
 	})
 	return rows
 }
 
-func addFlagCompletions(rows *[]string, seen map[string]bool, flags *pflag.FlagSet, prefix string) {
+func addFlagCompletions(rows *[]string, seen map[string]bool, flags *pflag.FlagSet, prefix string, cmd *cobra.Command) {
 	if flags == nil {
 		return
 	}
 	flags.VisitAll(func(flag *pflag.Flag) {
-		if flag.Hidden {
+		if flag.Hidden || suppressFlagForCommand(cmd, flag.Name) {
 			return
 		}
 		long := "--" + flag.Name
