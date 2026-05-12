@@ -72,6 +72,8 @@ DNS record table output always includes a `Current Context:` footer line. When t
 
 `ib dns delete NAME` prompts with a Charmbracelet Huh confirmation before deleting a selected record. Use `-y` or `--yes` to skip the confirmation. If the user cancels either the duplicate-record picker or confirmation prompt, `ib` prints `INFO: delete cancelled` and exits without issuing DELETE. If multiple forward records match the same FQDN, interactive table mode first uses a Charmbracelet Huh select picker showing type, name, value, zone, comment, and `_ref`; the selected record is then confirmed before DELETE. Non-interactive mode and `-o json`/`-o csv` fail safely unless `-y` is provided.
 
+When WAPI returns HTML or another non-JSON payload with a successful HTTP status, `ib` reports a contextual WAPI error instead of the raw Go JSON parser error. This most often means the configured server, WAPI version, credentials, reverse proxy, or login/SSO page is answering the request rather than the Infoblox WAPI JSON endpoint.
+
 ## Shell Completion
 
 `ib config completion bash`, `ib config completion zsh`, and `ib config completion fish` emit lightweight shell integrations that call the live `ib` binary during tab completion. Profiles, zones, records, flags, and output formats are resolved dynamically by `ib __complete` or `ib __completeNoDesc`, so users do not need to regenerate completion scripts when profile, zone, or record data changes. Regenerate the shell integration only when the completion script template itself changes.

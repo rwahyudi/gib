@@ -210,6 +210,13 @@ Use `-o json` or `-o csv` for machine-readable output.
 
 During `ib config new` and `ib config edit`, Step 05 discovers Grid Master Candidates and saves `read_server` only when a candidate successfully answers a read-only WAPI GET probe. GET requests then use that GCM; create, update, and delete requests always use the primary server.
 
+## Troubleshooting
+
+If a DNS write reports a non-JSON WAPI response, `ib` prints the WAPI object,
+HTTP status, content type, and a short response snippet. An HTML snippet usually
+means the configured server, WAPI version, credentials, or a proxy/login page is
+answering the WAPI request instead of Infoblox JSON.
+
 ## Cache
 
 Zone and record caches are stored in `~/.ib/cache.sqlite3`.

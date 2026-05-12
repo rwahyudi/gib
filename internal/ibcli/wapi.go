@@ -135,7 +135,7 @@ func (c *WapiClient) Request(method, objectPath string, params url.Values, paylo
 	}
 	var result any
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, err
+		return nil, nonJSONWapiResponseError(method, objectPath, resp, raw)
 	}
 	return result, nil
 }
@@ -160,6 +160,37 @@ func formatWapiError(raw []byte) string {
 	}
 	if text == "" {
 		return "empty error response"
+	}
+	return text
+}
+
+func nonJSONWapiResponseError(method, objectPath string, resp *http.Response, raw []byte) error {
+	details := []string{fmt.Sprintf("status %d", resp.StatusCode)}
+	if contentType := strings.TrimSpace(resp.Header.Get("Content-Type")); contentType != "" {
+		details = append(details, "content-type "+contentType)
+	}
+	message := fmt.Sprintf(
+		"non-JSON response for %s %s (%s)",
+		strings.ToUpper(strings.TrimSpace(method)),
+		strings.TrimLeft(objectPath, "/"),
+		strings.Join(details, ", "),
+	)
+	if snippet := responseSnippet(raw); snippet != "" {
+		message += ": " + snippet
+	}
+	message += ". Check the configured Infoblox server, WAPI version, authentication, and any proxy or login page in front of WAPI."
+	return &WapiError{Status: resp.StatusCode, Text: message}
+}
+
+func responseSnippet(raw []byte) string {
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return ""
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	const maxSnippet = 180
+	if len(text) > maxSnippet {
+		return text[:maxSnippet] + "..."
 	}
 	return text
 }
