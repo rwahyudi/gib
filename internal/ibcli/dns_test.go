@@ -1412,7 +1412,7 @@ func zoneInfoTestApp(t *testing.T, output string) (*App, *bytes.Buffer) {
 					"zone_format":       "FORWARD",
 					"ns_group":          "default",
 					"network_view":      "default",
-					"soa_serial_number": "2026050701",
+					"soa_serial_number": 2.026050701e+09,
 					"member_soa_mnames": []string{"ns1.example.com"},
 					"soa_email":         "dns@example.com",
 					"soa_refresh":       10800,

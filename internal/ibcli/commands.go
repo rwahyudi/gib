@@ -1132,12 +1132,14 @@ func (a *App) runZoneInfo(zoneName string) error {
 	zone := matches[0]
 	fields := []string{"zone", "view", "format", "ns_group", "network_view", "serial_number", "soa_mname", "soa_rname", "refresh", "retry", "expiry", "negative_caching_ttl", "comment"}
 	row := map[string]any{
-		"zone":                 cleanString(zone["fqdn"]),
-		"view":                 cleanString(zone["view"]),
-		"format":               cleanString(zone["zone_format"]),
-		"ns_group":             cleanString(zone["ns_group"]),
-		"network_view":         cleanString(zone["network_view"]),
-		"serial_number":        cleanString(zone["soa_serial_number"]),
+		"zone":         cleanString(zone["fqdn"]),
+		"view":         cleanString(zone["view"]),
+		"format":       cleanString(zone["zone_format"]),
+		"ns_group":     cleanString(zone["ns_group"]),
+		"network_view": cleanString(zone["network_view"]),
+		// Infoblox may encode SOA serials as JSON numbers, which Go can print
+		// in scientific notation. Keep zone info operator output integer-like.
+		"serial_number":        cleanIntegerString(zone["soa_serial_number"]),
 		"soa_mname":            stringify(zone["member_soa_mnames"]),
 		"soa_rname":            cleanString(zone["soa_email"]),
 		"refresh":              cleanIntegerString(zone["soa_refresh"]),

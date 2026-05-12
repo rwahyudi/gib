@@ -184,7 +184,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib dns view use VIEW` | Set the active DNS view for the current shell session. |
 | `ib dns zone create ZONE` | Create an authoritative DNS zone. |
 | `ib dns zone list [SEARCH]` | List authoritative DNS zones. |
-| `ib dns zone info ZONE` | Show DNS zone details. |
+| `ib dns zone info ZONE` | Show DNS zone details, with SOA serial rendered as an integer. |
 | `ib dns zone delete ZONE` | Delete an authoritative DNS zone. |
 | `ib dns zone use ZONE` | Set the active DNS zone for the current shell session. |
 
