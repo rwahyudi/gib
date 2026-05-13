@@ -700,6 +700,43 @@ func TestDNSSearchColumnsLimitJSONOutput(t *testing.T) {
 	assertJSONRecordColumns(t, stdout.String(), []string{"name", "comment"})
 }
 
+func TestDNSSearchNoRecordsSkipsTableOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns search should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	app.Output = tableOutput
+	var stderr bytes.Buffer
+	app.Stderr = &stderr
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedZones(profile, []map[string]any{
+		{"fqdn": "example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "app.example.com", "address": "192.0.2.10", "zone": "example.com", "comment": "search miss"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"dns", "search", "missing"}); err != nil {
+		t.Fatalf("dns search: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stdout.String(), "DNS Records") {
+		t.Fatalf("empty search rendered record table:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Current Context:") {
+		t.Fatalf("empty search did not print current context:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "No records found.") {
+		t.Fatalf("empty search warning missing:\n%s", stderr.String())
+	}
+}
+
 func TestDNSZoneListFiltersSortsAndSelectsColumns(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("dns zone list should use fresh cache, got %s %s", r.Method, r.URL.Path)

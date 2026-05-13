@@ -7,6 +7,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const (
+	configSuccessPanelMinWidth          = 64
+	configSuccessPanelHorizontalPadding = 2
+)
+
 var (
 	configPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
@@ -32,7 +37,7 @@ var (
 	configSuccessPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#22c55e")).
-				Width(64).
+				Width(configSuccessPanelMinWidth).
 				Padding(0, 1)
 	configSuccessTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ade80"))
 )
@@ -188,7 +193,17 @@ func renderConfigSuccessPanel(profile Profile, isDefault bool) string {
 	lines = append(lines, configSuccessTitleStyle.Render("Profile Saved"))
 	lines = append(lines, configCaptionStyle.Render("The profile is ready for DNS commands."))
 	lines = append(lines, renderConfigRows(displayRows))
-	return configSuccessPanelStyle.Render(strings.Join(lines, "\n"))
+	return configSuccessPanelStyle.Width(configSuccessPanelWidth(lines)).Render(strings.Join(lines, "\n"))
+}
+
+func configSuccessPanelWidth(lines []string) int {
+	width := configSuccessPanelMinWidth
+	for _, line := range lines {
+		if lineWidth := lipgloss.Width(line) + configSuccessPanelHorizontalPadding; lineWidth > width {
+			width = lineWidth
+		}
+	}
+	return width
 }
 
 func (a *App) promptConnectionTestRetry(err error) bool {

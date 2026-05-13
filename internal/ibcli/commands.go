@@ -563,6 +563,8 @@ ib dns search app --global`),
 			}
 			if len(records) == 0 && a.isTableOutput() {
 				a.PrintWarning("No records found.")
+				a.printRecordTableFooter(true, len(records))
+				return nil
 			}
 			return a.emitRecordsWithContext(records, true, recordColumns)
 		},
@@ -990,13 +992,27 @@ func (a *App) promptReadServer(profile Profile, _ string) (string, bool) {
 		a.printConfigureInfo("INFO: no usable Grid Master Candidate found; read queries will use the primary server.")
 		return "", true
 	}
+	declined := false
 	for _, candidate := range candidates {
 		if err := a.testReadServer(profile, candidate); err != nil {
 			a.printConfigureInfo("INFO: Grid Master Candidate " + candidate + " failed read-only API probe and will not be used: " + err.Error())
 			continue
 		}
+		useCandidate, err := a.gum.Confirm("Use "+candidate+" for read-only DNS queries?", true)
+		if err != nil {
+			return "", true
+		}
+		if !useCandidate {
+			declined = true
+			a.printConfigureInfo("INFO: Grid Master Candidate " + candidate + " was not selected; checking the next candidate.")
+			continue
+		}
 		a.printConfigureInfo("INFO: read-only GET requests will use Grid Master Candidate " + candidate + ".")
 		return candidate, true
+	}
+	if declined {
+		a.printConfigureInfo("INFO: no Grid Master Candidate was selected; read queries will use the primary server.")
+		return "", true
 	}
 	a.printConfigureInfo("INFO: no Grid Master Candidate passed read-only API probe; read queries will use the primary server.")
 	return "", true

@@ -445,6 +445,33 @@ func TestConfigureSummaryOmitsPassword(t *testing.T) {
 	}
 }
 
+func TestConfigureSummaryKeepsLongReadEndpointOnOneLine(t *testing.T) {
+	longReadEndpoint := "https://grid-master-candidate-readonly-01.network-services.example.edu.au"
+
+	output := renderConfigSuccessPanel(Profile{
+		Name:        "default",
+		Server:      "https://infoblox.example",
+		ReadServer:  longReadEndpoint,
+		Username:    "admin",
+		Password:    "secret-password",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "DNS Zone View",
+		DefaultZone: "example.com",
+		VerifySSL:   false,
+		Timeout:     defaultTimeoutSeconds,
+	}, true)
+
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "Read endpoint") {
+			if !strings.Contains(line, longReadEndpoint) {
+				t.Fatalf("read endpoint wrapped away from label:\n%s", output)
+			}
+			return
+		}
+	}
+	t.Fatalf("configure summary missing read endpoint row:\n%s", output)
+}
+
 func TestConfigureNewProfileNamePromptStartsBlankAndDefaultsOnEnter(t *testing.T) {
 	server := newConfigSuccessServer(t)
 	app := testApp(t)
@@ -948,6 +975,7 @@ func TestPromptReadServerUsesFirstGCMWithWorkingReadOnlyAPI(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app.Stdout = &stdout
 	app.Stderr = &stderr
+	app.Stdin = strings.NewReader("y\n")
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 	profile := Profile{
 		Name:        defaultProfileName,
@@ -967,8 +995,73 @@ func TestPromptReadServerUsesFirstGCMWithWorkingReadOnlyAPI(t *testing.T) {
 	if probeRequests != 1 {
 		t.Fatalf("read-only probe requests = %d, want 1", probeRequests)
 	}
-	if !strings.Contains(stdout.String(), "INFO: read-only GET requests will use Grid Master Candidate "+gcm.URL+".") {
+	output := stdout.String()
+	if !strings.Contains(output, "Use "+gcm.URL+" for read-only DNS queries? [Y/n]") {
+		t.Fatalf("read-server confirmation prompt missing:\nstdout:\n%s\nstderr:\n%s", output, stderr.String())
+	}
+	if !strings.Contains(output, "INFO: read-only GET requests will use Grid Master Candidate "+gcm.URL+".") {
 		t.Fatalf("success info line missing:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestPromptReadServerClearsCurrentWhenWorkingGCMDeclined(t *testing.T) {
+	var probeRequests int
+	gcm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/grid") {
+			http.NotFound(w, r)
+			return
+		}
+		probeRequests++
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "grid"}})
+	}))
+	defer gcm.Close()
+
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/member") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{
+				{"host_name": gcm.URL, "master_candidate": true, "enable_ro_api_access": true},
+			},
+		})
+	}))
+	defer primary.Close()
+
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader("n\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	profile := Profile{
+		Name:        defaultProfileName,
+		Server:      primary.URL,
+		Username:    "admin",
+		Password:    "secret",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		VerifySSL:   true,
+		Timeout:     defaultTimeoutSeconds,
+	}
+
+	selected, changed := app.promptReadServer(profile, "https://readonly.example")
+	if !changed || selected != "" {
+		t.Fatalf("selected=%q changed=%v, want explicit clear", selected, changed)
+	}
+	if probeRequests != 1 {
+		t.Fatalf("read-only probe requests = %d, want 1", probeRequests)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"Use " + gcm.URL + " for read-only DNS queries? [Y/n]",
+		"INFO: Grid Master Candidate " + gcm.URL + " was not selected; checking the next candidate.",
+		"INFO: no Grid Master Candidate was selected; read queries will use the primary server.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("decline output missing %q:\nstdout:\n%s\nstderr:\n%s", want, output, stderr.String())
+		}
 	}
 }
 
