@@ -148,6 +148,54 @@ func TestZoneCompletionsAreWiredToCommandsAndFlags(t *testing.T) {
 	}
 }
 
+func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
+	var networkView string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/wapi/"+defaultWAPIVersion+"/"+networkObject {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		networkView = r.URL.Query().Get("network_view")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{
+				{"network": "192.0.2.0/24", "network_view": "default"},
+				{"network": "10.0.0.0/24", "network_view": "default"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	writeCompletionProfile(t, app, server.URL)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"__complete", "dns", "next-ip", "--network-view", "default", "192"}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	if networkView != "default" {
+		t.Fatalf("network_view query = %q, want default", networkView)
+	}
+	if !strings.Contains(output, "192.0.2.0/24\tdefault") {
+		t.Fatalf("network completion missing CIDR:\n%s", output)
+	}
+	if strings.Contains(output, "10.0.0.0/24") {
+		t.Fatalf("network completion did not filter prefix:\n%s", output)
+	}
+	if !strings.Contains(output, ":4") {
+		t.Fatalf("completion did not disable file completion:\n%s", output)
+	}
+}
+
+func TestNetworkCompletionFailsQuietlyWithoutConfig(t *testing.T) {
+	app := testApp(t)
+	if matches := app.completeNetworkCIDRs(&cobra.Command{}, "192"); len(matches) != 0 {
+		t.Fatalf("matches without config = %#v", matches)
+	}
+}
+
 func TestZoneCreateDoesNotCompleteExistingZones(t *testing.T) {
 	app, stdout := completionAppWithZones(t)
 	if err := app.Execute([]string{"__complete", "dns", "zone", "create", "ex"}); err != nil {

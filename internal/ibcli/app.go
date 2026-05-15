@@ -23,6 +23,7 @@ const (
 	defaultZoneEnv                = "IB_ZONE"
 	defaultViewEnv                = "IB_VIEW"
 	disableZoneOverrideAnnotation = "ibcli/disable-zone-override"
+	disableDNSContextAnnotation   = "ibcli/disable-dns-context"
 	tableOutput                   = "table"
 	jsonOutput                    = "json"
 	csvOutput                     = "csv"
@@ -31,6 +32,7 @@ const (
 	viewObject                    = "view"
 	gridObject                    = "grid"
 	memberObject                  = "member"
+	networkObject                 = "network"
 	allRecordsObject              = "allrecords"
 	wapiPageSize                  = 2000
 )
@@ -157,7 +159,13 @@ Common usage:
 			return fmt.Errorf("unsupported output format %q; use table, json, or csv", a.Output)
 		}
 		if commandDisablesZoneOverride(cmd) && commandFlagChanged(cmd, "zone") {
+			if commandDisablesDNSContext(cmd) {
+				return cliError("--zone/-z cannot be used with %s", cmd.CommandPath())
+			}
 			return cliError("--zone/-z cannot be used with ib dns zone list; use --view to choose a DNS view")
+		}
+		if commandDisablesViewOverride(cmd) && commandFlagChanged(cmd, "view") {
+			return cliError("--view/-v cannot be used with %s; use --network-view to choose an IPAM network view", cmd.CommandPath())
 		}
 		return nil
 	}
@@ -173,7 +181,20 @@ func commandDisablesZoneOverride(cmd *cobra.Command) bool {
 	// a single active zone. The annotation lets help, completion, and execution
 	// share the same command-specific suppression rule.
 	for current := cmd; current != nil; current = current.Parent() {
-		if current.Annotations != nil && current.Annotations[disableZoneOverrideAnnotation] == "true" {
+		if current.Annotations != nil && (current.Annotations[disableZoneOverrideAnnotation] == "true" || current.Annotations[disableDNSContextAnnotation] == "true") {
+			return true
+		}
+	}
+	return false
+}
+
+func commandDisablesViewOverride(cmd *cobra.Command) bool {
+	return commandDisablesDNSContext(cmd)
+}
+
+func commandDisablesDNSContext(cmd *cobra.Command) bool {
+	for current := cmd; current != nil; current = current.Parent() {
+		if current.Annotations != nil && current.Annotations[disableDNSContextAnnotation] == "true" {
 			return true
 		}
 	}
@@ -193,7 +214,7 @@ func commandFlagChanged(cmd *cobra.Command, name string) bool {
 }
 
 func suppressFlagForCommand(cmd *cobra.Command, name string) bool {
-	return name == "zone" && commandDisablesZoneOverride(cmd)
+	return (name == "zone" && commandDisablesZoneOverride(cmd)) || (name == "view" && commandDisablesViewOverride(cmd))
 }
 
 func normalizeSortArgs(args []string) []string {

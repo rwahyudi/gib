@@ -192,6 +192,7 @@ func (a *App) dnsCommand() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("zone", a.zoneFlagCompletion)
 	cmd.AddCommand(a.dnsViewCommand())
 	cmd.AddCommand(a.dnsZoneCommand())
+	cmd.AddCommand(a.dnsNextIPCommand())
 	cmd.AddCommand(a.dnsCreateCommand())
 	cmd.AddCommand(a.dnsEditCommand())
 	cmd.AddCommand(a.dnsListCommand())
@@ -413,6 +414,26 @@ func (a *App) dnsCreateCommand() *cobra.Command {
 	cmd.Flags().IntVarP(&ttl, "ttl", "t", -1, "optional record TTL in seconds")
 	cmd.Flags().BoolVar(&noptr, "noptr", false, "do not manage PTR records for A/AAAA workflows")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "record comment")
+	return cmd
+}
+
+func (a *App) dnsNextIPCommand() *cobra.Command {
+	var networkView string
+	var num int
+	var exclude []string
+	cmd := &cobra.Command{
+		Use:               "next-ip NETWORK",
+		Short:             "Find the next available IP in a network",
+		Annotations:       map[string]string{disableDNSContextAnnotation: "true"},
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.networkArgCompletion,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runDNSNextIP(args[0], networkView, num, exclude)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the target network")
+	cmd.Flags().IntVarP(&num, "num", "n", 1, "number of IP addresses to request, 1-20")
+	cmd.Flags().StringArrayVarP(&exclude, "exclude", "e", nil, "IP address to exclude from allocation; repeatable")
 	return cmd
 }
 
@@ -1325,6 +1346,21 @@ func (a *App) runZoneDelete(zoneName string) error {
 	}
 	a.PrintSuccess("SUCCESS: deleted DNS zone " + target)
 	return nil
+}
+
+func (a *App) runDNSNextIP(network string, networkView string, num int, exclude []string) error {
+	_, client, err := a.configuredClient()
+	if err != nil {
+		return err
+	}
+	rows, err := nextAvailableIPRows(client, network, networkView, num, exclude)
+	if err != nil {
+		return err
+	}
+	if a.isTableOutput() {
+		a.PrintContext()
+	}
+	return a.emitRows("Next Available IPs", nextIPOutputColumns, rows)
 }
 
 func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr bool, comment string) error {

@@ -1,0 +1,15 @@
+# Configuration for Fedora go-vendor-tools.
+#
+# github.com/mattn/go-localereader declares MIT in README.md but does not ship a
+# standalone license file. The vendor license tooling expects one license file
+# per vendored module, so reuse the MIT text from mattn's go-isatty module.
+
+[archive]
+post_commands = [
+    [
+        "cp",
+        "-p",
+        "vendor/github.com/mattn/go-isatty/LICENSE",
+        "vendor/github.com/mattn/go-localereader/LICENSE",
+    ],
+]

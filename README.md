@@ -25,6 +25,8 @@ cache rows.
 - DNS record workflows for listing, searching, creating, editing, and deleting
   records, including filtering, field sorting, selected output columns,
   interactive duplicate selection, and confirmation.
+- Next available IP lookup for IPv4 networks, with network-view selection,
+  multiple address requests, and excluded-address support.
 - Large-zone performance through `/allrecords`, local SQLite caching,
   worker-limited global search, and stale-while-revalidate refreshes.
 - Dynamic shell completion for profiles, views, zones, records, flags, record
@@ -50,6 +52,23 @@ env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod govulncheck ./...
 gosec ./...
 trivy fs --scanners vuln,secret,license .
 ```
+
+## Installation From Copr
+
+The Fedora/EPEL package name is `gib`; it installs the CLI as `/usr/bin/ib`.
+
+```bash
+sudo dnf install dnf-plugins-core
+sudo dnf copr enable rwahyudi/gib
+sudo dnf install gib
+ib --help
+```
+
+RPM packaging sources are in [`gib.spec`](gib.spec),
+[`go-vendor-tools.toml`](go-vendor-tools.toml), and
+[`packaging/rpm/README.md`](packaging/rpm/README.md). Start with the EPEL 10
+Copr chroot; add EPEL 9 only after confirming that its buildroot has a Go
+toolchain new enough for this module.
 
 ## Installation From GitHub Release
 
@@ -181,6 +200,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib dns` | Show DNS help and the current profile/view/zone context. |
 | `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones, `-t/--type` to filter record types, `-e/--exclude` to hide matching records, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns search KEYWORD` | Search records by name, value, or comment. Use `--global` for all searchable zones, `-r` for child zones under the current/root zone, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
+| `ib dns next-ip NETWORK` | Find the next available IPv4 address in a network. Use `--network-view` for ambiguous CIDRs, `-n/--num` for multiple addresses, and repeat `-e/--exclude` to skip addresses. |
 | `ib dns create NAME TYPE VALUE` | Create a DNS record, for example `ib dns create app host 192.0.2.10 -c "Application host"`. |
 | `ib dns edit NAME [TYPE] [VALUE]` | Edit an existing DNS record. |
 | `ib dns delete NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
@@ -201,6 +221,7 @@ ib dns zone list
 ib dns zone use example.com
 ib dns list
 ib dns search app
+ib dns next-ip 192.0.2.0/24 -n 3
 ib dns create app host 192.0.2.10 -c "Application host"
 ib dns edit app host 192.0.2.20 -t 300 -c "Application host"
 ib dns delete app
@@ -257,4 +278,3 @@ ib config completion bash > ~/.ib-complete.bash
 
 The generated completion calls the live `ib` binary, so profiles, zones, records, flags, and output formats are resolved dynamically.
 Installing from RPM will put bash completion file in /etc/bash_completion.d/ 
-

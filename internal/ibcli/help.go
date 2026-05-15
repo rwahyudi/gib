@@ -192,6 +192,14 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"sort", "-s name or --sort=-name sorts by field; blank --sort uses name"},
 			{"columns", "-C name,value prints selected output columns"},
 		})
+	case "ib dns next-ip":
+		return sectionWithRows("Next IP Usage", [][]string{
+			{"network", "IPv4 CIDR such as 192.0.2.0/24"},
+			{"view", "--network-view chooses the IPAM network view when a CIDR is ambiguous"},
+			{"num", "-n 3 or --num 3 requests multiple addresses"},
+			{"exclude", "-e 192.0.2.10 excludes an address from allocation; repeatable"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
 	case "ib dns zone list":
 		return sectionWithRows("Zone List Usage", [][]string{
 			{"search", "optional positional search matches zone name or comment"},
@@ -296,6 +304,11 @@ func usageDetails(cmd *cobra.Command) string {
 		return strings.Join([]string{
 			sectionWithLines("Example", []string{"ib dns search app"}),
 			helpSubtitleStyle.Render(`Use "ib dns search -h" for more info.`),
+		}, "\n")
+	case "ib dns next-ip":
+		return strings.Join([]string{
+			sectionWithLines("Example", []string{"ib dns next-ip 192.0.2.0/24 -n 3"}),
+			helpSubtitleStyle.Render(`Use "ib dns next-ip -h" for more info.`),
 		}, "\n")
 	}
 	return ""

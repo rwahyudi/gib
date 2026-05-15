@@ -25,6 +25,7 @@ import (
 
 const (
 	allRecordsReturnFields = "name,type,view,zone,ttl,comment,address,record"
+	networkReturnFields    = "network,network_view"
 	zoneReturnFields       = "fqdn,view,zone_format,comment,ns_group,primary_type"
 	zoneSerialFields       = zoneReturnFields + ",soa_serial_number"
 	zoneDetailFields       = zoneReturnFields + ",member_soa_mnames,soa_email,soa_expire,soa_negative_ttl,soa_refresh,soa_retry,soa_serial_number,network_view"
@@ -43,6 +44,7 @@ var (
 	// across table, JSON, CSV, sorting, and shell completion.
 	recordOutputColumns = []string{"type", "name", "value", "zone", "ttl", "comment"}
 	zoneOutputColumns   = []string{"zone", "view", "format", "ns_group", "comment"}
+	nextIPOutputColumns = []string{"network", "network_view", "ip"}
 	zoneFormatTypes     = []string{"FORWARD", "IPV4", "IPV6"}
 
 	recordTypeColors = map[string]lipgloss.Color{
@@ -442,6 +444,144 @@ func queryZones(client *WapiClient, search string) ([]map[string]any, error) {
 	}
 	sortZones(zones)
 	return zones, nil
+}
+
+func normalizeNextIPNetwork(raw string) (string, error) {
+	prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
+	if err != nil {
+		return "", cliError("NETWORK must be an IPv4 CIDR, for example 192.0.2.0/24")
+	}
+	if !prefix.Addr().Is4() {
+		return "", cliError("NETWORK must be an IPv4 CIDR; IPv6 next-IP lookup is not supported yet")
+	}
+	return prefix.Masked().String(), nil
+}
+
+func validateNextIPRequest(num int, exclude []string) ([]string, error) {
+	if num < 1 || num > 20 {
+		return nil, cliError("--num must be between 1 and 20")
+	}
+	excluded := make([]string, 0, len(exclude))
+	for _, item := range exclude {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			return nil, cliError("--exclude requires an IP address")
+		}
+		address, err := netip.ParseAddr(value)
+		if err != nil || !address.Is4() {
+			return nil, cliError("--exclude must be an IPv4 address: %s", value)
+		}
+		excluded = append(excluded, address.String())
+	}
+	return excluded, nil
+}
+
+func networkQueryParams(network string, networkView string) url.Values {
+	params := url.Values{}
+	params.Set("_return_fields", networkReturnFields)
+	params.Set("network", network)
+	if strings.TrimSpace(networkView) != "" {
+		params.Set("network_view", strings.TrimSpace(networkView))
+	}
+	return params
+}
+
+func queryNetworks(client *WapiClient, networkView string) ([]map[string]any, error) {
+	params := url.Values{}
+	params.Set("_return_fields", networkReturnFields)
+	if strings.TrimSpace(networkView) != "" {
+		params.Set("network_view", strings.TrimSpace(networkView))
+	}
+	return pagedQuery(client, networkObject, params)
+}
+
+func findNetwork(client *WapiClient, network string, networkView string) (map[string]any, error) {
+	cidr, err := normalizeNextIPNetwork(network)
+	if err != nil {
+		return nil, err
+	}
+	matches, err := pagedQuery(client, networkObject, networkQueryParams(cidr, networkView))
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return nil, cliError("no network found for %s", cidr)
+	}
+	if len(matches) > 1 {
+		return nil, cliError("multiple networks found for %s; use --network-view to choose one", cidr)
+	}
+	return matches[0], nil
+}
+
+func nextAvailableIPRows(client *WapiClient, network string, networkView string, num int, exclude []string) ([]map[string]any, error) {
+	excluded, err := validateNextIPRequest(num, exclude)
+	if err != nil {
+		return nil, err
+	}
+	matchedNetwork, err := findNetwork(client, network, networkView)
+	if err != nil {
+		return nil, err
+	}
+	ref := cleanString(matchedNetwork["_ref"])
+	if ref == "" {
+		return nil, cliError("matched network %s does not include an _ref", cleanString(matchedNetwork["network"]))
+	}
+	payload := map[string]any{"num": num}
+	if len(excluded) > 0 {
+		payload["exclude"] = excluded
+	}
+	params := url.Values{"_function": []string{"next_available_ip"}}
+	response, err := client.Request(http.MethodPost, ref, params, payload)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := nextAvailableIPResponseIPs(response)
+	if err != nil {
+		return nil, err
+	}
+	networkName := firstNonEmpty(cleanString(matchedNetwork["network"]), network)
+	view := cleanString(matchedNetwork["network_view"])
+	rows := make([]map[string]any, 0, len(ips))
+	for _, ip := range ips {
+		rows = append(rows, map[string]any{
+			"network":      networkName,
+			"network_view": view,
+			"ip":           ip,
+		})
+	}
+	return rows, nil
+}
+
+func nextAvailableIPResponseIPs(response any) ([]string, error) {
+	row, ok := response.(map[string]any)
+	if !ok {
+		return nil, cliError("next_available_ip response did not include an ips list")
+	}
+	raw, ok := row["ips"]
+	if !ok {
+		return nil, cliError("next_available_ip response did not include an ips list")
+	}
+	var ips []string
+	switch typed := raw.(type) {
+	case []any:
+		for _, item := range typed {
+			ip := cleanString(item)
+			if ip != "" {
+				ips = append(ips, ip)
+			}
+		}
+	case []string:
+		for _, item := range typed {
+			ip := strings.TrimSpace(item)
+			if ip != "" {
+				ips = append(ips, ip)
+			}
+		}
+	}
+	if len(ips) == 0 {
+		return nil, cliError("next_available_ip response did not include any IP addresses")
+	}
+	return ips, nil
 }
 
 func (a *App) cachedZones(profile Profile, client *WapiClient, search string) ([]map[string]any, error) {

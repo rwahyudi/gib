@@ -59,7 +59,10 @@ func TestModuleHelpStillUsesCommands(t *testing.T) {
 		"-z, --zone STRING",
 		"-v, --view STRING",
 		"Commands",
-		"create  Create a DNS record",
+		"create",
+		"Create a DNS record",
+		"next-ip",
+		"Find the next available IP in a network",
 		`Use "ib dns <command> --help" for more detail.`,
 	} {
 		if !strings.Contains(output, want) {
@@ -147,6 +150,41 @@ func TestDNSSearchHelpShowsSort(t *testing.T) {
 	}
 }
 
+func TestDNSNextIPHelpShowsOptions(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"dns", "next-ip", "--help"}); err != nil {
+		t.Fatalf("dns next-ip help: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"Next IP Usage",
+		"IPv4 CIDR such as 192.0.2.0/24",
+		"--network-view chooses the IPAM network view",
+		"-n 3 or --num 3 requests multiple addresses",
+		"-e 192.0.2.10 excludes an address",
+		"--network-view STRING",
+		"-n, --num INT",
+		"-e, --exclude STRINGARRAY",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dns next-ip help output missing %q:\n%s", want, output)
+		}
+	}
+	for _, unwanted := range []string{
+		"--zone STRING",
+		"--view STRING",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("dns next-ip help output contains unused DNS context flag %q:\n%s", unwanted, output)
+		}
+	}
+}
+
 func TestDNSZoneListHelpShowsFilters(t *testing.T) {
 	app := testApp(t)
 	var stdout bytes.Buffer
@@ -194,6 +232,29 @@ func TestDNSZoneListRejectsZoneOverride(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--zone/-z cannot be used with ib dns zone list") {
 		t.Fatalf("dns zone list error = %v", err)
+	}
+}
+
+func TestDNSNextIPRejectsDNSContextOverrides(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"dns", "--zone", "example.com", "next-ip", "192.0.2.0/24"}, want: "--zone/-z cannot be used with ib dns next-ip"},
+		{args: []string{"dns", "--view", "DNS Zone View", "next-ip", "192.0.2.0/24"}, want: "--view/-v cannot be used with ib dns next-ip; use --network-view"},
+	}
+	for _, tt := range tests {
+		app := testApp(t)
+		app.Stderr = &bytes.Buffer{}
+		app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+		err := app.Execute(tt.args)
+		if err == nil {
+			t.Fatalf("Execute(%v) accepted DNS context override", tt.args)
+		}
+		if !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("Execute(%v) error = %v, want %q", tt.args, err, tt.want)
+		}
 	}
 }
 

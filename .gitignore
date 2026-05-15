@@ -1,4 +1,5 @@
+*.rpm
+*.src.rpm
+*.tar.gz
+*-vendor.tar.bz2
 /ib
-.agents/
-.codex/
-dist/

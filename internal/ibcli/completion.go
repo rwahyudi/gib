@@ -122,6 +122,13 @@ func (a *App) editArgCompletion(cmd *cobra.Command, args []string, toComplete st
 	}
 }
 
+func (a *App) networkArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 || strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
+		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+	}
+	return a.completeNetworkCIDRs(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
 var recordTypeDescriptions = map[string]string{
 	"a":     "IPv4 address record",
 	"aaaa":  "IPv6 address record",
@@ -665,6 +672,22 @@ func (a *App) completeZoneNames(cmd *cobra.Command, toComplete string) []string 
 	return matchingZoneNames(zones, toComplete)
 }
 
+func (a *App) completeNetworkCIDRs(cmd *cobra.Command, toComplete string) []string {
+	profile, err := a.loadConfig(true)
+	if err != nil {
+		return nil
+	}
+	networkView := ""
+	if flag := cmd.Flags().Lookup("network-view"); flag != nil {
+		networkView = strings.TrimSpace(flag.Value.String())
+	}
+	networks, err := queryNetworks(a.newClient(profile), networkView)
+	if err != nil {
+		return nil
+	}
+	return matchingNetworkCIDRs(networks, toComplete)
+}
+
 func (a *App) cachedZoneNames(profile Profile) ([]string, error) {
 	// Zone completion shares the normal zone-list cache path so config changes,
 	// manual cache clears, and background refreshes behave the same as commands.
@@ -710,6 +733,32 @@ func zoneNamesFromRows(zones []map[string]any) []string {
 		return strings.ToLower(names[i]) < strings.ToLower(names[j])
 	})
 	return names
+}
+
+func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string {
+	prefix := strings.ToLower(strings.TrimSpace(toComplete))
+	seen := map[string]bool{}
+	rows := make([]string, 0, len(networks))
+	for _, network := range networks {
+		cidr := cleanString(network["network"])
+		if cidr == "" || seen[cidr] {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(strings.ToLower(cidr), prefix) {
+			continue
+		}
+		seen[cidr] = true
+		description := cleanString(network["network_view"])
+		if description != "" {
+			rows = append(rows, cidr+"\t"+description)
+			continue
+		}
+		rows = append(rows, cidr)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return strings.ToLower(recordCompletionName(rows[i])) < strings.ToLower(recordCompletionName(rows[j]))
+	})
+	return rows
 }
 
 func matchingZoneNames(zones []string, toComplete string) []string {
