@@ -655,6 +655,29 @@ func TestDNSListSortsRecords(t *testing.T) {
 	assertJSONRecordNames(t, stdout.String(), []string{"alpha.example.com", "bravo.example.com", "charlie.example.com"})
 }
 
+func TestDNSListSortsReverseRecordsNumericallyByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns list should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	reverseZone := "192.0.2.0/24"
+	if err := app.writeCachedRecords(profile, reverseZone, "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "10", "address": "192.0.2.10", "ptrdname": "ten.example.com", "zone": reverseZone},
+		{"type": "record:ptr", "name": "100", "address": "192.0.2.100", "ptrdname": "hundred.example.com", "zone": reverseZone},
+		{"type": "record:ptr", "name": "2", "address": "192.0.2.2", "ptrdname": "two.example.com", "zone": reverseZone},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "list", reverseZone}); err != nil {
+		t.Fatalf("dns list reverse default sort: %v\nstdout:\n%s", err, stdout.String())
+	}
+	assertJSONRecordNames(t, stdout.String(), []string{"192.0.2.2", "192.0.2.10", "192.0.2.100"})
+}
+
 func TestDNSListColumnsLimitJSONOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("dns list should use fresh cache, got %s %s", r.Method, r.URL.Path)

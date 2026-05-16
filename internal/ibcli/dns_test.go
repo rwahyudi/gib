@@ -950,6 +950,57 @@ func TestRecordSortRejectsUnsupportedField(t *testing.T) {
 	}
 }
 
+func TestRecordSortValueUsesNumericIPOrder(t *testing.T) {
+	records := []TypedRecord{
+		{Type: "a", Item: map[string]any{"name": "ten.example.com", "address": "192.0.2.10", "zone": "example.com"}},
+		{Type: "cname", Item: map[string]any{"name": "alias.example.com", "canonical": "target.example.com", "zone": "example.com"}},
+		{Type: "a", Item: map[string]any{"name": "two.example.com", "address": "192.0.2.2", "zone": "example.com"}},
+		{Type: "a", Item: map[string]any{"name": "private.example.com", "address": "10.0.0.1", "zone": "example.com"}},
+	}
+
+	applyRecordSort(records, RecordSort{Enabled: true, Field: "value"})
+	assertSortedRecordNames(t, records, []string{"private.example.com", "two.example.com", "ten.example.com", "alias.example.com"})
+
+	applyRecordSort(records, RecordSort{Enabled: true, Field: "value", Desc: true})
+	assertSortedRecordNames(t, records, []string{"ten.example.com", "two.example.com", "private.example.com", "alias.example.com"})
+}
+
+func TestRecordSortNameUsesNumericIPOrder(t *testing.T) {
+	records := []TypedRecord{
+		{Type: "ptr", Item: map[string]any{"name": "10", "address": "192.0.2.10", "ptrdname": "ten.example.com", "zone": "192.0.2.0/24"}},
+		{Type: "a", Item: map[string]any{"name": "app.example.com", "address": "192.0.2.1", "zone": "example.com"}},
+		{Type: "ptr", Item: map[string]any{"name": "2", "address": "192.0.2.2", "ptrdname": "two.example.com", "zone": "192.0.2.0/24"}},
+	}
+
+	applyRecordSort(records, RecordSort{Enabled: true, Field: "name"})
+	assertSortedRecordNames(t, records, []string{"192.0.2.2", "192.0.2.10", "app.example.com"})
+
+	applyRecordSort(records, RecordSort{Enabled: true, Field: "name", Desc: true})
+	assertSortedRecordNames(t, records, []string{"192.0.2.10", "192.0.2.2", "app.example.com"})
+}
+
+func TestDefaultRecordSortUsesNumericReverseIPOrder(t *testing.T) {
+	records := []TypedRecord{
+		{Type: "ptr", Item: map[string]any{"name": "10", "address": "192.0.2.10", "ptrdname": "ten.example.com", "zone": "192.0.2.0/24"}},
+		{Type: "ptr", Item: map[string]any{"name": "100", "address": "192.0.2.100", "ptrdname": "hundred.example.com", "zone": "192.0.2.0/24"}},
+		{Type: "ptr", Item: map[string]any{"name": "2", "address": "192.0.2.2", "ptrdname": "two.example.com", "zone": "192.0.2.0/24"}},
+	}
+
+	sortRecords(records)
+	assertSortedRecordNames(t, records, []string{"192.0.2.2", "192.0.2.10", "192.0.2.100"})
+}
+
+func TestDefaultRecordSortPreservesForwardStringOrder(t *testing.T) {
+	records := []TypedRecord{
+		{Type: "a", Item: map[string]any{"name": "charlie.example.com", "address": "192.0.2.30", "zone": "example.com"}},
+		{Type: "a", Item: map[string]any{"name": "alpha.example.com", "address": "192.0.2.10", "zone": "example.com"}},
+		{Type: "a", Item: map[string]any{"name": "bravo.example.com", "address": "192.0.2.20", "zone": "example.com"}},
+	}
+
+	sortRecords(records)
+	assertSortedRecordNames(t, records, []string{"alpha.example.com", "bravo.example.com", "charlie.example.com"})
+}
+
 func TestSearchDefaultsToCurrentZoneOnly(t *testing.T) {
 	zones := []map[string]any{
 		{"fqdn": "example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
@@ -1434,6 +1485,17 @@ func testRecords(count int) []TypedRecord {
 		})
 	}
 	return records
+}
+
+func assertSortedRecordNames(t *testing.T, records []TypedRecord, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(records))
+	for _, record := range records {
+		got = append(got, recordName(record.Item, record.Type))
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("record names = %#v, want %#v", got, want)
+	}
 }
 
 func testZones(count int) []map[string]any {

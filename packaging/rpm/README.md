@@ -47,6 +47,13 @@ ib --help
 ib config completion bash
 ```
 
+Optional output-control smoke checks after configuring a test profile:
+
+```bash
+ib dns list --sort name --columns name,value,ttl -o csv
+ib dns list -o json | jq '.[0]'
+```
+
 ## Publish to Copr
 
 Create the project once:

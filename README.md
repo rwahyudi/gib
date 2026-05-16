@@ -1,18 +1,19 @@
 # gib
 
 `ib` a fast, lightweight , operator-focused single binary CLI for managing
-Infoblox DNS records without living in the web UI. It keeps day-to-day DNS work
-close to the shell: profile setup, view and zone context, record search, record
-changes, cache inspection, and shell completion all happen from one compact
-command surface.
+Infoblox DNS records without living in the web UI. It keeps Ad-Hoc & day-to-day
+DNS work close to the shell, super fast and extremely easy.
+
+
+
 
 ![ib cli preview](docs/assets/go-record1.gif)
 
-The CLI is designed for large Infoblox environments. Read-heavy workflows use a
-validated Grid Master Candidate when available.  Record listing and search use a
-local SQLite cache backed by `/allrecords`, and stale-while-revalidate keeps
-search responsive while background refreshes check zone serials and update
-cache rows.
+The CLI is designed with performance in mind.  Read-heavy workflows use a
+validated Grid Master Candidate when available.  Record listing and search use
+various caching techniques and multi threading to ensure snappy experience.
+
+
 
 ## Features
 
@@ -81,7 +82,14 @@ curl -LO https://github.com/rwahyudi/gib/releases/download/v0.1.0/ib_0.1.0_linux
 tar -xzf ib_0.1.0_linux_amd64.tar.gz ib
 sudo install -m 0755 ib /usr/local/bin/ib
 ib --help
+
+# Optional: install Bash autocomplete for all users.
+sudo mkdir -p /etc/bash_completion.d
+ib config completion bash | sudo tee /etc/bash_completion.d/ib >/dev/null
 ```
+
+Open a new shell after installing the completion file, or source it directly with
+`. /etc/bash_completion.d/ib`.
 
 RHEL derivatives:
 
@@ -132,7 +140,8 @@ ib dns --view "DNS Zone View" search app
 ## Global Switches
 
 - `-o, --output table|json|csv` is available from the root command and applies
-  to every command. Use `json` or `csv` for scripts.
+  to every command. Use `csv` for spreadsheet/script exports, or `json` when
+  piping to tools such as `jq`.
 - `-z, --zone ZONE` and `-v, --view VIEW` are available on `ib dns` and most
   subcommands. They override the current DNS context for one command only.
   `ib dns zone list` intentionally accepts only `--view` because it lists zones
@@ -233,7 +242,24 @@ ib dns delete app
 
 `ib dns delete` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records match, interactive table mode shows a Huh select list so one record can be chosen.
 
-Use `-o json` or `-o csv` for machine-readable output.
+#### Output Controls
+
+Record and zone list-style commands can sort rows, select columns, and emit
+machine-readable output:
+
+```bash
+ib dns list --sort name --columns name,value,ttl
+ib dns list --sort=-name --columns zone,name,value -o csv
+ib dns search app --global --sort zone --columns zone,name,value -o csv
+ib dns list -o json | jq -r '.[] | [.name, .value] | @tsv'
+ib dns zone list --sort zone --columns zone,format,comment -o json | jq '.[]'
+```
+
+Use `--sort FIELD` for ascending order and `--sort=-FIELD` for descending
+order. Record fields are `name`, `type`, `value`, `zone`, `ttl`, and `comment`;
+zone fields are `zone`, `view`, `format`, `ns_group`, and `comment`. Use
+`--columns` or `-C` with a comma-separated list to keep only the fields you need.
+Use `-o csv` for CSV output, or `-o json` when the next step is a `jq` pipeline.
 
 
 
@@ -281,4 +307,4 @@ ib config completion bash > ~/.ib-complete.bash
 ```
 
 The generated completion calls the live `ib` binary, so profiles, zones, records, flags, and output formats are resolved dynamically.
-Installing from RPM will put bash completion file in /etc/bash_completion.d/ 
+Installing from RPM or DEB puts the Bash completion file in `/etc/bash_completion.d/ib`.

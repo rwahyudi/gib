@@ -2045,10 +2045,35 @@ func currentZoneSerial(client *WapiClient, zoneName string) (string, bool, error
 
 func sortRecords(records []TypedRecord) {
 	sort.Slice(records, func(i, j int) bool {
-		left := strings.ToLower(records[i].ItemString("zone") + records[i].ItemString("name") + records[i].Type + recordValue(records[i].Type, records[i].Item))
-		right := strings.ToLower(records[j].ItemString("zone") + records[j].ItemString("name") + records[j].Type + recordValue(records[j].Type, records[j].Item))
-		return left < right
+		result := compareDefaultRecordSort(records[i], records[j])
+		if result == 0 {
+			return false
+		}
+		return result < 0
 	})
+}
+
+func compareDefaultRecordSort(left TypedRecord, right TypedRecord) int {
+	// Reverse zones display PTR owners as IP addresses, so default list output
+	// compares those displayed names numerically before falling back to the
+	// historical zone/name/type/value key used by forward zones.
+	leftIP, leftOK := firstSortIPAddress(recordName(left.Item, left.Type))
+	rightIP, rightOK := firstSortIPAddress(recordName(right.Item, right.Type))
+	switch {
+	case leftOK && rightOK:
+		if result := leftIP.Compare(rightIP); result != 0 {
+			return result
+		}
+	case leftOK:
+		return -1
+	case rightOK:
+		return 1
+	}
+	return compareCaseInsensitiveText(defaultRecordSortKey(left), defaultRecordSortKey(right))
+}
+
+func defaultRecordSortKey(record TypedRecord) string {
+	return record.ItemString("zone") + record.ItemString("name") + record.Type + recordValue(record.Type, record.Item)
 }
 
 type RecordSort struct {
@@ -2094,24 +2119,24 @@ func applyRecordSort(records []TypedRecord, option RecordSort) {
 	// The caller applies the historical zone/name/type sort first. This stable
 	// sort then groups by the selected field without losing deterministic ties.
 	sort.SliceStable(records, func(i, j int) bool {
-		result := compareRecordSort(records[i], records[j], option.Field)
+		result := compareRecordSort(records[i], records[j], option.Field, option.Desc)
 		if result == 0 {
 			return false
-		}
-		if option.Desc {
-			return result > 0
 		}
 		return result < 0
 	})
 }
 
-func compareRecordSort(left TypedRecord, right TypedRecord, field string) int {
+func compareRecordSort(left TypedRecord, right TypedRecord, field string, desc bool) int {
 	if field == "ttl" {
-		return compareRecordTTL(recordTTL(left.Item), recordTTL(right.Item))
+		return applySortDirection(compareRecordTTL(recordTTL(left.Item), recordTTL(right.Item)), desc)
 	}
 	leftValue := recordSortValue(left, field)
 	rightValue := recordSortValue(right, field)
-	return strings.Compare(strings.ToLower(leftValue), strings.ToLower(rightValue))
+	if field == "name" || field == "value" {
+		return compareRecordIPAwareText(leftValue, rightValue, desc)
+	}
+	return applySortDirection(compareCaseInsensitiveText(leftValue, rightValue), desc)
 }
 
 func recordSortValue(record TypedRecord, field string) string {
@@ -2155,6 +2180,45 @@ func compareRecordTTL(left string, right string) int {
 	default:
 		return 0
 	}
+}
+
+func compareRecordIPAwareText(left string, right string, desc bool) int {
+	leftIP, leftOK := firstSortIPAddress(left)
+	rightIP, rightOK := firstSortIPAddress(right)
+	switch {
+	case leftOK && rightOK:
+		return applySortDirection(leftIP.Compare(rightIP), desc)
+	case leftOK:
+		return -1
+	case rightOK:
+		return 1
+	default:
+		return applySortDirection(compareCaseInsensitiveText(left, right), desc)
+	}
+}
+
+func firstSortIPAddress(value string) (netip.Addr, bool) {
+	for _, segment := range strings.Split(value, ",") {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		if address, err := netip.ParseAddr(segment); err == nil {
+			return address, true
+		}
+	}
+	return netip.Addr{}, false
+}
+
+func compareCaseInsensitiveText(left string, right string) int {
+	return strings.Compare(strings.ToLower(left), strings.ToLower(right))
+}
+
+func applySortDirection(result int, desc bool) int {
+	if desc {
+		return -result
+	}
+	return result
 }
 
 func (r TypedRecord) ItemString(key string) string {

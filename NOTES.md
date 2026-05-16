@@ -70,7 +70,7 @@ For non-interactive stderr, `-o json`, or `-o csv`, the progress view is disable
 
 `ib dns search KEY` searches only the resolved current zone by default. Use `-z ZONE` to choose a different root zone, and add `-r` or `--recursive` to include child authoritative zones under that root. `--global` still searches every searchable zone in the selected DNS view and cannot be combined with `--recursive`. Search supports the same `-t`/`--type`, `-e`/`--exclude`, `-s`/`--sort`, and `-C`/`--columns` record filters as list.
 
-For record sorting, a blank `--sort` uses `name`, and a leading minus sorts descending, for example `--sort=-name` or `-s -ttl`. The default sort order is unchanged when `--sort` is omitted.
+For record sorting, a blank `--sort` uses `name`, and a leading minus sorts descending, for example `--sort=-name` or `-s -ttl`. Sorting by `name` or `value` uses numeric IP ordering when the selected field contains an IP address, so `192.0.2.2` sorts before `192.0.2.10`. IP values sort before non-IP values in both ascending and descending order. When `--sort` is omitted, plain `ib dns list` keeps the historical default order for forward zones and uses numeric IP ordering for reverse-zone records that display IP names.
 
 For record columns, the default output remains `type,name,value,zone,ttl,comment`. `--columns name,value` filters and orders output fields for table, JSON, and CSV. Duplicate or unknown column names are rejected.
 
