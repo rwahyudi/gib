@@ -31,6 +31,20 @@ func (a *App) zoneFlagCompletion(cmd *cobra.Command, args []string, toComplete s
 	return a.completeZoneNames(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
+func (a *App) dnsListArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	trimmed := strings.TrimSpace(toComplete)
+	if len(args) > 0 || strings.HasPrefix(trimmed, "-") {
+		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+	}
+	zones := a.completeZoneNames(cmd, toComplete)
+	if trimmed != "" {
+		return zones, cobra.ShellCompDirectiveNoFileComp
+	}
+	rows := flagCompletions(cmd, toComplete)
+	rows = append(rows, zones...)
+	return rows, cobra.ShellCompDirectiveNoFileComp
+}
+
 func shellNameCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 || strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp

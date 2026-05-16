@@ -96,6 +96,8 @@ When WAPI returns HTML or another non-JSON payload with a successful HTTP status
 
 `ib dns search KEY -C <tab><tab>` and `ib dns list --columns <tab><tab>` complete record output columns. Comma-separated completion skips already selected columns, so `--columns name,` offers `name,type`, `name,value`, and the remaining columns.
 
+`ib dns list <tab><tab>` offers command and inherited flags such as `-C`, `-e`, `-s`, and `-o` even before a zone argument is typed. Non-flag text after `ib dns list` still completes zone names.
+
 `ib dns zone list -t <tab><tab>`, `ib dns zone list -s <tab><tab>`, and `ib dns zone list -C <tab><tab>` complete zone formats, sort fields, and output columns. `ib dns zone list -<tab><tab>` completes `--view`/`-v` and zone-list filters, but not `--zone`/`-z`.
 
 For Bash, `ib <tab><tab>` should complete root commands such as `config`, `dns`, and `help`. If it does not, regenerate and reload the shell integration with `ib config completion bash > ~/.ib-complete.bash` and start a new shell or run `. ~/.ib-complete.bash`.

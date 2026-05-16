@@ -550,6 +550,34 @@ func TestSearchCompletesFlagsAfterGlobalFlag(t *testing.T) {
 	}
 }
 
+func TestDNSListCompletesFlagsAtCommandStart(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"__complete", "dns", "list", ""}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"--columns\trecord output columns, comma-separated",
+		"-C\trecord output columns, comma-separated",
+		"--exclude\texclude records matching keyword",
+		"-e\texclude records matching keyword",
+		"--sort\tsort records by field",
+		"-s\tsort records by field",
+		"--output\toutput format: table, json, or csv",
+		"-o\toutput format: table, json, or csv",
+		":4",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestDNSListCompletesTypeFlagValues(t *testing.T) {
 	app := testApp(t)
 	var stdout bytes.Buffer

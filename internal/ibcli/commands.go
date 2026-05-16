@@ -476,15 +476,10 @@ func (a *App) dnsListCommand() *cobra.Command {
 	var sortRaw string
 	var columnsRaw string
 	cmd := &cobra.Command{
-		Use:   "list [ZONE]",
-		Short: "List DNS records in a zone",
-		Args:  cobra.MaximumNArgs(1),
-		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			if len(args) > 0 {
-				return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
-			}
-			return a.zoneArgCompletion(cmd, args, toComplete)
-		},
+		Use:               "list [ZONE]",
+		Short:             "List DNS records in a zone",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: a.dnsListArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			types, err := parseRecordTypes(typeFilter)
 			if err != nil {
