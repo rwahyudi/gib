@@ -23,6 +23,8 @@ Default tuning in the profile config `[meta]` section:
 | `cache_ttl` | `300` seconds | Normal freshness for zone and record cache rows. |
 | `records_cache_swr_ttl` | `259200` seconds | How long expired record rows can be served stale while revalidating. |
 | `dns_search_worker_limit` | `16` | Maximum parallel zone workers during multi-zone search. |
+| `max_background_worker_wait` | `3` seconds | Maximum wait for an active same-zone refresh before foreground WAPI work. |
+| `completion_cache_prefetch` | `true` | Whether shell completion starts background refresh helpers for missing or stale DNS context caches. |
 | refresh lease TTL | `300` seconds | Local lock lifetime that prevents duplicate refresh subprocesses. |
 
 ## Cache Decision Flow
@@ -32,7 +34,16 @@ Default tuning in the profile config `[meta]` section:
 The important performance point is the stale-while-revalidate path: if a record
 cache row is expired but still inside `records_cache_swr_ttl`, the user gets
 cached records immediately. `ib` only blocks on Infoblox when the row is missing
-or already outside the stale window.
+or already outside the stale window. Before doing that foreground work, it waits
+up to `max_background_worker_wait` seconds for an active refresh of the same
+profile, DNS view, and zone to finish.
+
+Shell completion never performs a foreground Infoblox refresh for zone or record
+names. With `completion_cache_prefetch = true`, completion checks the current DNS
+view and zone, then starts detached zone-list or current-zone record refresh
+helpers when those cache rows are missing or stale. With
+`completion_cache_prefetch = false`, completion only reads local cache rows and
+does not start background refresh helpers.
 
 ## Read, Write, And Worker Flow
 
@@ -52,8 +63,10 @@ per-zone record load:
 2. Read the zone's `record_cache` row.
 3. Decode JSON records when a cache row exists.
 4. Decide fresh, stale-inside-SWR, or expired-outside-SWR.
-5. Acquire a refresh lease and launch a detached refresh only when needed.
-6. Normalize, deduplicate, sort, and match records by name, value, and comment.
+5. For missing or expired-outside-SWR rows, wait briefly for any active same-zone
+   refresh lease, then re-read cache if the helper completed.
+6. Acquire a refresh lease and launch a detached refresh only when needed.
+7. Normalize, deduplicate, sort, and match records by name, value, and comment.
 
 The progress label `Checking cache` covers all of that local work. It can still
 take visible time for large cached zones because JSON decoding and record

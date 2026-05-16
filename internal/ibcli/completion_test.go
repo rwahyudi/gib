@@ -32,24 +32,14 @@ func TestCompleteZoneNamesUsesCacheAndFilters(t *testing.T) {
 	}
 }
 
-func TestCachedZoneNamesRefreshesExpiredCache(t *testing.T) {
-	var requests int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		if r.URL.Path != "/wapi/"+defaultWAPIVersion+"/"+zoneObject {
-			t.Fatalf("path = %s", r.URL.Path)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result": []map[string]any{
-				{"fqdn": "zeta.example.com"},
-				{"fqdn": "alpha.example.com"},
-			},
-		})
-	}))
-	defer server.Close()
-
+func TestCachedZoneNamesReturnsStaleCacheAndQueuesRefresh(t *testing.T) {
 	app := testApp(t)
-	profile := writeCompletionProfile(t, app, server.URL)
+	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")
+	refreshes := make(chan Profile, 1)
+	app.backgroundZoneRefresher = func(profile Profile) error {
+		refreshes <- profile
+		return nil
+	}
 	if err := app.writeCachedZones(profile, []map[string]any{
 		{"fqdn": "stale.example.com"},
 	}, time.Now().Add(-10*time.Minute)); err != nil {
@@ -60,39 +50,27 @@ func TestCachedZoneNamesRefreshesExpiredCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cached zones: %v", err)
 	}
-	if strings.Join(names, ",") != "alpha.example.com,zeta.example.com" {
+	if strings.Join(names, ",") != "stale.example.com" {
 		t.Fatalf("names = %#v", names)
 	}
-	if requests != 1 {
-		t.Fatalf("requests = %d", requests)
+	select {
+	case refreshed := <-refreshes:
+		if refreshed.Name != defaultProfileName || refreshed.DNSView != "default" {
+			t.Fatalf("refresh profile = %#v", refreshed)
+		}
+	default:
+		t.Fatal("zone cache refresh was not queued")
 	}
 }
 
-func TestRecordCompletionRefreshesExpiredCache(t *testing.T) {
-	var allRecordRequests int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/zone_auth"):
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"result": []map[string]any{
-					{"fqdn": "example.com", "view": "default", "zone_format": "FORWARD", "soa_serial_number": "2026050802"},
-				},
-			})
-		case strings.HasSuffix(r.URL.Path, "/allrecords"):
-			allRecordRequests++
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"result": []map[string]any{
-					{"type": "record:a", "name": "live", "address": "192.0.2.20", "zone": "example.com"},
-				},
-			})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
+func TestRecordCompletionReturnsStaleCacheAndQueuesRefresh(t *testing.T) {
 	app := testApp(t)
-	profile := writeCompletionProfile(t, app, server.URL)
+	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")
+	refreshes := make(chan string, 1)
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		refreshes <- profile.DNSView + "|" + zone
+		return nil
+	}
 	now := time.Now()
 	if err := app.writeCachedRecordsEntry(profile, "example.com", "2026050801", []map[string]any{
 		{"type": "record:a", "name": "stale", "address": "192.0.2.10", "zone": "example.com"},
@@ -105,11 +83,177 @@ func TestRecordCompletionRefreshesExpiredCache(t *testing.T) {
 		t.Fatalf("record completion cache: %v", err)
 	}
 	matches := matchingRecordNames(records, "")
-	if strings.Join(matches, ",") != "live\tA 192.0.2.20" {
+	if strings.Join(matches, ",") != "stale\tA 192.0.2.10" {
 		t.Fatalf("matches = %#v", matches)
 	}
-	if allRecordRequests != 1 {
-		t.Fatalf("allrecords requests = %d", allRecordRequests)
+	select {
+	case refreshed := <-refreshes:
+		if refreshed != "default|example.com" {
+			t.Fatalf("refresh target = %q", refreshed)
+		}
+	default:
+		t.Fatal("record cache refresh was not queued")
+	}
+}
+
+func TestCompletionPrefetchQueuesMissingContextCaches(t *testing.T) {
+	app := testApp(t)
+	writeCompletionProfile(t, app, "https://infoblox.invalid")
+	zoneRefreshes := make(chan Profile, 2)
+	recordRefreshes := make(chan string, 2)
+	app.backgroundZoneRefresher = func(profile Profile) error {
+		zoneRefreshes <- profile
+		return nil
+	}
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		recordRefreshes <- profile.DNSView + "|" + zone
+		return nil
+	}
+
+	app.startCompletionCachePrefetch([]string{"__complete", "dns", "list", ""})
+
+	select {
+	case profile := <-zoneRefreshes:
+		if profile.Name != defaultProfileName || profile.DNSView != "default" {
+			t.Fatalf("zone refresh profile = %#v", profile)
+		}
+	default:
+		t.Fatal("zone cache refresh was not queued")
+	}
+	select {
+	case target := <-recordRefreshes:
+		if target != "default|example.com" {
+			t.Fatalf("record refresh target = %q", target)
+		}
+	default:
+		t.Fatal("record cache refresh was not queued")
+	}
+
+	app.startCompletionCachePrefetch([]string{"__complete", "dns", "list", ""})
+	select {
+	case profile := <-zoneRefreshes:
+		t.Fatalf("duplicate zone refresh queued: %#v", profile)
+	case target := <-recordRefreshes:
+		t.Fatalf("duplicate record refresh queued: %s", target)
+	default:
+	}
+}
+
+func TestCompletionPrefetchCanBeDisabled(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{
+		Name:        defaultProfileName,
+		Server:      "https://infoblox.invalid",
+		Username:    "admin",
+		Password:    "secret",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		DefaultZone: "example.com",
+		VerifySSL:   true,
+		Timeout:     defaultTimeoutSeconds,
+	}
+	if err := app.writeConfigProfilesWithSettings(defaultProfileName, map[string]Profile{defaultProfileName: profile}, ConfigSettings{
+		CompletionCachePrefetch:    false,
+		completionCachePrefetchSet: true,
+	}); err != nil {
+		t.Fatalf("write profiles: %v", err)
+	}
+	loaded, err := app.loadConfig(true)
+	if err != nil {
+		t.Fatalf("load profile: %v", err)
+	}
+	now := time.Now()
+	if err := app.writeCachedZones(loaded, []map[string]any{{"fqdn": "example.com"}}, now.Add(-time.Hour)); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecordsEntry(loaded, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "stale", "address": "192.0.2.10", "zone": "example.com"},
+	}, now.Add(-time.Hour).Unix(), now.Add(-time.Second).Unix()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+	zoneRefreshes := make(chan Profile, 3)
+	recordRefreshes := make(chan string, 3)
+	app.backgroundZoneRefresher = func(profile Profile) error {
+		zoneRefreshes <- profile
+		return nil
+	}
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		recordRefreshes <- profile.DNSView + "|" + zone
+		return nil
+	}
+
+	app.startCompletionCachePrefetch([]string{"__complete", "dns", "list", ""})
+	if zones, err := app.cachedZoneNames(loaded); err != nil {
+		t.Fatalf("cached zones: %v", err)
+	} else if strings.Join(zones, ",") != "example.com" {
+		t.Fatalf("zones = %#v", zones)
+	}
+	if records, err := app.cachedRecordNamesForCompletion(loaded, "example.com"); err != nil {
+		t.Fatalf("cached records: %v", err)
+	} else if names := matchingRecordNames(records, ""); strings.Join(names, ",") != "stale\tA 192.0.2.10" {
+		t.Fatalf("records = %#v", names)
+	}
+
+	select {
+	case profile := <-zoneRefreshes:
+		t.Fatalf("zone refresh queued while prefetch disabled: %#v", profile)
+	case target := <-recordRefreshes:
+		t.Fatalf("record refresh queued while prefetch disabled: %s", target)
+	default:
+	}
+}
+
+func TestCompletionPrefetchUsesViewAndZoneOverrides(t *testing.T) {
+	app := testApp(t)
+	writeCompletionProfile(t, app, "https://infoblox.invalid")
+	recordRefreshes := make(chan string, 1)
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		recordRefreshes <- profile.DNSView + "|" + zone
+		return nil
+	}
+
+	app.startCompletionCachePrefetch([]string{"__complete", "dns", "--view", "DNS Zone View", "list", "--zone", "other.example.com", ""})
+
+	select {
+	case target := <-recordRefreshes:
+		if target != "DNS Zone View|other.example.com" {
+			t.Fatalf("record refresh target = %q", target)
+		}
+	default:
+		t.Fatal("record cache refresh was not queued")
+	}
+}
+
+func TestCompletionPrefetchSkipsFreshCaches(t *testing.T) {
+	app := testApp(t)
+	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")
+	if err := app.writeCachedZones(profile, []map[string]any{{"fqdn": "example.com"}}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "app", "address": "192.0.2.10", "zone": "example.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+	zoneRefreshes := make(chan Profile, 1)
+	recordRefreshes := make(chan string, 1)
+	app.backgroundZoneRefresher = func(profile Profile) error {
+		zoneRefreshes <- profile
+		return nil
+	}
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		recordRefreshes <- zone
+		return nil
+	}
+
+	app.startCompletionCachePrefetch([]string{"__completeNoDesc", "dns", "list", ""})
+
+	select {
+	case profile := <-zoneRefreshes:
+		t.Fatalf("unexpected zone refresh: %#v", profile)
+	case zone := <-recordRefreshes:
+		t.Fatalf("unexpected record refresh: %s", zone)
+	default:
 	}
 }
 

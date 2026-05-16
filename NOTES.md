@@ -30,6 +30,8 @@ The config file stores global cache/search tuning in the `[meta]` section:
 cache_ttl = 300
 dns_search_worker_limit = 16
 records_cache_swr_ttl = 259200
+max_background_worker_wait = 3
+completion_cache_prefetch = true
 ```
 
 `cache_ttl` is in seconds and controls both zone-list cache entries and per-zone record-cache entries. Freshness is calculated from `cached_at + cache_ttl`; the cache does not store a separate fresh-expiry timestamp. If the setting is missing or invalid, `ib` uses and writes the default value of `300`.
@@ -37,6 +39,10 @@ records_cache_swr_ttl = 259200
 `dns_search_worker_limit` controls how many zones `ib dns search --global` can load in parallel. If the setting is missing or invalid, `ib` uses and writes the default value of `16`.
 
 `records_cache_swr_ttl` is in seconds and controls how long expired per-zone record-cache entries can be served stale while `ib` refreshes them in the background. If the setting is missing or invalid, `ib` uses and writes the default value of `259200` seconds (3 days).
+
+`max_background_worker_wait` is in seconds and controls how long list/search record loading waits for an existing background refresh for the same profile, DNS view, and zone before doing foreground WAPI refresh work. If the setting is missing or invalid, `ib` uses and writes the default value of `3`.
+
+`completion_cache_prefetch` controls whether shell completion can start background cache refresh helpers. The default is `true`; accepted values include `true`/`false`, `enabled`/`disabled`, `yes`/`no`, and `on`/`off`. When enabled, every `ib __complete` or `ib __completeNoDesc` run checks the active DNS view and current zone, then starts lease-protected zone-list or current-zone record refresh helpers if those cache rows are missing or stale. When disabled, completion only reads whatever is already in the local cache: stale cached zone or record names can still be offered, missing cache returns no dynamic candidates for that attempt, and completion does not start detached refresh subprocesses.
 
 ## Config Profiles
 
@@ -100,11 +106,17 @@ Global options still complete while using `ib dns create`: `ib dns create -<tab>
 
 For `ib config new` and `ib config edit`, question 7 (`Default DNS Zone`) uses the Bubble Tea filter list when there are multiple choices and keeps an eight-row zone list area visible even when fewer rows are currently matched. Question 6 (`Default DNS View`) still sizes to the available DNS view choices when a picker is needed.
 
-## Zone Record Cache Workflow
+## Zone and Record Cache Workflow
 
-Zone record data is cached per profile, DNS view, and zone in the local SQLite cache.
+Zone-list data and zone-record data are cached in the local SQLite cache at `~/.ib/cache.sqlite3`, but they refresh differently.
 
-Successful `ib dns create`, `ib dns edit`, and `ib dns delete` operations remove the affected zone's record-cache row and synchronously launch the detached refresh subprocess when no matching refresh lease is active. The write command does not wait for `/allrecords`; the subprocess repopulates the cache in the background. A/AAAA workflows that also create or update PTR records queue refreshes for both the forward zone and the reverse zone. Successful DNS zone create/delete operations also clear and refresh the zone-list cache in the background; deleting a zone removes that zone's record cache instead of trying to refresh records for a zone that no longer exists.
+Zone-list data is cached in `zone_cache` per profile and DNS view. Normal commands read the matching row and return it immediately if it is still fresh under `cached_at + cache_ttl`. If the row is missing or expired, normal commands query Infoblox `zone_auth` in the foreground, write the fresh zone list back to SQLite, and return it. Zone cache does not currently use stale-while-revalidate for normal commands.
+
+Successful DNS zone create/delete operations clear and refresh the zone-list cache in the background through the hidden `ib config cache refresh-zones` helper. Deleting a zone removes that zone's record cache instead of trying to refresh records for a zone that no longer exists.
+
+Zone record data is cached in `record_cache` per profile, DNS view, and zone.
+
+Successful `ib dns create`, `ib dns edit`, and `ib dns delete` operations remove the affected zone's record-cache row and synchronously launch the detached refresh subprocess when no matching refresh lease is active. The write command does not wait for `/allrecords`; the subprocess repopulates the cache in the background. A/AAAA workflows that also create or update PTR records queue refreshes for both the forward zone and the reverse zone.
 
 When a command queries zone records:
 
@@ -116,13 +128,15 @@ When a command queries zone records:
 6. The background subprocess asks Infoblox for the zone SOA serial number.
 7. If the cached serial matches the server serial, `ib` treats the cached data as still valid, renews the cached age timestamp, recomputes normal freshness from `cached_at + cache_ttl`, and extends the stale expiry by `records_cache_swr_ttl`.
 8. If the serial changed, if the cache entry is missing, or if the cache entry has no serial to compare, the background subprocess downloads fresh `/allrecords` data, stores the new serial when available, and resets all record-cache timestamps.
-9. If an expired entry is already outside `records_cache_swr_ttl`, `ib` performs the serial check in the foreground. Matching serials renew `cached_at`, making the cache fresh again under the current `cache_ttl`; changed or missing serials refresh from `/allrecords`.
+9. If an expired entry is already outside `records_cache_swr_ttl`, `ib` first checks for an active background refresh for the same profile, DNS view, and zone. If one is active, it waits up to `max_background_worker_wait` seconds, polling every 2ms, then re-reads the cache if the refresh completed. If the wait times out or the cache is still too old, `ib` performs the serial check in the foreground. Matching serials renew `cached_at`, making the cache fresh again under the current `cache_ttl`; changed or missing serials refresh from `/allrecords`.
 
-The in-flight background refresh marker is stored in the local SQLite cache and expires automatically after 300 seconds. This prevents repeated `ib dns list` or `ib dns search` calls from starting duplicate refreshes while still allowing recovery if a refresh subprocess exits unexpectedly.
+The in-flight background refresh marker is stored in the local SQLite cache and expires automatically after 300 seconds. This prevents repeated `ib dns list` or `ib dns search` calls from starting duplicate refreshes while still allowing recovery if a refresh subprocess exits unexpectedly. The wait is scoped to the exact profile, DNS view, and zone; refreshes for other zones do not block the current list/search.
 
 `ib dns list --details` may enrich fresh cached rows with per-record detail calls when TTL/detail fields are missing. Stale SWR responses are returned exactly as cached; the background revalidation updates the cache separately.
 
 `ib dns search` uses the same record-cache workflow. It first loads the searchable zone list, skips secondary zones, then loads records from cache or `/allrecords` for the current zone, recursive child-zone scope, or global scope. Multi-zone searches use `dns_search_worker_limit` to bound parallel zone loading.
+
+Shell completion uses these same cache paths but does not perform foreground Infoblox refreshes for zone or record names. When `completion_cache_prefetch = true`, every `ib __complete` / `ib __completeNoDesc` run checks the current DNS context. If the zone-list cache or current-zone record cache is missing or stale, completion starts the same lease-protected hidden refresh helpers in the background. Zone completion returns local cached zone rows when available, even if stale. Record-name completion returns local cached record rows when available, even if stale. Missing cache returns no dynamic candidates for that completion attempt while the background refresh populates SQLite for the next attempt. When `completion_cache_prefetch = false`, completion keeps the local-only behavior but skips the background refresh start.
 
 `ib config cache status` shows cache age and record stale expiry, but not a `fresh_until` column. Freshness is calculated dynamically from each row's `cached_at` timestamp and the current `cache_ttl` setting. Table output keeps the detailed row table and adds a colored statistics footer with cache entries, cached records, fresh entries, SWR-stale entries, expired entries, and active refreshes. JSON output returns `statistics` plus `entries`; CSV output remains row-only for scripts.
 

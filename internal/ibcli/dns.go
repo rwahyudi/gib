@@ -1838,21 +1838,20 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 	now := time.Now()
 	entry, err := a.readCachedRecords(profile, zoneName)
 	if err == nil && entry.CacheFound {
-		// Fast path: fresh cached rows are returned without touching Infoblox.
-		if a.cacheEntryFresh(entry, now) {
-			source := recordCacheSourceFreshCache
-			if enrich && enrichAllRecordRows(client, entry.Rows) {
-				_ = a.writeCachedRecords(profile, zoneName, entry.Serial, entry.Rows, now)
-				source = recordCacheSourceFreshEnriched
-			}
-			return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: source}, nil
+		if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, now, enrich); ok {
+			return result, nil
 		}
+	}
 
-		// Stale-while-revalidate path: return cached rows immediately, then start
-		// exactly one detached revalidation process for this profile/view/zone.
-		if now.Unix() < entry.StaleExpiresAt {
-			a.startRecordCacheRevalidationAsync(profile, zoneName)
-			return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: recordCacheSourceStaleCache}, nil
+	// If a detached refresh is already updating this exact cache row, give it a
+	// short chance to finish before doing duplicate foreground WAPI work.
+	if waited, waitErr := a.waitForActiveRecordRefresh(profile, zoneName, a.maxBackgroundWorkerWait(), 2*time.Millisecond); waitErr == nil && waited {
+		now = time.Now()
+		entry, err = a.readCachedRecords(profile, zoneName)
+		if err == nil && entry.CacheFound {
+			if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, now, enrich); ok {
+				return result, nil
+			}
 		}
 	}
 
@@ -1885,6 +1884,26 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 	}
 	_ = a.writeCachedRecords(profile, zoneName, serial, rows, now)
 	return cachedRecordLoadResult{Records: recordsFromAllRecordRows(rows), Source: recordCacheSourceAllRecords}, nil
+}
+
+func (a *App) cachedRecordLoadResultFromEntry(profile Profile, client *WapiClient, zoneName string, entry cachedPayload, now time.Time, enrich bool) (cachedRecordLoadResult, bool) {
+	// Fast path: fresh cached rows are returned without touching Infoblox.
+	if a.cacheEntryFresh(entry, now) {
+		source := recordCacheSourceFreshCache
+		if enrich && enrichAllRecordRows(client, entry.Rows) {
+			_ = a.writeCachedRecords(profile, zoneName, entry.Serial, entry.Rows, now)
+			source = recordCacheSourceFreshEnriched
+		}
+		return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: source}, true
+	}
+
+	// Stale-while-revalidate path: return cached rows immediately, then start
+	// exactly one detached revalidation process for this profile/view/zone.
+	if now.Unix() < entry.StaleExpiresAt {
+		a.startRecordCacheRevalidationAsync(profile, zoneName)
+		return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: recordCacheSourceStaleCache}, true
+	}
+	return cachedRecordLoadResult{}, false
 }
 
 func (a *App) queueRecordCacheRefreshAfterWrite(profile Profile, zoneName string) {

@@ -250,6 +250,10 @@ Zone and record caches are stored in `~/.ib/cache.sqlite3`.
 
 Record cache freshness uses `cached_at + cache_ttl`. Expired records inside `records_cache_swr_ttl` are returned immediately while a single background refresh process revalidates the zone serial and refreshes `/allrecords` when needed.
 
+When cache is missing or already outside the stale window, list/search waits up to `max_background_worker_wait` seconds for an active background refresh of the same profile, DNS view, and zone before doing foreground WAPI refresh work.
+
+Shell completion prefetches cache freshness in the background by default. When `ib __complete` or `ib __completeNoDesc` runs and `completion_cache_prefetch = true`, it checks the current DNS view and zone, then starts lease-protected zone-list or current-zone record refresh helpers when cache rows are missing or stale. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
+
 `ib config cache status` keeps the detailed cache row table and adds a colored
 summary footer for table output: cache entries, cached records, fresh entries,
 SWR-stale entries, expired entries, and active refreshes. With `-o json`, it

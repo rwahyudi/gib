@@ -611,6 +611,60 @@ func (a *App) releaseRecordRefreshLease(profile Profile, zone string) error {
 	return err
 }
 
+func (a *App) recordRefreshLeaseActive(profile Profile, zone string, now time.Time) (bool, error) {
+	profileName, view := cacheScope(profile)
+	zone = normalizeCacheZone(zone)
+	key := cacheKey("record-refresh", profileName, view, zone)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	var expiresAt int64
+	err = db.QueryRow(`SELECT expires_at FROM record_refresh_locks WHERE cache_key = ?`, key).Scan(&expiresAt)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return expiresAt > now.Unix(), nil
+}
+
+func (a *App) waitForActiveRecordRefresh(profile Profile, zone string, maxWait time.Duration, pollInterval time.Duration) (bool, error) {
+	if maxWait <= 0 {
+		return false, nil
+	}
+	if pollInterval <= 0 {
+		pollInterval = 2 * time.Millisecond
+	}
+	active, err := a.recordRefreshLeaseActive(profile, zone, time.Now())
+	if err != nil || !active {
+		return false, err
+	}
+
+	deadline := time.Now().Add(maxWait)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false, nil
+		}
+		sleepFor := pollInterval
+		if remaining < sleepFor {
+			sleepFor = remaining
+		}
+		time.Sleep(sleepFor)
+		active, err = a.recordRefreshLeaseActive(profile, zone, time.Now())
+		if err != nil {
+			return false, err
+		}
+		if !active {
+			return true, nil
+		}
+	}
+}
+
 func (a *App) tryAcquireZoneRefreshLease(profile Profile, now time.Time, ttl time.Duration) (bool, error) {
 	return a.tryAcquireRecordRefreshLease(profile, zoneRefreshLockName, now, ttl)
 }

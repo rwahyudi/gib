@@ -16,12 +16,15 @@ import (
 var profileNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 const (
-	defaultCacheTTLSeconds        = 300
-	defaultDNSSearchWorkerLimit   = 16
-	defaultRecordsCacheSWRSeconds = 3 * 24 * 60 * 60
-	configCacheTTLKey             = "cache_ttl"
-	configDNSSearchWorkerLimitKey = "dns_search_worker_limit"
-	configRecordsCacheSWRKey      = "records_cache_swr_ttl"
+	defaultCacheTTLSeconds                = 300
+	defaultDNSSearchWorkerLimit           = 16
+	defaultRecordsCacheSWRSeconds         = 3 * 24 * 60 * 60
+	defaultMaxBackgroundWorkerWaitSeconds = 3
+	configCacheTTLKey                     = "cache_ttl"
+	configDNSSearchWorkerLimitKey         = "dns_search_worker_limit"
+	configRecordsCacheSWRKey              = "records_cache_swr_ttl"
+	configMaxBackgroundWorkerWaitKey      = "max_background_worker_wait"
+	configCompletionCachePrefetchKey      = "completion_cache_prefetch"
 )
 
 type Profile struct {
@@ -38,16 +41,22 @@ type Profile struct {
 }
 
 type ConfigSettings struct {
-	CacheTTLSeconds        int
-	DNSSearchWorkerLimit   int
-	RecordsCacheSWRSeconds int
+	CacheTTLSeconds                int
+	DNSSearchWorkerLimit           int
+	RecordsCacheSWRSeconds         int
+	MaxBackgroundWorkerWaitSeconds int
+	CompletionCachePrefetch        bool
+	completionCachePrefetchSet     bool
 }
 
 func defaultConfigSettings() ConfigSettings {
 	return ConfigSettings{
-		CacheTTLSeconds:        defaultCacheTTLSeconds,
-		DNSSearchWorkerLimit:   defaultDNSSearchWorkerLimit,
-		RecordsCacheSWRSeconds: defaultRecordsCacheSWRSeconds,
+		CacheTTLSeconds:                defaultCacheTTLSeconds,
+		DNSSearchWorkerLimit:           defaultDNSSearchWorkerLimit,
+		RecordsCacheSWRSeconds:         defaultRecordsCacheSWRSeconds,
+		MaxBackgroundWorkerWaitSeconds: defaultMaxBackgroundWorkerWaitSeconds,
+		CompletionCachePrefetch:        true,
+		completionCachePrefetchSet:     true,
 	}
 }
 
@@ -62,6 +71,13 @@ func (s ConfigSettings) complete() ConfigSettings {
 	if s.RecordsCacheSWRSeconds <= 0 {
 		s.RecordsCacheSWRSeconds = defaults.RecordsCacheSWRSeconds
 	}
+	if s.MaxBackgroundWorkerWaitSeconds <= 0 {
+		s.MaxBackgroundWorkerWaitSeconds = defaults.MaxBackgroundWorkerWaitSeconds
+	}
+	if !s.completionCachePrefetchSet {
+		s.CompletionCachePrefetch = defaults.CompletionCachePrefetch
+		s.completionCachePrefetchSet = true
+	}
 	return s
 }
 
@@ -75,6 +91,8 @@ func configSettingsFromSections(sections map[string]map[string]string) (ConfigSe
 	settings.CacheTTLSeconds, missing = positiveIntSetting(meta, configCacheTTLKey, settings.CacheTTLSeconds, missing)
 	settings.DNSSearchWorkerLimit, missing = positiveIntSetting(meta, configDNSSearchWorkerLimitKey, settings.DNSSearchWorkerLimit, missing)
 	settings.RecordsCacheSWRSeconds, missing = positiveIntSetting(meta, configRecordsCacheSWRKey, settings.RecordsCacheSWRSeconds, missing)
+	settings.MaxBackgroundWorkerWaitSeconds, missing = positiveIntSetting(meta, configMaxBackgroundWorkerWaitKey, settings.MaxBackgroundWorkerWaitSeconds, missing)
+	settings.CompletionCachePrefetch, settings.completionCachePrefetchSet, missing = boolSetting(meta, configCompletionCachePrefetchKey, settings.CompletionCachePrefetch, missing)
 	return settings.complete(), missing
 }
 
@@ -88,6 +106,21 @@ func positiveIntSetting(values map[string]string, key string, fallback int, miss
 		return fallback, true
 	}
 	return parsed, missing
+}
+
+func boolSetting(values map[string]string, key string, fallback bool, missing bool) (bool, bool, bool) {
+	raw, ok := values[key]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return fallback, false, true
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "y", "on", "enable", "enabled":
+		return true, true, missing
+	case "0", "false", "no", "n", "off", "disable", "disabled":
+		return false, true, missing
+	default:
+		return fallback, false, true
+	}
 }
 
 func (a *App) readConfigSettings() (ConfigSettings, bool, error) {
@@ -120,6 +153,14 @@ func (a *App) dnsSearchWorkerLimit() int {
 
 func (a *App) recordsCacheSWRTTL() time.Duration {
 	return time.Duration(a.configSettings().RecordsCacheSWRSeconds) * time.Second
+}
+
+func (a *App) maxBackgroundWorkerWait() time.Duration {
+	return time.Duration(a.configSettings().MaxBackgroundWorkerWaitSeconds) * time.Second
+}
+
+func (a *App) completionCachePrefetchEnabled() bool {
+	return a.configSettings().CompletionCachePrefetch
 }
 
 func normalizeProfileName(profileName string) (string, error) {
@@ -367,7 +408,9 @@ func (a *App) writeConfigProfilesWithSettings(defaultProfile string, profiles ma
 	builder.WriteString("default_profile = " + defaultProfile + "\n")
 	builder.WriteString(configCacheTTLKey + " = " + strconv.Itoa(settings.CacheTTLSeconds) + "\n")
 	builder.WriteString(configDNSSearchWorkerLimitKey + " = " + strconv.Itoa(settings.DNSSearchWorkerLimit) + "\n")
-	builder.WriteString(configRecordsCacheSWRKey + " = " + strconv.Itoa(settings.RecordsCacheSWRSeconds) + "\n\n")
+	builder.WriteString(configRecordsCacheSWRKey + " = " + strconv.Itoa(settings.RecordsCacheSWRSeconds) + "\n")
+	builder.WriteString(configMaxBackgroundWorkerWaitKey + " = " + strconv.Itoa(settings.MaxBackgroundWorkerWaitSeconds) + "\n")
+	builder.WriteString(configCompletionCachePrefetchKey + " = " + strconv.FormatBool(settings.CompletionCachePrefetch) + "\n\n")
 
 	names := make([]string, 0, len(profiles))
 	for name := range profiles {

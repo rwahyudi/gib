@@ -2,6 +2,7 @@ package ibcli
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -569,18 +570,20 @@ func (a *App) completeRecordNames(cmd *cobra.Command, explicitZone, toComplete s
 
 func (a *App) cachedRecordNamesForCompletion(profile Profile, zone string) ([]TypedRecord, error) {
 	entry, err := a.readCachedRecords(profile, zone)
-	if err == nil && entry.CacheFound && a.cacheEntryFresh(entry, time.Now()) {
-		return recordsFromAllRecordRows(entry.Rows), nil
-	}
-
-	// Completion is dynamic by design: when the local cache cannot satisfy a
-	// record-name request, fall back to the same cache/SWR loader used by dns
-	// list/search. Keep this in sync with README and NOTES if completion policy changes.
-	records, err := a.cachedRecordsForZone(profile, a.newClient(profile), zone)
 	if err != nil {
 		return nil, err
 	}
-	return records, nil
+	prefetchEnabled := a.completionCachePrefetchEnabled()
+	if !entry.CacheFound {
+		if prefetchEnabled {
+			a.startRecordCacheRevalidationAsync(profile, zone)
+		}
+		return nil, nil
+	}
+	if prefetchEnabled && !a.cacheEntryFresh(entry, time.Now()) {
+		a.startRecordCacheRevalidationAsync(profile, zone)
+	}
+	return recordsFromAllRecordRows(entry.Rows), nil
 }
 
 func matchingRecordNames(records []TypedRecord, toComplete string) []string {
@@ -689,13 +692,130 @@ func (a *App) completeNetworkCIDRs(cmd *cobra.Command, toComplete string) []stri
 }
 
 func (a *App) cachedZoneNames(profile Profile) ([]string, error) {
-	// Zone completion shares the normal zone-list cache path so config changes,
-	// manual cache clears, and background refreshes behave the same as commands.
-	zones, err := a.cachedZones(profile, a.newClient(profile), "")
+	entry, err := a.readCachedZones(profile)
 	if err != nil {
 		return nil, err
 	}
-	return zoneNamesFromRows(zones), nil
+	prefetchEnabled := a.completionCachePrefetchEnabled()
+	if !entry.CacheFound {
+		if prefetchEnabled {
+			a.startZoneCacheRefreshAsync(profile)
+		}
+		return nil, nil
+	}
+	if prefetchEnabled && !a.cacheEntryFresh(entry, time.Now()) {
+		a.startZoneCacheRefreshAsync(profile)
+	}
+	return zoneNamesFromRows(entry.Rows), nil
+}
+
+func (a *App) startCompletionCachePrefetch(args []string) {
+	if len(args) == 0 || !strings.HasPrefix(args[0], "__complete") {
+		return
+	}
+	// Completion prefetch is intentionally configurable: it improves the next
+	// DNS command after tab completion, but some operators prefer completion to
+	// be a local cache read only and never start detached refresh helpers.
+	if !a.completionCachePrefetchEnabled() {
+		return
+	}
+	profile, err := a.completionProfile()
+	if err != nil {
+		return
+	}
+	if view := completionFlagValue(args, "view", "v"); view != "" {
+		profile.DNSView = view
+	}
+
+	a.prefetchZoneCacheForCompletion(profile)
+
+	zone, err := a.resolveCompletionDNSZone(profile, completionFlagValue(args, "zone", "z"))
+	if err != nil {
+		return
+	}
+	a.prefetchRecordCacheForCompletion(profile, zone)
+}
+
+func (a *App) completionProfile() (Profile, error) {
+	// Completion prefetch runs before Cobra parses flags. Ignore any previous
+	// command's in-memory overrides so the active shell/session context is used.
+	previousZone, previousView := a.dnsZoneOverride, a.dnsViewOverride
+	a.dnsZoneOverride, a.dnsViewOverride = "", ""
+	profile, err := a.loadConfig(true)
+	a.dnsZoneOverride, a.dnsViewOverride = previousZone, previousView
+	return profile, err
+}
+
+func (a *App) prefetchZoneCacheForCompletion(profile Profile) {
+	entry, err := a.readCachedZones(profile)
+	if err == nil && entry.CacheFound && a.cacheEntryFresh(entry, time.Now()) {
+		return
+	}
+	if err != nil {
+		return
+	}
+	a.startZoneCacheRefreshAsync(profile)
+}
+
+func (a *App) prefetchRecordCacheForCompletion(profile Profile, zone string) {
+	entry, err := a.readCachedRecords(profile, zone)
+	if err == nil && entry.CacheFound && a.cacheEntryFresh(entry, time.Now()) {
+		return
+	}
+	if err != nil {
+		return
+	}
+	a.startRecordCacheRevalidationAsync(profile, zone)
+}
+
+func (a *App) resolveCompletionDNSZone(profile Profile, explicit string) (string, error) {
+	if explicit != "" {
+		return normalizeZoneName(explicit)
+	}
+	if zone := a.readSessionZone(profile.Name); zone != "" {
+		return normalizeZoneName(zone)
+	}
+	if zone := strings.TrimSpace(os.Getenv(defaultZoneEnv)); zone != "" {
+		return normalizeZoneName(zone)
+	}
+	if profile.DefaultZone != "" {
+		return normalizeZoneName(profile.DefaultZone)
+	}
+	return "", cliError("DNS zone is required")
+}
+
+func completionFlagValue(args []string, longName string, shortName string) string {
+	if len(args) < 3 {
+		return ""
+	}
+	end := len(args) - 1
+	longFlag := "--" + longName
+	shortFlag := "-" + shortName
+	for index := 1; index < end; index++ {
+		arg := strings.TrimSpace(args[index])
+		if arg == "--" {
+			return ""
+		}
+		if value, ok := strings.CutPrefix(arg, longFlag+"="); ok {
+			return strings.TrimSpace(value)
+		}
+		if shortName != "" {
+			if value, ok := strings.CutPrefix(arg, shortFlag+"="); ok {
+				return strings.TrimSpace(value)
+			}
+			if strings.HasPrefix(arg, shortFlag) && len(arg) > len(shortFlag) {
+				return strings.TrimSpace(strings.TrimPrefix(arg, shortFlag))
+			}
+		}
+		if arg != longFlag && (shortName == "" || arg != shortFlag) {
+			continue
+		}
+		if index+1 >= end {
+			return ""
+		}
+		return strings.TrimSpace(args[index+1])
+	}
+	return ""
 }
 
 func (a *App) completeProfileNames(toComplete string, includeDefault bool) []string {

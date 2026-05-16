@@ -93,6 +93,7 @@ func NewDefaultApp() (*App, error) {
 }
 
 func (a *App) Execute(args []string) error {
+	a.startCompletionCachePrefetch(args)
 	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeZoneListFlagNames(args) {
 		return nil
 	}

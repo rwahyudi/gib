@@ -498,6 +498,93 @@ func TestRecordRefreshLeaseScopesByZoneAndExpires(t *testing.T) {
 	}
 }
 
+func TestWaitForActiveRecordRefreshTimesOut(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", DNSView: "default"}
+	acquired, err := app.tryAcquireRecordRefreshLease(profile, "example.com", time.Now(), recordRefreshLeaseTTL)
+	if err != nil || !acquired {
+		t.Fatalf("acquire lease = %v, %v", acquired, err)
+	}
+
+	start := time.Now()
+	waited, err := app.waitForActiveRecordRefresh(profile, "example.com", 20*time.Millisecond, 2*time.Millisecond)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("wait for refresh: %v", err)
+	}
+	if waited {
+		t.Fatalf("waited = true, want false for timeout")
+	}
+	if elapsed < 15*time.Millisecond {
+		t.Fatalf("wait returned too early after %s", elapsed)
+	}
+}
+
+func TestCachedRecordsWaitsForActiveRefreshAndUsesCache(t *testing.T) {
+	var allRecordRequests int
+	server := recordCacheServer(t, "2026050802", []map[string]any{{"type": "HOST_IPV4ADDR", "name": "live.example.com", "address": "192.0.2.20"}}, &allRecordRequests)
+	defer server.Close()
+
+	app := testApp(t)
+	profile := Profile{Name: "default", DNSView: "default"}
+	acquired, err := app.tryAcquireRecordRefreshLease(profile, "example.com", time.Now(), recordRefreshLeaseTTL)
+	if err != nil || !acquired {
+		t.Fatalf("acquire lease = %v, %v", acquired, err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		time.Sleep(10 * time.Millisecond)
+		_ = app.writeCachedRecords(profile, "example.com", "2026050802", []map[string]any{
+			{"type": "HOST_IPV4ADDR", "name": "cached.example.com", "address": "192.0.2.10"},
+		}, time.Now())
+		_ = app.releaseRecordRefreshLease(profile, "example.com")
+	}()
+
+	records, source, err := app.cachedRecordsForZoneWithSource(profile, testWapiClient(server), "example.com")
+	if err != nil {
+		t.Fatalf("cached records: %v", err)
+	}
+	<-done
+	if source != recordCacheSourceFreshCache {
+		t.Fatalf("source = %q, want %q", source, recordCacheSourceFreshCache)
+	}
+	if allRecordRequests != 0 {
+		t.Fatalf("allrecords requests = %d, want 0", allRecordRequests)
+	}
+	if len(records) != 1 || recordName(records[0].Item, records[0].Type) != "cached.example.com" {
+		t.Fatalf("records = %#v", records)
+	}
+}
+
+func TestCachedRecordsDoesNotWaitForOtherZoneRefresh(t *testing.T) {
+	var allRecordRequests int
+	server := recordCacheServer(t, "2026050802", []map[string]any{{"type": "HOST_IPV4ADDR", "name": "live.example.com", "address": "192.0.2.20"}}, &allRecordRequests)
+	defer server.Close()
+
+	app := testApp(t)
+	profile := Profile{Name: "default", DNSView: "default"}
+	acquired, err := app.tryAcquireRecordRefreshLease(profile, "other.example.com", time.Now(), recordRefreshLeaseTTL)
+	if err != nil || !acquired {
+		t.Fatalf("acquire other lease = %v, %v", acquired, err)
+	}
+
+	start := time.Now()
+	_, source, err := app.cachedRecordsForZoneWithSource(profile, testWapiClient(server), "example.com")
+	if err != nil {
+		t.Fatalf("cached records: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("record load waited for unrelated refresh: %s", elapsed)
+	}
+	if source != recordCacheSourceAllRecords {
+		t.Fatalf("source = %q, want %q", source, recordCacheSourceAllRecords)
+	}
+	if allRecordRequests != 1 {
+		t.Fatalf("allrecords requests = %d, want 1", allRecordRequests)
+	}
+}
+
 func TestRunRecordCacheRevalidateReleasesLeaseWhenSerialMatches(t *testing.T) {
 	var allRecordRequests int
 	server := recordCacheServer(t, "2026050801", []map[string]any{{"type": "HOST_IPV4ADDR", "name": "live.example.com", "address": "192.0.2.20"}}, &allRecordRequests)

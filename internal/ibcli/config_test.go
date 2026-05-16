@@ -79,6 +79,8 @@ func TestWriteConfigProfilesEncryptsPasswordAndReadsItBack(t *testing.T) {
 		"cache_ttl = 300",
 		"dns_search_worker_limit = 16",
 		"records_cache_swr_ttl = 259200",
+		"max_background_worker_wait = 3",
+		"completion_cache_prefetch = true",
 	} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("config missing %q:\n%s", want, raw)
@@ -131,6 +133,8 @@ timeout = 30
 		"cache_ttl = 300",
 		"dns_search_worker_limit = 16",
 		"records_cache_swr_ttl = 259200",
+		"max_background_worker_wait = 3",
+		"completion_cache_prefetch = true",
 	} {
 		if !strings.Contains(string(updated), want) {
 			t.Fatalf("updated config missing %q:\n%s", want, updated)
@@ -148,6 +152,8 @@ default_profile = default
 cache_ttl = not-a-number
 dns_search_worker_limit = -5
 records_cache_swr_ttl = 0
+max_background_worker_wait = nope
+completion_cache_prefetch = maybe
 `
 	if err := os.WriteFile(app.ConfigFile, []byte(raw), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -168,6 +174,38 @@ records_cache_swr_ttl = 0
 	}
 	if settings.RecordsCacheSWRSeconds != defaultRecordsCacheSWRSeconds {
 		t.Fatalf("records cache swr ttl = %d, want %d", settings.RecordsCacheSWRSeconds, defaultRecordsCacheSWRSeconds)
+	}
+	if settings.MaxBackgroundWorkerWaitSeconds != defaultMaxBackgroundWorkerWaitSeconds {
+		t.Fatalf("max background wait = %d, want %d", settings.MaxBackgroundWorkerWaitSeconds, defaultMaxBackgroundWorkerWaitSeconds)
+	}
+	if !settings.CompletionCachePrefetch {
+		t.Fatalf("completion cache prefetch = false, want true fallback")
+	}
+}
+
+func TestReadConfigSettingsAllowsDisabledCompletionPrefetch(t *testing.T) {
+	app := testApp(t)
+	raw := `[meta]
+default_profile = default
+cache_ttl = 600
+dns_search_worker_limit = 8
+records_cache_swr_ttl = 1200
+max_background_worker_wait = 5
+completion_cache_prefetch = disabled
+`
+	if err := os.WriteFile(app.ConfigFile, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	settings, missing, err := app.readConfigSettings()
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if missing {
+		t.Fatalf("missing = true, want false")
+	}
+	if settings.CompletionCachePrefetch {
+		t.Fatal("completion cache prefetch = true, want false")
 	}
 }
 
