@@ -60,6 +60,44 @@ func TestDNSCreateWorkflowPostsToPrimaryWithoutMandatoryTTL(t *testing.T) {
 	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
+func TestDNSCreateCNAMEQualifiesShortTarget(t *testing.T) {
+	var postPayload map[string]any
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "record:cname" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&postPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode("record:cname/ref")
+	}))
+	defer primary.Close()
+
+	read := emptyReadServer(t)
+	defer read.Close()
+
+	stubLookupHost(t, "computer1.example.com")
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	refreshes := captureRecordRefreshes(app)
+
+	if err := app.Execute([]string{"dns", "create", "hostalias1", "cname", "computer1"}); err != nil {
+		t.Fatalf("create cname: %v", err)
+	}
+
+	for key, want := range map[string]any{
+		"name":      "hostalias1.example.com",
+		"canonical": "computer1.example.com",
+		"view":      "default",
+	} {
+		if postPayload[key] != want {
+			t.Fatalf("payload[%s] = %#v, want %#v; payload = %#v", key, postPayload[key], want, postPayload)
+		}
+	}
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+}
+
 func TestDNSCreateUsesDNSContextOverrides(t *testing.T) {
 	var postPayload map[string]any
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +196,38 @@ func TestDNSEditWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	}
 	if len(readRequests) == 0 {
 		t.Fatalf("expected record lookup requests on read server")
+	}
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+}
+
+func TestDNSEditCNAMEQualifiesShortTarget(t *testing.T) {
+	var putPayload map[string]any
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || trimWAPIPath(r.URL.Path) != "record:cname/ref" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&putPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "record:cname/ref"})
+	}))
+	defer primary.Close()
+
+	read := cnameRecordLookupServer(t)
+	defer read.Close()
+
+	stubLookupHost(t, "computer1.example.com")
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	refreshes := captureRecordRefreshes(app)
+
+	if err := app.Execute([]string{"dns", "edit", "hostalias1", "cname", "computer1"}); err != nil {
+		t.Fatalf("edit cname: %v", err)
+	}
+
+	if putPayload["canonical"] != "computer1.example.com" {
+		t.Fatalf("canonical = %#v, want computer1.example.com; payload = %#v", putPayload["canonical"], putPayload)
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
 	assertRecordRefreshQueued(t, refreshes, "example.com")
@@ -1292,6 +1362,42 @@ func duplicateRecordLookupServer(t *testing.T, requests *[]string) *httptest.Ser
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
 		}
 	}))
+}
+
+func cnameRecordLookupServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
+		if trimWAPIPath(r.URL.Path) == "record:cname" && r.URL.Query().Get("name") == "hostalias1.example.com" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":      "record:cname/ref",
+					"name":      "hostalias1.example.com",
+					"canonical": "old.example.com",
+					"view":      "default",
+					"zone":      "example.com",
+				}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+	}))
+}
+
+func stubLookupHost(t *testing.T, wantHost string) {
+	t.Helper()
+	previous := lookupHost
+	lookupHost = func(host string) ([]string, error) {
+		if host != wantHost {
+			t.Fatalf("lookup host = %q, want %q", host, wantHost)
+		}
+		return []string{"192.0.2.10"}, nil
+	}
+	t.Cleanup(func() {
+		lookupHost = previous
+	})
 }
 
 func trimWAPIPath(path string) string {

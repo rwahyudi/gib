@@ -249,11 +249,35 @@ func createPayload(recordType, value, name, zone string, ttl int, comment string
 			payload[key] = item
 		}
 	case "cname":
-		payload[spec.ValueField] = strings.TrimRight(value, ".")
+		target, err := cnameTargetValue(value, zone)
+		if err != nil {
+			return "", nil, err
+		}
+		payload[spec.ValueField] = target
 	default:
 		payload[spec.ValueField] = value
 	}
 	return objectType, payload, nil
+}
+
+func cnameTargetValue(value, zone string) (string, error) {
+	raw := strings.TrimSpace(value)
+	hasDot := strings.Contains(raw, ".")
+	target := strings.TrimSpace(strings.TrimRight(raw, "."))
+	if target == "" || hasDot {
+		return target, nil
+	}
+	normalizedZone, err := normalizeZoneName(zone)
+	if err != nil {
+		return "", err
+	}
+	return target + "." + normalizedZone, nil
+}
+
+func cnameTargetNeedsZone(value string) bool {
+	raw := strings.TrimSpace(value)
+	target := strings.TrimSpace(strings.TrimRight(raw, "."))
+	return target != "" && !strings.Contains(raw, ".")
 }
 
 func mxPayload(value string) (map[string]any, error) {
@@ -320,7 +344,7 @@ func hostPayload(value string) (map[string]any, error) {
 	return map[string]any{"ipv6addrs": []map[string]any{{"ipv6addr": address.String()}}}, nil
 }
 
-func updateValuePayload(recordType, value string) (map[string]any, error) {
+func updateValuePayload(recordType, value, zone string) (map[string]any, error) {
 	recordType = strings.ToLower(recordType)
 	spec, ok := recordTypes[recordType]
 	if !ok {
@@ -336,20 +360,24 @@ func updateValuePayload(recordType, value string) (map[string]any, error) {
 	case "ptr":
 		return map[string]any{"ptrdname": strings.TrimRight(value, ".")}, nil
 	case "cname":
-		return map[string]any{spec.ValueField: strings.TrimRight(value, ".")}, nil
+		target, err := cnameTargetValue(value, zone)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{spec.ValueField: target}, nil
 	default:
 		return map[string]any{spec.ValueField: value}, nil
 	}
 }
 
-func updatePayload(recordType string, value *string, ttl int, comment string) (map[string]any, error) {
+func updatePayload(recordType string, value *string, zone string, ttl int, comment string) (map[string]any, error) {
 	payload := map[string]any{}
 	if ttl >= 0 {
 		payload["ttl"] = ttl
 		payload["use_ttl"] = true
 	}
 	if value != nil {
-		fields, err := updateValuePayload(recordType, *value)
+		fields, err := updateValuePayload(recordType, *value, zone)
 		if err != nil {
 			return nil, err
 		}
@@ -944,10 +972,12 @@ func warnIfCNAMEUnresolved(app *App, recordType, value string) {
 		app.PrintWarning("WARNING: CNAME target is empty; DNS resolution check was skipped.")
 		return
 	}
-	if _, err := net.LookupHost(target); err != nil {
+	if _, err := lookupHost(target); err != nil {
 		app.PrintWarning(fmt.Sprintf("WARNING: CNAME target %s does not resolve from this system: %v. Record creation will continue.", target, err))
 	}
 }
+
+var lookupHost = net.LookupHost
 
 func recordTypeFromAllRecord(item map[string]any) string {
 	value := strings.ToLower(strings.TrimSpace(fmt.Sprint(item["type"])))

@@ -54,6 +54,72 @@ func TestCreatePayloadOmitsTTLWhenNotProvided(t *testing.T) {
 	}
 }
 
+func TestCreatePayloadQualifiesShortCNAMETarget(t *testing.T) {
+	client := &WapiClient{View: "DNS Zone View"}
+	objectType, payload, err := createPayload("cname", "computer1", "hostalias1", "example.com", -1, "", client)
+	if err != nil {
+		t.Fatalf("create payload: %v", err)
+	}
+	if objectType != "record:cname" {
+		t.Fatalf("object type = %q", objectType)
+	}
+	if payload["name"] != "hostalias1.example.com" {
+		t.Fatalf("name = %q", payload["name"])
+	}
+	if payload["canonical"] != "computer1.example.com" {
+		t.Fatalf("canonical = %q", payload["canonical"])
+	}
+}
+
+func TestCreatePayloadPreservesDottedCNAMETarget(t *testing.T) {
+	client := &WapiClient{View: "DNS Zone View"}
+	for _, tc := range []struct {
+		value string
+		want  string
+	}{
+		{value: "computer1.other.com", want: "computer1.other.com"},
+		{value: "computer1.", want: "computer1"},
+	} {
+		_, payload, err := createPayload("cname", tc.value, "hostalias1", "example.com", -1, "", client)
+		if err != nil {
+			t.Fatalf("create payload for %q: %v", tc.value, err)
+		}
+		if payload["canonical"] != tc.want {
+			t.Fatalf("canonical for %q = %q, want %q", tc.value, payload["canonical"], tc.want)
+		}
+	}
+}
+
+func TestUpdatePayloadQualifiesShortCNAMETarget(t *testing.T) {
+	value := "computer1"
+	payload, err := updatePayload("cname", &value, "example.com", -1, "")
+	if err != nil {
+		t.Fatalf("update payload: %v", err)
+	}
+	if payload["canonical"] != "computer1.example.com" {
+		t.Fatalf("canonical = %q", payload["canonical"])
+	}
+}
+
+func TestUpdatePayloadPreservesDottedCNAMETarget(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  string
+	}{
+		{value: "computer1.other.com", want: "computer1.other.com"},
+		{value: "computer1.", want: "computer1"},
+	} {
+		value := tc.value
+		payload, err := updatePayload("cname", &value, "", -1, "")
+		if err != nil {
+			t.Fatalf("update payload for %q: %v", tc.value, err)
+		}
+		if payload["canonical"] != tc.want {
+			t.Fatalf("canonical for %q = %q, want %q", tc.value, payload["canonical"], tc.want)
+		}
+	}
+}
+
 func TestRunDNSCreatePTRDoesNotRequireDefaultZone(t *testing.T) {
 	var postedPTR map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

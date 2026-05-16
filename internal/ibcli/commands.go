@@ -1371,7 +1371,14 @@ func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr 
 	if err != nil {
 		return err
 	}
-	warnIfCNAMEUnresolved(a, recordType, value)
+	warnValue := value
+	if recordType == "cname" {
+		warnValue, err = cnameTargetValue(value, resolvedZone)
+		if err != nil {
+			return err
+		}
+	}
+	warnIfCNAMEUnresolved(a, recordType, warnValue)
 	objectType, payload, err := createPayload(recordType, value, name, resolvedZone, ttl, comment, client)
 	if err != nil {
 		return err
@@ -1486,10 +1493,24 @@ func (a *App) runDNSEdit(recordNameValue, requestedType string, value *string, z
 	if err != nil {
 		return err
 	}
+	updateZone := ""
 	if value != nil {
-		warnIfCNAMEUnresolved(a, record.Type, *value)
+		warnValue := *value
+		if strings.EqualFold(record.Type, "cname") {
+			if cnameTargetNeedsZone(*value) {
+				updateZone, err = a.resolveDNSZone(profile, zone)
+				if err != nil {
+					return err
+				}
+			}
+			warnValue, err = cnameTargetValue(*value, updateZone)
+			if err != nil {
+				return err
+			}
+		}
+		warnIfCNAMEUnresolved(a, record.Type, warnValue)
 	}
-	payload, err := updatePayload(record.Type, value, ttl, comment)
+	payload, err := updatePayload(record.Type, value, updateZone, ttl, comment)
 	if err != nil {
 		return err
 	}
@@ -1587,7 +1608,7 @@ func (a *App) syncPTRForAddress(profile Profile, client *WapiClient, address net
 	if err != nil {
 		return "", err
 	}
-	payload, err := updatePayload("ptr", &ptrdname, ttl, comment)
+	payload, err := updatePayload("ptr", &ptrdname, "", ttl, comment)
 	if err != nil {
 		return "", err
 	}
