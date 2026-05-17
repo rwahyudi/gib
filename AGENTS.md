@@ -36,6 +36,60 @@ Add or update tests for behavior changes, especially config parsing, WAPI routin
 
 Name tests by behavior, for example `TestDNSContextLineUsesCompactColonFormat`.
 
+## Separate-Agent Work
+
+When available, use separate agents for independent, bounded work that can run in parallel with the main implementation. Keep each agent's scope explicit and avoid overlapping writes.
+
+Good separate-agent tasks:
+
+- Review-only scan of one subsystem, such as `completion.go` or `cache.go`.
+- Find existing tests and fixtures for a behavior before implementation.
+- Draft or update documentation examples after code behavior is already known.
+- Run focused verification in parallel, such as completion tests while main work edits DNS logic.
+- Inspect generated CLI output from a built binary and report mismatches.
+- Compare README, man page, packaging completion, and help text for consistency.
+
+Do not delegate:
+
+- The immediate blocking task on the critical path.
+- Broad repo exploration with no concrete question.
+- Edits to the same files another agent or the main thread is changing.
+- Live Infoblox calls or credential-dependent checks.
+- Git staging, commits, tags, or pushes.
+
+Separate-agent output contract:
+
+- State files inspected or changed.
+- Report exact commands run and whether they passed.
+- For review tasks, list findings first with file/line references.
+- For implementation tasks, list changed files and any remaining validation gaps.
+
+## Documentation Consistency Checks
+
+For every behavior change, check whether nearby documentation, README examples, man pages, and diagrams still match the code. Use a separate agent when this can run in parallel with implementation.
+
+Docs and assets to check:
+
+- `README.md`
+- `NOTES.md`
+- `docs/performance-caching.md`
+- `docs/assets/*.svg`
+- `packaging/man/ib.1`
+- `packaging/bash_completion/ib`
+- `packaging/rpm/README.md`
+
+When code changes affect commands, flags, output, cache behavior, config prompts, completion, WAPI routing, or packaging, verify related docs in the same patch. Do not update docs speculatively; only change docs when the code behavior is confirmed.
+
+Good separate-agent doc tasks:
+
+- Compare CLI help output against README and man-page examples.
+- Check whether cache or WAPI behavior changes require updates to `docs/performance-caching.md` or SVG diagrams.
+- Inspect generated completion behavior against `packaging/bash_completion/ib`.
+- Verify command examples still use the current argument order and HOST-first create examples.
+- Report stale docs with file/line references and suggested replacement text.
+
+For infographic changes, prefer editing the source SVG text/labels directly and keep terminology aligned with code names such as `record_cache`, `zone_cache`, SWR, refresh leases, read server, and primary server.
+
 ## Commit & Pull Request Guidelines
 
 This checkout does not currently expose Git metadata, so no project-specific commit convention can be inferred. Use concise imperative commit messages such as `Colorize DNS record types` or `Compact context help output`.
