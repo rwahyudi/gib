@@ -367,9 +367,11 @@ func TestConfigCacheAndCompletionHelpCoversOperationalDetails(t *testing.T) {
 			args: []string{"config", "completion", "--help"},
 			want: []string{
 				"Completion Usage",
-				"no arg  print setup instructions",
-				"bash    generate Bash completion",
+				"no arg   print setup instructions",
+				"bash     generate Bash completion",
+				"windows  install PowerShell completion on Windows",
 				"ib config completion bash > ~/.ib-complete.bash",
+				"ib config completion windows",
 			},
 		},
 		{

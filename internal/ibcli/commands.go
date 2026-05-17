@@ -151,8 +151,8 @@ func (a *App) cacheCommand() *cobra.Command {
 
 func (a *App) completionCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "completion [bash|zsh|fish]",
-		Short:             "Generate shell completion or print setup instructions",
+		Use:               "completion [bash|zsh|fish|windows]",
+		Short:             "Generate or install shell completion",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: shellNameCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -161,6 +161,9 @@ func (a *App) completionCommand() *cobra.Command {
 				fmt.Fprintln(a.Stdout, `  Bash: ib config completion bash > ~/.ib-complete.bash && printf '\n# ib shell completion\n. ~/.ib-complete.bash\n' >> ~/.bashrc`)
 				fmt.Fprintln(a.Stdout, `  Zsh:  ib config completion zsh > ~/.ib-complete.zsh && printf '\n# ib shell completion\n. ~/.ib-complete.zsh\n' >> ~/.zshrc`)
 				fmt.Fprintln(a.Stdout, `  Fish: ib config completion fish > ~/.config/fish/completions/ib.fish`)
+				if windowsCompletionAvailable() {
+					fmt.Fprintln(a.Stdout, `  PowerShell: ib config completion windows`)
+				}
 				return nil
 			}
 			switch args[0] {
@@ -173,8 +176,10 @@ func (a *App) completionCommand() *cobra.Command {
 			case "fish":
 				_, err := fmt.Fprint(a.Stdout, dynamicFishCompletionScript())
 				return err
+			case "windows":
+				return a.runWindowsCompletionSetup()
 			default:
-				return cliError("unsupported shell %q; use bash, zsh, or fish", args[0])
+				return cliError("unsupported shell %q; use bash, zsh, fish, or windows", args[0])
 			}
 		},
 	}

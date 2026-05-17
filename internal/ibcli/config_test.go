@@ -332,7 +332,7 @@ func TestConfigOverviewWithoutProfilesUsesSetupPanel(t *testing.T) {
 		"server, username, password, WAPI/TLS",
 		"auto GCM read endpoint",
 		"runs before saving; retry on failure",
-		"ib config completion [bash|zsh|fish]",
+		"ib config completion [SHELL]",
 		"ib config cache status|clear",
 		"ib config <command> --help",
 		"ib config / configure",
@@ -402,7 +402,7 @@ func TestConfigOverviewWithProfilesShowsActionPanel(t *testing.T) {
 		"ib config use PROFILE",
 		"ib config list",
 		"ib config delete PROFILE",
-		"ib config completion [bash|zsh|fish]",
+		"ib config completion [SHELL]",
 		"ib config cache status|clear",
 		"ib config <command> --help",
 	} {

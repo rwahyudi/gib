@@ -165,7 +165,8 @@ if (($userPath -split ";") -notcontains $userBin) {
 ```
 
 Native Windows profile passwords are encrypted with user-scope Windows DPAPI.
-Native PowerShell completion is not available yet; Bash, Zsh, and Fish
+Run `ib config completion windows` in PowerShell to install native completion
+for the current user, then open a new PowerShell window. Bash, Zsh, and Fish
 completion can still be generated for WSL, Git Bash, or MSYS2.
 
 ## Setup
@@ -188,7 +189,7 @@ DNS commands use this context order:
 command --zone/--view -> ib dns zone/view use -> IB_ZONE/IB_VIEW -> configured defaults
 ```
 
-On native Windows, `ib dns zone use` and `ib dns view use` store the same session context files under the user's local app data directory. Shells that do not pass a stable `IB_SHELL_PID` should use `IB_ZONE` / `IB_VIEW` or command flags for explicit context until native PowerShell completion is added.
+On native Windows, `ib dns zone use` and `ib dns view use` store the same session context files under the user's local app data directory. Run `ib config completion windows` to install the PowerShell integration that passes `IB_SHELL_PID`; shells without that integration should use `IB_ZONE` / `IB_VIEW` or command flags for explicit context.
 
 Override context for one command without saving it:
 
@@ -259,7 +260,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib config list` | List configured profiles and their default/read endpoint context. |
 | `ib config use PROFILE` | Set the default profile. |
 | `ib config delete PROFILE` | Delete a non-default profile and clear its local cache rows. |
-| `ib config completion [bash\|zsh\|fish]` | Generate dynamic shell completion. |
+| `ib config completion [bash\|zsh\|fish\|windows]` | Generate or install dynamic shell completion. |
 | `ib config cache status` | Show local SQLite cache entries with table statistics, or structured statistics with `-o json`. |
 | `ib config cache clear` | Clear local SQLite cache entries. |
 
@@ -367,5 +368,11 @@ ib config completion bash > ~/.ib-complete.bash
 . ~/.ib-complete.bash
 ```
 
-The generated completion calls the live `ib` binary, so profiles, zones, records, flags, and output formats are resolved dynamically.
+On Windows, install native PowerShell completion for the current user:
+
+```powershell
+ib config completion windows
+```
+
+The generated or installed completion calls the live `ib` binary, so profiles, zones, records, flags, and output formats are resolved dynamically.
 Installing from RPM or DEB puts the Bash completion file in `/etc/bash_completion.d/ib`.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -925,19 +926,26 @@ func TestConfigureAliasCompletesCacheCommands(t *testing.T) {
 }
 
 func TestConfigCompletionCompletesShellNames(t *testing.T) {
+	rootWants := []string{
+		"bash\tBash completion script",
+		"zsh\tZsh completion script",
+		"fish\tFish completion script",
+		":4",
+	}
+	rootOmitted := []string{"windows\tPowerShell completion installer"}
+	if runtime.GOOS == "windows" {
+		rootWants = append(rootWants, "windows\tPowerShell completion installer")
+		rootOmitted = nil
+	}
 	tests := []struct {
 		args    []string
 		wants   []string
 		omitted []string
 	}{
 		{
-			args: []string{"__complete", "config", "completion", ""},
-			wants: []string{
-				"bash\tBash completion script",
-				"zsh\tZsh completion script",
-				"fish\tFish completion script",
-				":4",
-			},
+			args:    []string{"__complete", "config", "completion", ""},
+			wants:   rootWants,
+			omitted: rootOmitted,
 		},
 		{
 			args: []string{"__complete", "config", "completion", "b"},
@@ -973,6 +981,24 @@ func TestConfigCompletionCompletesShellNames(t *testing.T) {
 				t.Fatalf("completion %v unexpectedly included %q:\n%s", tt.args, omitted, output)
 			}
 		}
+	}
+}
+
+func TestConfigCompletionWindowsRejectsNonWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows completion setup is available on Windows")
+	}
+	app := testApp(t)
+	app.Stdout = &bytes.Buffer{}
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	err := app.Execute([]string{"config", "completion", "windows"})
+	if err == nil {
+		t.Fatalf("windows completion setup unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "windows completion setup is only available on Windows") {
+		t.Fatalf("windows completion setup returned unexpected error: %v", err)
 	}
 }
 

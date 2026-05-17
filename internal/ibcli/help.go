@@ -113,7 +113,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 				{"edit", "ib config edit [PROFILE]"},
 				{"switch", "ib config use PROFILE"},
 				{"inspect", "ib config list"},
-				{"completion", "ib config completion [bash|zsh|fish]"},
+				{"completion", "ib config completion [bash|zsh|fish|windows]"},
 				{"cache", "ib config cache status|clear"},
 			}),
 			sectionWithRows("Profile Details", [][]string{
@@ -223,12 +223,14 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 				{"bash", "generate Bash completion"},
 				{"zsh", "generate Zsh completion"},
 				{"fish", "generate Fish completion"},
+				{"windows", "install PowerShell completion on Windows"},
 			}),
 			sectionWithLines("Setup", []string{
 				"ib config completion bash > ~/.ib-complete.bash",
 				`printf '\n# ib shell completion\n. ~/.ib-complete.bash\n' >> ~/.bashrc`,
 				"ib config completion zsh > ~/.ib-complete.zsh",
 				"ib config completion fish > ~/.config/fish/completions/ib.fish",
+				"ib config completion windows",
 			}),
 		}, "\n")
 	case "ib config cache":

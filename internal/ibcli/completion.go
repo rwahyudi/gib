@@ -51,11 +51,7 @@ func shellNameCompletion(cmd *cobra.Command, args []string, toComplete string) (
 	if len(args) > 0 || strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
-	candidates := []string{
-		"bash\tBash completion script",
-		"zsh\tZsh completion script",
-		"fish\tFish completion script",
-	}
+	candidates := shellCompletionCandidates()
 	prefix := strings.ToLower(strings.TrimSpace(toComplete))
 	if prefix == "" {
 		return candidates, cobra.ShellCompDirectiveNoFileComp
