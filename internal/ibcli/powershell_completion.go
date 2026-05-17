@@ -3,6 +3,7 @@ package ibcli
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -13,6 +14,8 @@ const (
 	powerShellProfileStart      = "# BEGIN ib shell completion"
 	powerShellProfileEnd        = "# END ib shell completion"
 )
+
+var powerShellProfilePathDiscoverer = discoverPowerShellProfilePaths
 
 func windowsCompletionAvailable() bool {
 	return runtime.GOOS == "windows"
@@ -86,10 +89,64 @@ func (a *App) installPowerShellCompletion(home string) (string, []string, error)
 }
 
 func windowsPowerShellProfilePaths(home string) []string {
-	return []string{
-		filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"),
-		filepath.Join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"),
+	var paths []string
+	appendPowerShellProfilePaths(&paths, filepath.Join(home, "Documents"))
+	for _, key := range []string{"OneDrive", "OneDriveCommercial", "OneDriveConsumer"} {
+		if base := strings.TrimSpace(os.Getenv(key)); base != "" {
+			appendPowerShellProfilePaths(&paths, filepath.Join(base, "Documents"))
+		}
 	}
+	for _, profilePath := range powerShellProfilePathDiscoverer(home) {
+		appendUniquePath(&paths, profilePath)
+	}
+	return paths
+}
+
+func appendPowerShellProfilePaths(paths *[]string, documentsDir string) {
+	if strings.TrimSpace(documentsDir) == "" {
+		return
+	}
+	appendUniquePath(paths, filepath.Join(documentsDir, "PowerShell", "Microsoft.PowerShell_profile.ps1"))
+	appendUniquePath(paths, filepath.Join(documentsDir, "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"))
+}
+
+func appendUniquePath(paths *[]string, path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	cleaned := filepath.Clean(path)
+	for _, existing := range *paths {
+		if strings.EqualFold(filepath.Clean(existing), cleaned) {
+			return
+		}
+	}
+	*paths = append(*paths, cleaned)
+}
+
+func discoverPowerShellProfilePaths(_ string) []string {
+	var paths []string
+	for _, shell := range []string{"pwsh.exe", "powershell.exe"} {
+		profilePath, err := currentUserPowerShellProfilePath(shell)
+		if err != nil {
+			continue
+		}
+		appendUniquePath(&paths, profilePath)
+	}
+	return paths
+}
+
+func currentUserPowerShellProfilePath(shell string) (string, error) {
+	shellPath, err := exec.LookPath(shell)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.Command(shellPath, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$PROFILE.CurrentUserCurrentHost")
+	raw, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(raw)), nil
 }
 
 func powerShellProfileBlock(scriptPath string) string {
@@ -142,7 +199,7 @@ func powerShellSingleQuote(value string) string {
 
 func dynamicPowerShellCompletionScript() string {
 	return `# PowerShell completion for ib
-Register-ArgumentCompleter -Native -CommandName 'ib' -ScriptBlock {
+Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe') -ScriptBlock {
   param($wordToComplete, $commandAst, $cursorPosition)
 
   if ($null -eq $wordToComplete) {
@@ -187,10 +244,10 @@ Register-ArgumentCompleter -Native -CommandName 'ib' -ScriptBlock {
   }
 
   foreach ($line in $output) {
-    if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith(':')) {
+    if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith(':') -or $line.StartsWith('Completion ended with directive:')) {
       continue
     }
-    $parts = $line -split "\t", 2
+    $parts = $line -split ([char]9), 2
     $value = $parts[0]
     if ([string]::IsNullOrWhiteSpace($value)) {
       continue

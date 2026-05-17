@@ -13,6 +13,11 @@ import (
 func TestConfigCompletionWindowsCommandInstallsPowerShellCompletion(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
+	oldDiscoverer := powerShellProfilePathDiscoverer
+	powerShellProfilePathDiscoverer = func(string) []string { return nil }
+	t.Cleanup(func() {
+		powerShellProfilePathDiscoverer = oldDiscoverer
+	})
 
 	app := testApp(t)
 	var stdout bytes.Buffer

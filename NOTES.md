@@ -92,7 +92,7 @@ When WAPI returns HTML or another non-JSON payload with a successful HTTP status
 
 ## Shell Completion
 
-`ib config completion bash`, `ib config completion zsh`, and `ib config completion fish` emit lightweight shell integrations that call the live `ib` binary during tab completion. `ib config completion windows` installs a PowerShell profile integration on native Windows only. Profiles, zones, records, flags, and output formats are resolved dynamically by `ib __complete` or `ib __completeNoDesc`, so users do not need to regenerate or reinstall completion when profile, zone, or record data changes. Regenerate or reinstall the shell integration only when the completion script template itself changes.
+`ib config completion bash`, `ib config completion zsh`, and `ib config completion fish` emit lightweight shell integrations that call the live `ib` binary during tab completion. `ib config completion windows` installs a PowerShell profile integration on native Windows only, covering standard profile paths, common OneDrive Documents paths, and discovered `$PROFILE.CurrentUserCurrentHost` paths. Profiles, zones, records, flags, and output formats are resolved dynamically by `ib __complete` or `ib __completeNoDesc`, so users do not need to regenerate or reinstall completion when profile, zone, or record data changes. Regenerate or reinstall the shell integration only when the completion script template itself changes.
 
 `ib dns search KEY -t <tab><tab>` and `ib dns list -t <tab><tab>` complete supported record type filters such as `a`, `host`, and `txt`. Comma-separated filters are completed from the current segment, so `-t a,` offers remaining types as `a,host`, `a,txt`, and so on.
 

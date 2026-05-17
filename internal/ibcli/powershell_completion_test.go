@@ -1,6 +1,7 @@
 package ibcli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,14 +41,69 @@ func TestUpsertPowerShellProfileBlockAppendsAndReplaces(t *testing.T) {
 func TestDynamicPowerShellCompletionScriptUsesCobraCompletion(t *testing.T) {
 	script := dynamicPowerShellCompletionScript()
 	for _, want := range []string{
-		"Register-ArgumentCompleter -Native -CommandName 'ib'",
+		"Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe')",
 		"$env:IB_ACTIVE_HELP = '0'",
 		"$env:IB_SHELL_PID = [string]$PID",
 		"$requestArgs = @('__complete')",
+		"$parts = $line -split ([char]9), 2",
+		"$line.StartsWith('Completion ended with directive:')",
 		"[System.Management.Automation.CompletionResult]::new",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("PowerShell completion script missing %q:\n%s", want, script)
 		}
 	}
+	if strings.Contains(script, `-split "\t"`) {
+		t.Fatalf("PowerShell completion script uses literal backslash-t split:\n%s", script)
+	}
+}
+
+func TestWindowsPowerShellProfilePathsIncludesKnownAndDiscoveredLocations(t *testing.T) {
+	home := t.TempDir()
+	oneDrive := filepath.Join(home, "OneDrive")
+	discovered := filepath.Join(home, "RedirectedDocuments", "PowerShell", "Microsoft.PowerShell_profile.ps1")
+	t.Setenv("OneDrive", oneDrive)
+	t.Setenv("OneDriveCommercial", "")
+	t.Setenv("OneDriveConsumer", "")
+
+	oldDiscoverer := powerShellProfilePathDiscoverer
+	powerShellProfilePathDiscoverer = func(string) []string {
+		return []string{
+			filepath.Join(oneDrive, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"),
+			discovered,
+		}
+	}
+	t.Cleanup(func() {
+		powerShellProfilePathDiscoverer = oldDiscoverer
+	})
+
+	paths := windowsPowerShellProfilePaths(home)
+	for _, want := range []string{
+		filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"),
+		filepath.Join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"),
+		filepath.Join(oneDrive, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"),
+		filepath.Join(oneDrive, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"),
+		discovered,
+	} {
+		if !containsPath(paths, want) {
+			t.Fatalf("profile paths missing %q: %#v", want, paths)
+		}
+	}
+	if countPath(paths, filepath.Join(oneDrive, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")) != 1 {
+		t.Fatalf("profile paths did not deduplicate OneDrive PowerShell profile: %#v", paths)
+	}
+}
+
+func containsPath(paths []string, want string) bool {
+	return countPath(paths, want) > 0
+}
+
+func countPath(paths []string, want string) int {
+	count := 0
+	for _, path := range paths {
+		if strings.EqualFold(filepath.Clean(path), filepath.Clean(want)) {
+			count++
+		}
+	}
+	return count
 }
