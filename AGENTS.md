@@ -92,7 +92,9 @@ For infographic changes, prefer editing the source SVG text/labels directly and 
 
 ## Commit & Pull Request Guidelines
 
-This checkout does not currently expose Git metadata, so no project-specific commit convention can be inferred. Use concise imperative commit messages such as `Colorize DNS record types` or `Compact context help output`.
+After making file changes, validate the relevant behavior, stage only files changed for the current task, and commit automatically with a concise imperative message. Report the commit hash in the final response.
+
+Pause instead of committing only when validation fails, unrelated worktree changes conflict with the task, or the user explicitly says not to commit. Use messages such as `Colorize DNS record types`, `Compact context help output`, or `Document parallel agent workflows`.
 
 Pull requests should include a short summary, verification commands, and sample output when CLI formatting changes.
 
