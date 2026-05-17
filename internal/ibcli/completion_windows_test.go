@@ -46,7 +46,7 @@ func TestConfigCompletionWindowsCommandInstallsPowerShellCompletion(t *testing.T
 	if err != nil {
 		t.Fatalf("read PowerShell completion script: %v", err)
 	}
-	if !strings.Contains(string(raw), "Register-ArgumentCompleter -Native -CommandName 'ib'") {
+	if !strings.Contains(string(raw), "Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe')") {
 		t.Fatalf("PowerShell completion script missing argument completer:\n%s", raw)
 	}
 }

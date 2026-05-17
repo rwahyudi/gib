@@ -376,7 +376,9 @@ ib config completion windows
 
 Run the Windows installer again after upgrading `ib` if completion behavior
 changes. It updates the normal PowerShell profile paths plus common OneDrive
-Documents profile locations.
+Documents profile locations. If `ib dns <Tab>` offers `dns` instead of DNS
+subcommands, replace `ib.exe`, rerun `ib config completion windows`, and open a
+new PowerShell window so the updated script is loaded.
 
 The generated or installed completion calls the live `ib` binary, so profiles, zones, records, flags, and output formats are resolved dynamically.
 Installing from RPM or DEB puts the Bash completion file in `/etc/bash_completion.d/ib`.

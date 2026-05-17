@@ -42,6 +42,9 @@ func TestDynamicPowerShellCompletionScriptUsesCobraCompletion(t *testing.T) {
 	script := dynamicPowerShellCompletionScript()
 	for _, want := range []string{
 		"Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe')",
+		"function __ibCompletionWords",
+		"[System.Management.Automation.PSParser]::Tokenize",
+		"$requestArgs += @($commandWords[1..($commandWords.Count - 1)])",
 		"$env:IB_ACTIVE_HELP = '0'",
 		"$env:IB_SHELL_PID = [string]$PID",
 		"$requestArgs = @('__complete')",

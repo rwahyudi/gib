@@ -206,21 +206,43 @@ Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe') -ScriptBlock {
     $wordToComplete = ''
   }
 
-  $commandElements = @($commandAst.CommandElements)
-  if ($commandElements.Count -eq 0) {
+  function __ibCompletionWords {
+    param($ast)
+
+    $words = @($ast.CommandElements | ForEach-Object { $_.Extent.Text } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $line = $ast.Extent.Text
+    if ([string]::IsNullOrWhiteSpace($line)) {
+      $line = $ast.ToString()
+    }
+
+    $parseErrors = $null
+    $tokens = @([System.Management.Automation.PSParser]::Tokenize($line, [ref]$parseErrors) |
+      Where-Object { $_.Type -in @('Command', 'CommandArgument', 'String', 'Number', 'Parameter') } |
+      Sort-Object Start |
+      ForEach-Object { $_.Content } |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    if ($tokens.Count -gt $words.Count) {
+      $words = $tokens
+    }
+    return @($words)
+  }
+
+  $commandWords = @(__ibCompletionWords $commandAst)
+  if ($commandWords.Count -eq 0) {
     return
   }
 
-  $commandName = $commandElements[0].Extent.Text
+  $commandName = $commandWords[0]
   if ([string]::IsNullOrWhiteSpace($commandName)) {
     $commandName = 'ib'
   }
 
   $requestArgs = @('__complete')
-  if ($commandElements.Count -gt 1) {
-    $requestArgs += @($commandElements[1..($commandElements.Count - 1)] | ForEach-Object { $_.Extent.Text })
+  if ($commandWords.Count -gt 1) {
+    $requestArgs += @($commandWords[1..($commandWords.Count - 1)])
   }
-  if ($requestArgs.Count -eq 1 -or $requestArgs[-1] -ne $wordToComplete) {
+  if ($wordToComplete -eq '' -or $requestArgs.Count -eq 1 -or $requestArgs[-1] -ne $wordToComplete) {
     $requestArgs += $wordToComplete
   }
 
