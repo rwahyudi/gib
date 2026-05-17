@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -79,6 +80,9 @@ var (
 	cacheStatsStaleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#2E3440")).Background(lipgloss.Color("#EBCB8B")).Padding(0, 1)
 	cacheStatsExpiredStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ECEFF4")).Background(lipgloss.Color("#BF616A")).Padding(0, 1)
 	cacheStatsRefreshingStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ECEFF4")).Background(lipgloss.Color("#B48EAD")).Padding(0, 1)
+
+	cacheReadyMu    sync.Mutex
+	cacheReadyPaths = map[string]bool{}
 )
 
 // cachedPayload is the common in-memory form for zone-list and record-cache
@@ -129,16 +133,34 @@ func (a *App) openCacheDB() (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(cacheSchema); err != nil {
+	if err := a.ensureCacheDBReady(db); err != nil {
 		db.Close()
 		return nil, err
+	}
+	return db, nil
+}
+
+func (a *App) ensureCacheDBReady(db *sql.DB) error {
+	path := filepath.Clean(a.cachePath())
+	cacheReadyMu.Lock()
+	if cacheReadyPaths[path] {
+		cacheReadyMu.Unlock()
+		return nil
+	}
+	defer cacheReadyMu.Unlock()
+
+	if _, err := db.Exec(cacheSchema); err != nil {
+		return err
 	}
 	if err := migrateCacheDB(db); err != nil {
-		db.Close()
-		return nil, err
+		return err
 	}
-	_ = protectPrivateFile(a.cachePath())
-	return db, nil
+	if err := protectPrivateFile(path); err != nil {
+		return err
+	}
+
+	cacheReadyPaths[path] = true
+	return nil
 }
 
 func migrateCacheDB(db *sql.DB) error {

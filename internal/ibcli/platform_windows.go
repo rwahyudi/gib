@@ -7,10 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+var protectedWindowsPaths sync.Map
 
 func (a *App) encryptCurrentPassword(password string) (string, error) {
 	in := dataBlobFromBytes([]byte(password))
@@ -85,6 +88,13 @@ func freeDataBlob(blob windows.DataBlob) {
 }
 
 func protectWindowsPath(path string) error {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" {
+		return nil
+	}
+	if _, ok := protectedWindowsPaths.Load(path); ok {
+		return nil
+	}
 	userSID, err := currentUserSID()
 	if err != nil {
 		return err
@@ -106,7 +116,7 @@ func protectWindowsPath(path string) error {
 	if err != nil {
 		return err
 	}
-	return windows.SetNamedSecurityInfo(
+	if err := windows.SetNamedSecurityInfo(
 		path,
 		windows.SE_FILE_OBJECT,
 		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
@@ -114,7 +124,11 @@ func protectWindowsPath(path string) error {
 		nil,
 		acl,
 		nil,
-	)
+	); err != nil {
+		return err
+	}
+	protectedWindowsPaths.Store(path, struct{}{})
+	return nil
 }
 
 func currentUserSID() (*windows.SID, error) {

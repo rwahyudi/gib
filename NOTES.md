@@ -22,6 +22,8 @@ GitHub releases are tag-driven through GoReleaser. The release workflow publishe
 
 `docs/performance-caching.md` explains cache freshness, stale-while-revalidate, read/write routing, search workers, and SQLite cache tables. Keep that page plus `docs/assets/cache-decision-flow.svg`, `docs/assets/cache-workers.svg`, and `docs/assets/sqlite-cache-tables.svg` in sync when cache behavior, read-server routing, worker behavior, or cache schema changes. The diagrams use a dark Nord, angular, gradient style with compact boxes, small arrowheads, and small animated traffic markers only on the read/write worker flow.
 
+Search can open the SQLite cache once per zone while scanning many zones. Keep cache schema initialization and Windows ACL hardening memoized per process/path; otherwise native Windows search pays repeated filesystem security and schema setup overhead for every zone worker.
+
 ## Global Cache and Search Settings
 
 The config file stores global cache/search tuning in the `[meta]` section:
