@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -138,7 +137,7 @@ func (a *App) openCacheDB() (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
-	_ = os.Chmod(a.cachePath(), 0o600)
+	_ = protectPrivateFile(a.cachePath())
 	return db, nil
 }
 

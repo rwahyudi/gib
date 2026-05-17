@@ -40,7 +40,11 @@ Find available IPv4 addresses in a network.
 .SH FILES
 .TP
 .I ~/.ib/config
-Local profile configuration.
+Local profile configuration with encrypted password tokens.
+.TP
+.I ~/.ib/key
+Unix key file for legacy \fBenc:v1\fR profile password tokens. Native Windows
+builds write new password tokens with user-scope DPAPI instead.
 .TP
 .I ~/.ib/cache.sqlite3
 Local DNS cache database.

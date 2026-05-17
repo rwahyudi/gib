@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
-const encryptedPasswordPrefix = "enc:v1:"
+const (
+	encryptedPasswordPrefix     = "enc:v1:"
+	encryptedWindowsDPAPIPrefix = "enc:v2:windows-dpapi:"
+)
 
 func generateFernetKey() (string, error) {
 	key := make([]byte, 32)

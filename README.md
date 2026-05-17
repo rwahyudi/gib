@@ -119,7 +119,7 @@ ib config edit
 ib config list
 ```
 
-Profiles store the primary server, auto-detected GCM read endpoint when available, credentials, WAPI version, DNS view, and default zone. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Do not commit `~/.ib/config`, `~/.ib/key`, or cache data.
+Profiles store the primary server, auto-detected GCM read endpoint when available, credentials, WAPI version, DNS view, and default zone. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Unix builds use a local `~/.ib/key`; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles. Do not commit `~/.ib/config`, `~/.ib/key`, or cache data.
 
 ## DNS 
 
@@ -128,6 +128,8 @@ DNS commands use this context order:
 ```text
 command --zone/--view -> ib dns zone/view use -> IB_ZONE/IB_VIEW -> configured defaults
 ```
+
+On native Windows, `ib dns zone use` and `ib dns view use` store the same session context files under the user's local app data directory. Shells that do not pass a stable `IB_SHELL_PID` should use `IB_ZONE` / `IB_VIEW` or command flags for explicit context until native PowerShell completion is added.
 
 Override context for one command without saving it:
 

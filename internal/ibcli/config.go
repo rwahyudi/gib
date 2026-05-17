@@ -236,20 +236,13 @@ func (a *App) ensureConfigDir() error {
 	if err := os.MkdirAll(a.ConfigDir, 0o700); err != nil {
 		return err
 	}
-	if err := os.Chmod(a.ConfigDir, 0o700); err != nil {
-		info, statErr := os.Stat(a.ConfigDir)
-		if statErr == nil && info.IsDir() && info.Mode().Perm() == 0o700 {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return protectConfigDir(a.ConfigDir)
 }
 
 func (a *App) getOrCreateConfigKey() (string, error) {
 	raw, err := os.ReadFile(a.ConfigKeyFile)
 	if err == nil {
-		_ = os.Chmod(a.ConfigKeyFile, 0o600)
+		_ = protectPrivateFile(a.ConfigKeyFile)
 		return strings.TrimSpace(string(raw)), nil
 	}
 	if !os.IsNotExist(err) {
@@ -265,8 +258,7 @@ func (a *App) getOrCreateConfigKey() (string, error) {
 	if err := os.WriteFile(a.ConfigKeyFile, []byte(key+"\n"), 0o600); err != nil {
 		return "", err
 	}
-	_ = os.Chmod(a.ConfigKeyFile, 0o600)
-	return key, nil
+	return key, protectPrivateFile(a.ConfigKeyFile)
 }
 
 func (a *App) readConfigKey() (string, error) {
@@ -274,22 +266,28 @@ func (a *App) readConfigKey() (string, error) {
 	if err != nil {
 		return "", cliError("missing encryption key file at %s; run: ib config new [PROFILE]", a.ConfigKeyFile)
 	}
-	_ = os.Chmod(a.ConfigKeyFile, 0o600)
+	_ = protectPrivateFile(a.ConfigKeyFile)
 	return strings.TrimSpace(string(raw)), nil
 }
 
 func (a *App) encryptPassword(password string) (string, error) {
+	if strings.HasPrefix(password, encryptedWindowsDPAPIPrefix) {
+		return password, nil
+	}
 	if strings.HasPrefix(password, encryptedPasswordPrefix) {
 		return password, nil
 	}
-	key, err := a.getOrCreateConfigKey()
-	if err != nil {
-		return "", err
-	}
-	return encryptFernet(key, password)
+	return a.encryptCurrentPassword(password)
 }
 
 func (a *App) decryptPassword(password string) (string, error) {
+	if strings.HasPrefix(password, encryptedWindowsDPAPIPrefix) {
+		return decryptWindowsDPAPIPassword(password)
+	}
+	return a.decryptFernetPassword(password)
+}
+
+func (a *App) decryptFernetPassword(password string) (string, error) {
 	if !strings.HasPrefix(password, encryptedPasswordPrefix) {
 		return password, nil
 	}
@@ -447,7 +445,7 @@ func (a *App) writeConfigProfilesWithSettings(defaultProfile string, profiles ma
 	if err := os.WriteFile(a.ConfigFile, []byte(builder.String()), 0o600); err != nil {
 		return err
 	}
-	return os.Chmod(a.ConfigFile, 0o600)
+	return protectPrivateFile(a.ConfigFile)
 }
 
 func (a *App) loadConfig(required bool) (Profile, error) {
@@ -515,16 +513,6 @@ func (a *App) defaultConfigValues() Profile {
 	return profiles[defaultProfile].complete()
 }
 
-func sessionBaseDir(kind string) string {
-	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
-	if runtimeDir != "" {
-		if info, err := os.Stat(runtimeDir); err == nil && info.IsDir() {
-			return filepath.Join(runtimeDir, "ib", kind)
-		}
-	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("ib-%d", os.Getuid()), kind)
-}
-
 const sessionParentPIDEnv = "IB_SHELL_PID"
 
 func sessionParentPID() int {
@@ -547,21 +535,6 @@ func sessionCandidatePIDs() []int {
 		pids = append(pids, pid)
 	}
 	return pids
-}
-
-func processParentPID(pid int) int {
-	raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
-	if err != nil {
-		return 0
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 2 && fields[0] == "PPid:" {
-			parent, _ := strconv.Atoi(fields[1])
-			return parent
-		}
-	}
-	return 0
 }
 
 func sessionFileForPID(kind, prefix string, pid int) string {
@@ -635,8 +608,10 @@ func writeSessionValue(path string, payload map[string]any) error {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		return err
 	}
-	_ = os.Chmod(filepath.Dir(path), 0o700)
-	return os.Chmod(path, 0o600)
+	if err := protectConfigDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	return protectPrivateFile(path)
 }
 
 func intFromAny(value any) int {

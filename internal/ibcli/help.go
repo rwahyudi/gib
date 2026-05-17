@@ -120,7 +120,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 				{"prompts", "server, username, password, WAPI version, SSL, auto GCM read endpoint, DNS view, default zone"},
 				{"storage", a.ConfigFile},
 				{"key", a.ConfigKeyFile},
-				{"password", "encrypted at rest"},
+				{"password", credentialProtectionDescription()},
 			}),
 		}, "\n")
 	case "ib dns":

@@ -78,6 +78,10 @@ For record columns, the default output remains `type,name,value,zone,ttl,comment
 
 Most `ib dns` subcommands inherit `--zone`/`-z` and `--view`/`-v`. These are per-command context overrides and take precedence over `ib dns zone use`, `ib dns view use`, `IB_ZONE`, `IB_VIEW`, and configured defaults without saving anything to the profile. `ib dns zone list` suppresses the zone override in help and completion and rejects it if typed manually.
 
+`ib dns zone use` and `ib dns view use` store shell-session context in PID-scoped files. Unix builds also inspect `/proc` to recover the shell grandparent PID when completion or subprocess handoff changes the immediate parent. Native Windows builds do not use `/proc`; they use `IB_SHELL_PID` when a shell integration provides it and otherwise fall back to the immediate parent process. `IB_ZONE`, `IB_VIEW`, and command flags remain the reliable explicit context overrides in Windows shells without native completion integration.
+
+Profile passwords use `enc:v1:` Fernet tokens with `~/.ib/key` on Unix. Native Windows writes new passwords as `enc:v2:windows-dpapi:` tokens protected by user-scope DPAPI and best-effort owner ACL hardening. Windows can still decrypt existing `enc:v1:` profiles when the key file exists; those passwords are migrated to DPAPI the next time a decrypted profile is written.
+
 DNS record table output always includes a `Current Context:` footer line. When the table has more than five records, the `Total records` badge is shown on the same line.
 
 `ib dns zone info ZONE` normalizes SOA serial numbers to integer text so JSON numeric/scientific notation from WAPI does not leak into table, JSON, or CSV output.
