@@ -109,6 +109,47 @@ ib --help
 
 RPM and DEB packages install `ib` to `/usr/local/bin/ib` and install Bash completion to `/etc/bash_completion.d/ib`. Open a new shell after package installation to load completion.
 
+## Installation on Windows
+
+Native Windows builds are supported, but the current GitHub release workflow
+publishes Linux packages only. Until a Windows release artifact is published,
+build `ib.exe` from source with Go 1.24 or newer:
+
+```powershell
+winget install GoLang.Go
+git clone https://github.com/rwahyudi/gib.git
+cd gib
+
+$env:GOCACHE = "$env:TEMP\go-build"
+$env:GOMODCACHE = "$env:TEMP\go-mod"
+go build -buildvcs=false -o ib.exe .\cmd\ib
+
+$userBin = Join-Path $HOME "bin"
+New-Item -ItemType Directory -Force $userBin | Out-Null
+Copy-Item .\ib.exe (Join-Path $userBin "ib.exe") -Force
+
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if (($userPath -split ";") -notcontains $userBin) {
+  $newPath = ($userPath.TrimEnd(";") + ";$userBin").TrimStart(";")
+  [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+}
+```
+
+Open a new PowerShell window after updating `PATH`, then verify the install:
+
+```powershell
+ib --help
+ib config new --default
+```
+
+If you already have a prebuilt `ib.exe`, copy it to a directory on your user
+`PATH`, such as `$HOME\bin`, and open a new PowerShell window before running
+`ib --help`.
+
+Native Windows profile passwords are encrypted with user-scope Windows DPAPI.
+Native PowerShell completion is not available yet; Bash, Zsh, and Fish
+completion can still be generated for WSL, Git Bash, or MSYS2.
+
 ## Setup
 
 Create or edit an Infoblox profile:
