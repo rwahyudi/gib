@@ -16,7 +16,7 @@ Security scanning lives in GitHub Actions and Dependabot. Keep README security c
 
 ## Release Maintenance
 
-GitHub releases are tag-driven through GoReleaser. The release workflow publishes Linux amd64 tarball, RPM, DEB, and checksum assets. RPM and DEB packages install `/usr/local/bin/ib` and `/etc/bash_completion.d/ib`. Keep README install commands, `.goreleaser.yaml`, and packaged completion paths in sync when changing release behavior.
+GitHub releases are tag-driven through GoReleaser. The release workflow publishes Linux amd64 tarball, RPM, DEB, Windows amd64 ZIP, and checksum assets. RPM and DEB packages install `/usr/local/bin/ib` and `/etc/bash_completion.d/ib`. Windows release builds must keep CGO enabled and use MinGW because the SQLite cache depends on `go-sqlite3`. Keep README install commands, `.goreleaser.yaml`, and packaged completion paths in sync when changing release behavior.
 
 ## Performance and Caching Docs
 

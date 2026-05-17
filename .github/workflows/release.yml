@@ -32,10 +32,19 @@ jobs:
       - name: Install package build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential rpm
+          sudo apt-get install -y build-essential rpm gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
 
       - name: Run tests
         run: go test ./...
+
+      - name: Smoke test Windows build
+        run: go build -buildvcs=false -o /tmp/ib.exe ./cmd/ib
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "1"
+          CC: x86_64-w64-mingw32-gcc
+          CXX: x86_64-w64-mingw32-g++
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7

@@ -111,9 +111,38 @@ RPM and DEB packages install `ib` to `/usr/local/bin/ib` and install Bash comple
 
 ## Installation on Windows
 
-Native Windows builds are supported, but the current GitHub release workflow
-publishes Linux packages only. Until a Windows release artifact is published,
-build `ib.exe` from source with Go 1.24 or newer:
+Native Windows release builds are published as portable ZIP archives. Download
+the Windows ZIP from the [latest GitHub release](https://github.com/rwahyudi/gib/releases/latest),
+extract `ib.exe`, and place it on your user `PATH`:
+
+```powershell
+$version = "0.3.2"
+$archive = "ib_${version}_windows_amd64.zip"
+$url = "https://github.com/rwahyudi/gib/releases/download/v$version/$archive"
+
+Invoke-WebRequest -Uri $url -OutFile $archive
+Expand-Archive ".\$archive" -DestinationPath ".\ib-$version" -Force
+
+$userBin = Join-Path $HOME "bin"
+New-Item -ItemType Directory -Force $userBin | Out-Null
+Copy-Item ".\ib-$version\ib.exe" (Join-Path $userBin "ib.exe") -Force
+
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if (($userPath -split ";") -notcontains $userBin) {
+  $newPath = ($userPath.TrimEnd(";") + ";$userBin").TrimStart(";")
+  [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+}
+```
+
+Open a new PowerShell window after updating `PATH`, then verify the install:
+
+```powershell
+ib --help
+ib config new --default
+```
+
+If you prefer to build from source, install Go 1.24 or newer and build
+`ib.exe` locally:
 
 ```powershell
 winget install GoLang.Go
@@ -134,17 +163,6 @@ if (($userPath -split ";") -notcontains $userBin) {
   [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
 }
 ```
-
-Open a new PowerShell window after updating `PATH`, then verify the install:
-
-```powershell
-ib --help
-ib config new --default
-```
-
-If you already have a prebuilt `ib.exe`, copy it to a directory on your user
-`PATH`, such as `$HOME\bin`, and open a new PowerShell window before running
-`ib --help`.
 
 Native Windows profile passwords are encrypted with user-scope Windows DPAPI.
 Native PowerShell completion is not available yet; Bash, Zsh, and Fish
@@ -226,8 +244,8 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
   cache data in SQLite.
 - [go-isatty](https://github.com/mattn/go-isatty) detects interactive terminals
   so scripts keep clean output.
-- [GoReleaser](https://goreleaser.com/) builds release binaries plus RPM and DEB
-  packages.
+- [GoReleaser](https://goreleaser.com/) builds release binaries, the Windows
+  ZIP archive, and Linux RPM/DEB packages.
 
 ## Command Reference
 

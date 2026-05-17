@@ -3,7 +3,7 @@ version: 2
 project_name: ib
 
 builds:
-  - id: ib
+  - id: ib-linux
     main: ./cmd/ib
     binary: ib
     env:
@@ -16,13 +16,36 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+  - id: ib-windows
+    main: ./cmd/ib
+    binary: ib
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-w64-mingw32-gcc
+      - CXX=x86_64-w64-mingw32-g++
+    goos:
+      - windows
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
 
 archives:
   - id: ib-linux
     ids:
-      - ib
+      - ib-linux
     formats:
       - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+  - id: ib-windows
+    ids:
+      - ib-windows
+    formats:
+      - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
@@ -30,7 +53,7 @@ archives:
 nfpms:
   - id: ib-linux-packages
     ids:
-      - ib
+      - ib-linux
     package_name: ib
     vendor: rwahyudi
     homepage: https://github.com/rwahyudi/gib
