@@ -3,6 +3,7 @@ package ibcli
 import (
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -60,6 +61,17 @@ type searchProgressModel struct {
 }
 
 func (a *App) runDNSSearch(profile Profile, client *WapiClient, options SearchOptions) ([]TypedRecord, error) {
+	if a.searchDebugEnabled() {
+		originalProgress := options.Progress
+		options.Progress = func(event SearchProgressEvent) {
+			a.writeSearchDebugEvent(event)
+			if originalProgress != nil {
+				originalProgress(event)
+			}
+		}
+		return a.collectSearchResults(profile, client, options)
+	}
+
 	if !a.searchProgressEnabled() {
 		var records []TypedRecord
 		if err := a.withSpinner("Searching DNS records...", func() error {
@@ -117,6 +129,33 @@ func clearSearchProgressView(writer io.Writer, model tea.Model) {
 
 func (a *App) searchProgressEnabled() bool {
 	return a.isTableOutput() && a.spinnerEnabled()
+}
+
+func (a *App) searchDebugEnabled() bool {
+	return envFlagEnabled("IB_SEARCH_DEBUG") || envFlagEnabled("IB_CACHE_DEBUG")
+}
+
+func envFlagEnabled(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "y", "on", "enable", "enabled":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *App) writeSearchDebugEvent(event SearchProgressEvent) {
+	if a.Stderr == nil {
+		return
+	}
+	switch event.Kind {
+	case searchProgressWorkerDone:
+		fmt.Fprintf(a.Stderr, "search cache: zone=%s source=%s records=%d\n", event.Zone, event.Source, event.Records)
+	case searchProgressWorkerSkip:
+		fmt.Fprintf(a.Stderr, "search cache: zone=%s skipped=%s\n", event.Zone, event.Stage)
+	case searchProgressWorkerError:
+		fmt.Fprintf(a.Stderr, "search cache: zone=%s error=%v\n", event.Zone, event.Err)
+	}
 }
 
 func newSearchProgressModel(events <-chan SearchProgressEvent) searchProgressModel {

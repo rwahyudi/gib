@@ -57,6 +57,34 @@ func TestWapiClientRoutesGETToReadServerAndWritesToPrimary(t *testing.T) {
 	}
 }
 
+func TestNewClientTunesTransportForParallelSearchReuse(t *testing.T) {
+	app := testApp(t)
+	writeConfigForSettings(t, app, ConfigSettings{DNSSearchWorkerLimit: 24})
+	client := app.newClient(Profile{
+		Server:      "https://infoblox.example",
+		Username:    "admin",
+		Password:    "secret",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		VerifySSL:   true,
+	})
+
+	transport, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", client.httpClient.Transport)
+	}
+	want := 48
+	if transport.MaxIdleConnsPerHost != want {
+		t.Fatalf("MaxIdleConnsPerHost = %d, want %d", transport.MaxIdleConnsPerHost, want)
+	}
+	if transport.MaxConnsPerHost != want {
+		t.Fatalf("MaxConnsPerHost = %d, want %d", transport.MaxConnsPerHost, want)
+	}
+	if transport.MaxIdleConns < want {
+		t.Fatalf("MaxIdleConns = %d, want >= %d", transport.MaxIdleConns, want)
+	}
+}
+
 func TestWapiClientExplainsNonJSONResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

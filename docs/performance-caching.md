@@ -15,6 +15,7 @@ run multi-zone searches with a bounded worker pool.
 | Read endpoint | GET requests use `read_server` when configured. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
 | Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`. |
+| Connections | The WAPI HTTP client keeps an idle connection pool sized from `dns_search_worker_limit` for better TLS reuse. |
 
 Default tuning in the profile config `[meta]` section:
 
@@ -56,10 +57,13 @@ create, edit, delete, and zone mutation commands stay on the primary Grid Master
 ## What The Workers Do
 
 For a global search, `ib` first loads the searchable zone list, filters out
-secondary zones, and then assigns zones to workers. Each worker does the same
-per-zone record load:
+secondary zones, preloads matching record-cache rows with one SQLite connection,
+and then assigns zones to workers. Each worker uses the preloaded row when it is
+fresh or inside the SWR window, then falls back to the per-zone cache/WAPI path
+only for missing or expired rows. Each per-zone record load:
 
-1. Open the SQLite cache with a single DB connection and `busy_timeout`.
+1. Use the preloaded SQLite row, or open the SQLite cache with a single DB
+   connection and `busy_timeout` when a fallback is required.
 2. Read the zone's `record_cache` row.
 3. Decode JSON records when a cache row exists.
 4. Decide fresh, stale-inside-SWR, or expired-outside-SWR.
@@ -102,3 +106,7 @@ Use these commands when troubleshooting cache behavior:
 ib config cache status
 ib config cache clear
 ```
+
+Use `IB_SEARCH_DEBUG=1 ib dns search KEYWORD --global` to keep per-zone cache
+source lines on stderr after the command finishes. Sources are `fresh cache`,
+`stale cache`, `serial-valid cache`, or `allrecords`.

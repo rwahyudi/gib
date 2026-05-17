@@ -41,6 +41,30 @@ func TestClearSearchProgressViewSkipsEmptyView(t *testing.T) {
 	}
 }
 
+func TestSearchDebugEventWritesPersistentCacheSource(t *testing.T) {
+	t.Setenv("IB_SEARCH_DEBUG", "1")
+	app := testApp(t)
+	var stderr bytes.Buffer
+	app.Stderr = &stderr
+
+	if !app.searchDebugEnabled() {
+		t.Fatal("search debug should be enabled")
+	}
+	app.writeSearchDebugEvent(SearchProgressEvent{
+		Kind:    searchProgressWorkerDone,
+		Zone:    "example.com",
+		Source:  recordCacheSourceFreshCache,
+		Records: 3,
+	})
+
+	got := stderr.String()
+	for _, want := range []string{"zone=example.com", "source=fresh cache", "records=3"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("debug output missing %q: %q", want, got)
+		}
+	}
+}
+
 type emptyTeaModel struct{}
 
 func (emptyTeaModel) Init() tea.Cmd {

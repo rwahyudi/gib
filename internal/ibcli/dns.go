@@ -1864,6 +1864,15 @@ func (a *App) cachedRecordsForZoneWithSourceAndDetails(profile Profile, client *
 	return result.Records, result.Source, err
 }
 
+func (a *App) cachedRecordsForZoneWithPrefetchedSourceAndDetails(profile Profile, client *WapiClient, zoneName string, enrich bool, entry cachedPayload, hasEntry bool) ([]TypedRecord, string, error) {
+	if hasEntry && entry.CacheFound {
+		if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, time.Now(), enrich); ok {
+			return result.Records, result.Source, nil
+		}
+	}
+	return a.cachedRecordsForZoneWithSourceAndDetails(profile, client, zoneName, enrich)
+}
+
 func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zoneName string, enrich bool) (cachedRecordLoadResult, error) {
 	now := time.Now()
 	entry, err := a.readCachedRecords(profile, zoneName)
@@ -2504,6 +2513,12 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 		return []zoneRecordBatch{{ZoneName: zoneName, Records: records}}, nil
 	}
 
+	zoneNames := make([]string, 0, len(zones))
+	for _, zone := range zones {
+		zoneNames = append(zoneNames, cleanString(zone["fqdn"]))
+	}
+	prefetchedRecords := a.readCachedRecordsForZones(profile, zoneNames)
+
 	workerCount := a.dnsSearchWorkerLimit()
 	if len(zones) < workerCount {
 		workerCount = len(zones)
@@ -2535,7 +2550,8 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 						return
 					}
 					reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressWorkerStart, WorkerID: workerID, Zone: job.zoneName, Stage: "Checking cache"})
-					records, source, err := a.cachedRecordsForZoneWithSourceAndDetails(profile, client, job.zoneName, enrich)
+					entry, hasEntry := prefetchedRecords[normalizeCacheZone(job.zoneName)]
+					records, source, err := a.cachedRecordsForZoneWithPrefetchedSourceAndDetails(profile, client, job.zoneName, enrich, entry, hasEntry)
 					if err != nil {
 						if isSecondaryZoneDataUnavailable(err) {
 							reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressWorkerSkip, WorkerID: workerID, Zone: job.zoneName, Stage: "Secondary zone data unavailable", Err: err})

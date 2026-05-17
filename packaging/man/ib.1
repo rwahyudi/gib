@@ -48,6 +48,11 @@ builds write new password tokens with user-scope DPAPI instead.
 .TP
 .I ~/.ib/cache.sqlite3
 Local DNS cache database.
+.SH ENVIRONMENT
+.TP
+.B IB_SEARCH_DEBUG=1
+Print persistent per-zone DNS search cache sources to stderr. Sources include
+fresh cache, stale cache, serial-valid cache, and allrecords.
 .SH SEE ALSO
 .B ib --help
 and

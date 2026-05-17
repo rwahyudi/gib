@@ -478,6 +478,51 @@ func (a *App) readCachedRecords(profile Profile, zone string) (cachedPayload, er
 	return entry, nil
 }
 
+func (a *App) readCachedRecordsForZones(profile Profile, zones []string) map[string]cachedPayload {
+	entries := map[string]cachedPayload{}
+	profileName, view := cacheScope(profile)
+	normalizedZones := make([]string, 0, len(zones))
+	seen := map[string]bool{}
+	for _, zone := range zones {
+		zone = normalizeCacheZone(zone)
+		if zone == "" || seen[zone] {
+			continue
+		}
+		seen[zone] = true
+		normalizedZones = append(normalizedZones, zone)
+	}
+	if len(normalizedZones) == 0 {
+		return entries
+	}
+
+	db, err := a.openCacheDB()
+	if err != nil {
+		return entries
+	}
+	defer db.Close()
+
+	for _, zone := range normalizedZones {
+		key := cacheKey("records", profileName, view, zone)
+		var serial sql.NullString
+		var raw string
+		var cachedAt, staleExpiresAt int64
+		err := db.QueryRow(`SELECT payload_json, zone_serial, cached_at, stale_expires_at FROM record_cache WHERE cache_key = ?`, key).Scan(&raw, &serial, &cachedAt, &staleExpiresAt)
+		if err != nil {
+			continue
+		}
+		rows, err := rowsFromJSON(raw)
+		if err != nil {
+			continue
+		}
+		entry := cachedPayload{Rows: rows, CachedAt: cachedAt, StaleExpiresAt: staleExpiresAt, CacheFound: true}
+		if serial.Valid {
+			entry.Serial = serial.String
+		}
+		entries[zone] = entry
+	}
+	return entries
+}
+
 func (a *App) writeCachedRecords(profile Profile, zone string, serial string, rows []map[string]any, now time.Time) error {
 	// A freshly downloaded zone gets a normal freshness window and a longer SWR
 	// window. After the normal window expires, list/search can still return this

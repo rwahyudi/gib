@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" role="img" aria-labelledby="title desc">
   <title id="title">Nord ib cache, read endpoint, write endpoint, and worker flow</title>
-  <desc id="desc">Static worker boxes read from SQLite cache in parallel. Small animated markers show read traffic to a GCM endpoint, write traffic to the primary Grid Master, and background refresh traffic updating the cache.</desc>
+  <desc id="desc">Static worker boxes use a preloaded SQLite cache snapshot and fall back to per-zone cache checks. Small animated markers show read traffic to a GCM endpoint, write traffic to the primary Grid Master, and background refresh traffic updating the cache.</desc>
   <defs>
     <linearGradient id="page-bg" x1="0" y1="0" x2="980" y2="560" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#2E3440" />
@@ -79,19 +79,19 @@
   <rect class="panel" x="35" y="40" width="910" height="475" rx="5" />
 
   <text class="text" x="65" y="80">ib DNS Search, Cache, and Infoblox Routing</text>
-  <text class="small" x="65" y="106">Parallel workers use local cache first. GET can use GCM. Writes stay on the primary Grid Master.</text>
+  <text class="small" x="65" y="106">Search preloads local cache rows before workers. GET can use GCM. Writes stay on the primary Grid Master.</text>
 
   <rect class="worker node" x="70" y="120" width="140" height="50" rx="4" />
   <text class="text" x="100" y="150">Worker 1</text>
-  <text class="tiny" x="84" y="167">zone A cache load</text>
+  <text class="tiny" x="84" y="167">zone A cached row</text>
 
   <rect class="worker node" x="70" y="230" width="140" height="50" rx="4" />
   <text class="text" x="100" y="260">Worker 2</text>
-  <text class="tiny" x="84" y="277">zone B cache load</text>
+  <text class="tiny" x="84" y="277">zone B cached row</text>
 
   <rect class="worker node" x="70" y="340" width="140" height="50" rx="4" />
   <text class="text" x="100" y="370">Worker 3</text>
-  <text class="tiny" x="84" y="387">zone C cache load</text>
+  <text class="tiny" x="84" y="387">zone C cached row</text>
 
   <rect class="cache node" x="430" y="205" width="190" height="130" rx="4" />
   <text class="text" x="478" y="246">SQLite Cache</text>
@@ -153,7 +153,7 @@
     </animateMotion>
   </circle>
 
-  <text class="tiny" x="245" y="135">parallel cache checks</text>
+  <text class="tiny" x="245" y="135">prefetched cache rows</text>
   <text class="tiny" x="635" y="216">GET / SOA / allrecords</text>
   <text class="tiny" x="515" y="489">POST / PUT / DELETE</text>
   <text class="tiny" x="599" y="382">renew or replace cache</text>

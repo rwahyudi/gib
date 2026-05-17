@@ -1423,6 +1423,71 @@ func TestSearchProgressReportsWorkerEvents(t *testing.T) {
 	}
 }
 
+func TestSearchAcrossZonesUsesFreshPrefetchedRecordCache(t *testing.T) {
+	zones := []map[string]any{
+		{"fqdn": "one.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "two.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}
+	var requestsMu sync.Mutex
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestsMu.Lock()
+		requests++
+		requestsMu.Unlock()
+		http.Error(w, "cache should satisfy this search", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedZones(profile, zones, now); err != nil {
+		t.Fatalf("write cached zones: %v", err)
+	}
+	for _, zone := range zones {
+		zoneName := cleanString(zone["fqdn"])
+		if err := app.writeCachedRecords(profile, zoneName, "2026050801", []map[string]any{
+			{"type": "HOST_IPV4ADDR", "name": "test." + zoneName, "address": "192.0.2.10", "zone": zoneName},
+		}, now); err != nil {
+			t.Fatalf("write cached records for %s: %v", zoneName, err)
+		}
+	}
+
+	var eventsMu sync.Mutex
+	var events []SearchProgressEvent
+	records, err := app.collectSearchResults(profile, testWapiClient(server), SearchOptions{
+		Keyword: "test",
+		Global:  true,
+		Progress: func(event SearchProgressEvent) {
+			eventsMu.Lock()
+			events = append(events, event)
+			eventsMu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	if len(records) != len(zones) {
+		t.Fatalf("records = %d, want %d: %#v", len(records), len(zones), records)
+	}
+	requestsMu.Lock()
+	defer requestsMu.Unlock()
+	if requests != 0 {
+		t.Fatalf("WAPI requests = %d, want 0", requests)
+	}
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	var freshCacheHits int
+	for _, event := range events {
+		if event.Kind == searchProgressWorkerDone && event.Source == recordCacheSourceFreshCache {
+			freshCacheHits++
+		}
+	}
+	if freshCacheHits != len(zones) {
+		t.Fatalf("fresh cache hits = %d, want %d; events=%#v", freshCacheHits, len(zones), events)
+	}
+}
+
 func TestSearchAcrossZonesSkipsSecondaryDataUnavailableError(t *testing.T) {
 	zones := []map[string]any{
 		{"fqdn": "primary.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},

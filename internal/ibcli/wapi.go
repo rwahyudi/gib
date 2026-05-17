@@ -35,12 +35,15 @@ type WapiClient struct {
 	httpClient  *http.Client
 }
 
+const minWAPIIdleConns = 32
+
 func (a *App) newClient(profile Profile) *WapiClient {
 	timeout := profile.Timeout
 	if timeout == 0 {
 		timeout = defaultTimeoutSeconds
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	a.tuneWAPITransport(transport)
 	if !profile.VerifySSL {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- operator-controlled Infoblox profile setting
 	}
@@ -63,6 +66,22 @@ func (a *App) newClient(profile Profile) *WapiClient {
 			Transport: transport,
 		},
 	}
+}
+
+func (a *App) tuneWAPITransport(transport *http.Transport) {
+	if transport == nil {
+		return
+	}
+	workerLimit := a.dnsSearchWorkerLimit()
+	desiredIdleConns := workerLimit * 2
+	if desiredIdleConns < minWAPIIdleConns {
+		desiredIdleConns = minWAPIIdleConns
+	}
+	if transport.MaxIdleConns < desiredIdleConns {
+		transport.MaxIdleConns = desiredIdleConns
+	}
+	transport.MaxIdleConnsPerHost = desiredIdleConns
+	transport.MaxConnsPerHost = desiredIdleConns
 }
 
 func normalizeServer(value string) (string, error) {

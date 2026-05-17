@@ -338,6 +338,8 @@ Zone and record caches are stored in `~/.ib/cache.sqlite3`.
 
 Record cache freshness uses `cached_at + cache_ttl`. Expired records inside `records_cache_swr_ttl` are returned immediately while a single background refresh process revalidates the zone serial and refreshes `/allrecords` when needed.
 
+Multi-zone search preloads matching record-cache rows with one SQLite connection before workers start. Workers still fall back to per-zone cache/WAPI checks for missing or expired rows. The WAPI HTTP client keeps a larger per-host connection pool sized from `dns_search_worker_limit` so parallel search can reuse TLS connections instead of repeatedly reconnecting.
+
 When cache is missing or already outside the stale window, list/search waits up to `max_background_worker_wait` seconds for an active background refresh of the same profile, DNS view, and zone before doing foreground WAPI refresh work.
 
 Shell completion prefetches cache freshness in the background by default. When `ib __complete` or `ib __completeNoDesc` runs and `completion_cache_prefetch = true`, it checks the current DNS view and zone, then starts lease-protected zone-list or current-zone record refresh helpers when cache rows are missing or stale. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
@@ -355,6 +357,18 @@ Useful cache commands:
 ```bash
 ib config cache status
 ib config cache clear
+```
+
+To see whether search used cache or WAPI, run with persistent cache-source diagnostics:
+
+```bash
+IB_SEARCH_DEBUG=1 ib dns search app --global
+```
+
+PowerShell:
+
+```powershell
+$env:IB_SEARCH_DEBUG = "1"; ib dns search app --global
 ```
 
 Deleting a profile also clears local cache rows for that profile.

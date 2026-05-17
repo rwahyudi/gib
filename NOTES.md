@@ -24,6 +24,10 @@ GitHub releases are tag-driven through GoReleaser. The release workflow publishe
 
 Search can open the SQLite cache once per zone while scanning many zones. Keep cache schema initialization and Windows ACL hardening memoized per process/path; otherwise native Windows search pays repeated filesystem security and schema setup overhead for every zone worker.
 
+Multi-zone search should preload record-cache rows for the selected zones with one SQLite connection before worker fan-out. This keeps native Windows search from repeatedly opening the cache file for fresh rows; missing or expired rows still fall back to the normal per-zone cache/WAPI path.
+
+The WAPI HTTP transport should keep enough idle per-host connections for search workers. Size `MaxIdleConnsPerHost` and `MaxConnsPerHost` from `dns_search_worker_limit` so Windows does not repeatedly pay TCP/TLS setup costs during parallel `/allrecords` refreshes.
+
 ## Global Cache and Search Settings
 
 The config file stores global cache/search tuning in the `[meta]` section:
@@ -59,6 +63,8 @@ During `ib config new` and `ib config edit`, DNS View and Default DNS Zone are o
 ## DNS Search Progress
 
 For interactive table output, `ib dns search` uses a Bubble Tea progress view on stderr while the search is running. The view shows the search stage, configured worker count, completed zones, match count, and each worker's current zone/cache source. The final record table is still printed normally on stdout after the progress view exits.
+
+For persistent troubleshooting output, `IB_SEARCH_DEBUG=1` or `IB_CACHE_DEBUG=1` disables the transient progress view and prints per-zone search cache sources on stderr. Use this when checking Windows cache behavior after the table has rendered.
 
 The worker state `Checking cache` covers the whole per-zone record load until the worker finishes. That includes opening the SQLite cache, reading and decoding cached JSON records, checking fresh/stale expiry, acquiring the stale-while-revalidate refresh lease and launching the detached refresh subprocess when needed, and, for entries outside SWR, doing foreground serial or `/allrecords` refresh work.
 
