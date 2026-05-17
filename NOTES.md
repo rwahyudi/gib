@@ -118,7 +118,7 @@ Successful DNS zone create/delete operations clear and refresh the zone-list cac
 
 Zone record data is cached in `record_cache` per profile, DNS view, and zone.
 
-Successful `ib dns create`, `ib dns edit`, and `ib dns delete` operations remove the affected zone's record-cache row and synchronously launch the detached refresh subprocess when no matching refresh lease is active. The write command does not wait for `/allrecords`; the subprocess repopulates the cache in the background. A/AAAA workflows that also create or update PTR records queue refreshes for both the forward zone and the reverse zone.
+Successful `ib dns create`, `ib dns edit`, and `ib dns delete` operations remove the affected zone's record-cache row and synchronously launch the detached refresh subprocess when no matching refresh lease is active. The write command does not wait for `/allrecords`; the subprocess repopulates the cache in the background. A/AAAA workflows that create, update, or may indirectly delete PTR records queue refreshes for both the forward zone and the reverse zone; when an A/AAAA edit moves to a new address, `ib` also removes the old matching PTR before refreshing the old reverse-zone cache.
 
 When a command queries zone records:
 

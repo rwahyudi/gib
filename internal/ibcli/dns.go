@@ -2837,18 +2837,29 @@ func reversePointer(address netip.Addr) string {
 	return strings.Join(nibbles, ".") + ".ip6.arpa"
 }
 
-func reverseZoneForIP(client *WapiClient, address netip.Addr) (string, error) {
-	expectedFormat := "IPV6"
+func reverseZoneFormat(address netip.Addr) string {
 	if address.Is4() {
-		expectedFormat = "IPV4"
+		return "IPV4"
 	}
+	return "IPV6"
+}
+
+func reverseZoneCandidates(address netip.Addr) []string {
 	pointer := reversePointer(address)
-	zones, err := queryZones(client, "")
-	if err != nil {
-		return "", err
+	labels := strings.Split(pointer, ".")
+	candidates := make([]string, 0, len(labels))
+	for i := range labels {
+		candidate := strings.Join(labels[i:], ".")
+		if candidate != "" {
+			candidates = append(candidates, candidate)
+		}
 	}
+	return candidates
+}
+
+func bestReverseZone(rows []map[string]any, pointer, expectedFormat string) (string, bool) {
 	var matches []string
-	for _, zone := range zones {
+	for _, zone := range rows {
 		format := strings.ToUpper(cleanString(zone["zone_format"]))
 		if format != "" && format != expectedFormat {
 			continue
@@ -2859,7 +2870,7 @@ func reverseZoneForIP(client *WapiClient, address netip.Addr) (string, error) {
 		}
 	}
 	if len(matches) == 0 {
-		return "", cliError("no %s reverse DNS zone found for %s in view %s", expectedFormat, address, client.View)
+		return "", false
 	}
 	sort.Slice(matches, func(i, j int) bool {
 		if len(matches[i]) == len(matches[j]) {
@@ -2867,7 +2878,55 @@ func reverseZoneForIP(client *WapiClient, address netip.Addr) (string, error) {
 		}
 		return len(matches[i]) > len(matches[j])
 	})
-	return matches[0], nil
+	return matches[0], true
+}
+
+func reverseZoneForIPByCandidates(client *WapiClient, address netip.Addr) (string, error) {
+	pointer := reversePointer(address)
+	expectedFormat := reverseZoneFormat(address)
+	for _, candidate := range reverseZoneCandidates(address) {
+		matches, err := findZone(client, candidate, zoneReturnFields)
+		if err != nil {
+			return "", err
+		}
+		if zone, ok := bestReverseZone(matches, pointer, expectedFormat); ok {
+			return zone, nil
+		}
+	}
+	return "", nil
+}
+
+func (a *App) cachedReverseZoneForIP(profile Profile, address netip.Addr) (string, bool) {
+	entry, err := a.readCachedZones(profile)
+	if err != nil || !entry.CacheFound {
+		return "", false
+	}
+	return bestReverseZone(entry.Rows, reversePointer(address), reverseZoneFormat(address))
+}
+
+func (a *App) reverseZoneForIPForCacheRefresh(profile Profile, client *WapiClient, address netip.Addr) (string, error) {
+	if reverseZone, ok := a.cachedReverseZoneForIP(profile, address); ok {
+		return reverseZone, nil
+	}
+	return reverseZoneForIP(client, address)
+}
+
+func reverseZoneForIP(client *WapiClient, address netip.Addr) (string, error) {
+	expectedFormat := reverseZoneFormat(address)
+	if reverseZone, err := reverseZoneForIPByCandidates(client, address); err != nil {
+		return "", err
+	} else if reverseZone != "" {
+		return reverseZone, nil
+	}
+	pointer := reversePointer(address)
+	zones, err := queryZones(client, "")
+	if err != nil {
+		return "", err
+	}
+	if reverseZone, ok := bestReverseZone(zones, pointer, expectedFormat); ok {
+		return reverseZone, nil
+	}
+	return "", cliError("no %s reverse DNS zone found for %s in view %s", expectedFormat, address, client.View)
 }
 
 func ptrMatches(client *WapiClient, address netip.Addr) (string, []TypedRecord, error) {

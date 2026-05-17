@@ -9,12 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 )
-
-var wapiSuffixRE = regexp.MustCompile(`/wapi/v[0-9][^/]*$`)
 
 type WapiError struct {
 	Status int
@@ -80,13 +77,24 @@ func normalizeServer(value string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", cliError("invalid Infoblox server URL: %s", value)
 	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return "", cliError("invalid Infoblox server URL scheme %q; use https:// or http://", parsed.Scheme)
+	}
 
 	// Operators often paste a full WAPI URL. Store only the appliance base URL
 	// so versioned paths are generated consistently by endpoint().
-	parsed.Path = wapiSuffixRE.ReplaceAllString(strings.TrimRight(parsed.Path, "/"), "")
+	parsed.Path = stripWAPIPath(strings.TrimRight(parsed.Path, "/"))
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func stripWAPIPath(path string) string {
+	lower := strings.ToLower(path)
+	if index := strings.Index(lower, "/wapi/v"); index >= 0 {
+		return strings.TrimRight(path[:index], "/")
+	}
+	return path
 }
 
 func (c *WapiClient) Request(method, objectPath string, params url.Values, payload any) (any, error) {

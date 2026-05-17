@@ -236,13 +236,24 @@ func (a *App) ensureConfigDir() error {
 	if err := os.MkdirAll(a.ConfigDir, 0o700); err != nil {
 		return err
 	}
-	return os.Chmod(a.ConfigDir, 0o700)
+	if err := os.Chmod(a.ConfigDir, 0o700); err != nil {
+		info, statErr := os.Stat(a.ConfigDir)
+		if statErr == nil && info.IsDir() && info.Mode().Perm() == 0o700 {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (a *App) getOrCreateConfigKey() (string, error) {
-	if raw, err := os.ReadFile(a.ConfigKeyFile); err == nil {
+	raw, err := os.ReadFile(a.ConfigKeyFile)
+	if err == nil {
 		_ = os.Chmod(a.ConfigKeyFile, 0o600)
 		return strings.TrimSpace(string(raw)), nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
 	}
 	if err := a.ensureConfigDir(); err != nil {
 		return "", err
@@ -514,36 +525,88 @@ func sessionBaseDir(kind string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("ib-%d", os.Getuid()), kind)
 }
 
+const sessionParentPIDEnv = "IB_SHELL_PID"
+
+func sessionParentPID() int {
+	if raw := strings.TrimSpace(os.Getenv(sessionParentPIDEnv)); raw != "" {
+		if pid, err := strconv.Atoi(raw); err == nil && pid > 0 {
+			return pid
+		}
+	}
+	return os.Getppid()
+}
+
+func sessionCandidatePIDs() []int {
+	seen := map[int]bool{}
+	var pids []int
+	for _, pid := range []int{sessionParentPID(), os.Getppid(), processParentPID(os.Getppid())} {
+		if pid <= 0 || seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+func processParentPID(pid int) int {
+	raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "PPid:" {
+			parent, _ := strconv.Atoi(fields[1])
+			return parent
+		}
+	}
+	return 0
+}
+
+func sessionFileForPID(kind, prefix string, pid int) string {
+	return filepath.Join(sessionBaseDir(kind), fmt.Sprintf("%s-%d.json", prefix, pid))
+}
+
 func sessionFile(kind, prefix string) string {
-	return filepath.Join(sessionBaseDir(kind), fmt.Sprintf("%s-%d.json", prefix, os.Getppid()))
+	return sessionFileForPID(kind, prefix, sessionParentPID())
 }
 
 func (a *App) readSessionZone(profileName string) string {
-	return readSessionValue(sessionFile("active-zones", "active-zone-session"), "zone", profileName)
+	return readSessionValueFromSessionFiles("active-zones", "active-zone-session", "zone", profileName)
 }
 
 func (a *App) writeSessionZone(zoneName, profileName string) error {
 	payload := map[string]any{
 		"zone":       zoneName,
 		"profile":    profileName,
-		"parent_pid": os.Getppid(),
+		"parent_pid": sessionParentPID(),
 	}
 	return writeSessionValue(sessionFile("active-zones", "active-zone-session"), payload)
 }
 
 func (a *App) readSessionView() string {
-	return readSessionValue(sessionFile("active-views", "active-view-session"), "view", "")
+	return readSessionValueFromSessionFiles("active-views", "active-view-session", "view", "")
 }
 
 func (a *App) writeSessionView(viewName string) error {
 	payload := map[string]any{
 		"view":       viewName,
-		"parent_pid": os.Getppid(),
+		"parent_pid": sessionParentPID(),
 	}
 	return writeSessionValue(sessionFile("active-views", "active-view-session"), payload)
 }
 
-func readSessionValue(path, key, profileName string) string {
+func readSessionValueFromSessionFiles(kind, prefix, key, profileName string) string {
+	for _, pid := range sessionCandidatePIDs() {
+		if value := readSessionValue(sessionFileForPID(kind, prefix, pid), key, profileName, pid); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func readSessionValue(path, key, profileName string, parentPID int) string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return ""
@@ -552,7 +615,7 @@ func readSessionValue(path, key, profileName string) string {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return ""
 	}
-	if intFromAny(payload["parent_pid"]) != os.Getppid() {
+	if intFromAny(payload["parent_pid"]) != parentPID {
 		return ""
 	}
 	if profileName != "" && strings.TrimSpace(fmt.Sprint(payload["profile"])) != profileName {

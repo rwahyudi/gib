@@ -17,6 +17,7 @@ func (a *App) zoneArgCompletion(cmd *cobra.Command, args []string, toComplete st
 
 func (a *App) optionalZoneArgCompletion(zoneArgIndex int) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		args = completionArgsBeforeCurrent(args, toComplete)
 		if len(args) != zoneArgIndex {
 			if len(args) > zoneArgIndex {
 				return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
@@ -32,6 +33,7 @@ func (a *App) zoneFlagCompletion(cmd *cobra.Command, args []string, toComplete s
 }
 
 func (a *App) dnsListArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	args = completionArgsBeforeCurrent(args, toComplete)
 	trimmed := strings.TrimSpace(toComplete)
 	if len(args) > 0 || strings.HasPrefix(trimmed, "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
@@ -94,6 +96,7 @@ func zoneListArgCompletion(cmd *cobra.Command, args []string, toComplete string)
 }
 
 func createArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	args = completionArgsBeforeCurrent(args, toComplete)
 	if strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
@@ -108,12 +111,13 @@ func createArgCompletion(cmd *cobra.Command, args []string, toComplete string) (
 }
 
 func (a *App) existingRecordArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	args = completionArgsBeforeCurrent(args, toComplete)
 	if strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
 	switch len(args) {
 	case 0:
-		return a.completeRecordNames(cmd, "", toComplete), cobra.ShellCompDirectiveNoFileComp
+		return a.completeRecordNames(cmd, commandZoneFlag(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
 	case 1:
 		return a.completeZoneNames(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	default:
@@ -122,6 +126,7 @@ func (a *App) existingRecordArgCompletion(cmd *cobra.Command, args []string, toC
 }
 
 func (a *App) editArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	args = completionArgsBeforeCurrent(args, toComplete)
 	if strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
@@ -138,10 +143,21 @@ func (a *App) editArgCompletion(cmd *cobra.Command, args []string, toComplete st
 }
 
 func (a *App) networkArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	args = completionArgsBeforeCurrent(args, toComplete)
 	if len(args) > 0 || strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
 	return a.completeNetworkCIDRs(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func completionArgsBeforeCurrent(args []string, toComplete string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	if args[len(args)-1] == toComplete {
+		return args[:len(args)-1]
+	}
+	return args
 }
 
 var recordTypeDescriptions = map[string]string{
@@ -553,10 +569,7 @@ func zoneColumnCompletions(toComplete string) []string {
 }
 
 func commandZoneFlag(cmd *cobra.Command) string {
-	if flag := cmd.Flags().Lookup("zone"); flag != nil {
-		return strings.TrimSpace(flag.Value.String())
-	}
-	return ""
+	return commandCompletionFlagValue(cmd, "zone")
 }
 
 func (a *App) completeRecordNames(cmd *cobra.Command, explicitZone, toComplete string) []string {
@@ -565,10 +578,8 @@ func (a *App) completeRecordNames(cmd *cobra.Command, explicitZone, toComplete s
 		return nil
 	}
 	profile.DNSView = a.resolveDNSView(profile)
-	if flag := cmd.Flags().Lookup("view"); flag != nil {
-		if view := strings.TrimSpace(flag.Value.String()); view != "" {
-			profile.DNSView = view
-		}
+	if view := commandCompletionFlagValue(cmd, "view"); view != "" {
+		profile.DNSView = view
 	}
 	zone, err := a.resolveDNSZone(profile, explicitZone)
 	if err != nil {
@@ -677,16 +688,26 @@ func (a *App) completeZoneNames(cmd *cobra.Command, toComplete string) []string 
 	if err != nil {
 		return nil
 	}
-	if flag := cmd.Flags().Lookup("view"); flag != nil {
-		if view := strings.TrimSpace(flag.Value.String()); view != "" {
-			profile.DNSView = view
-		}
+	if view := commandCompletionFlagValue(cmd, "view"); view != "" {
+		profile.DNSView = view
 	}
 	zones, err := a.cachedZoneNames(profile)
 	if err != nil {
 		return nil
 	}
 	return matchingZoneNames(zones, toComplete)
+}
+
+func commandCompletionFlagValue(cmd *cobra.Command, name string) string {
+	for _, flags := range []*pflag.FlagSet{cmd.Flags(), cmd.InheritedFlags(), cmd.PersistentFlags()} {
+		if flags == nil {
+			continue
+		}
+		if flag := flags.Lookup(name); flag != nil {
+			return strings.TrimSpace(flag.Value.String())
+		}
+	}
+	return ""
 }
 
 func (a *App) completeNetworkCIDRs(cmd *cobra.Command, toComplete string) []string {
@@ -954,7 +975,7 @@ __ib_dynamic_completion()
         return 0
     fi
 
-    out=$(IB_ACTIVE_HELP=0 "${cmd}" __completeNoDesc "${args[@]}" 2>/dev/null) || return 0
+    out=$(IB_ACTIVE_HELP=0 IB_SHELL_PID=$$ "${cmd}" __completeNoDesc "${args[@]}" 2>/dev/null) || return 0
 
     local lines=()
     while IFS='' read -r line; do
@@ -1010,16 +1031,16 @@ compdef _ib ib
 
 _ib()
 {
-    local requestComp line directive
-    local -a out completions
+    local line directive
+    local -a requestArgs out completions
 
     words=("${=words[1,CURRENT]}")
-    requestComp="${words[1]} __complete ${words[2,-1]}"
+    requestArgs=("${(@)words[2,-1]}")
     if [[ "${words[-1]}" == "" ]]; then
-        requestComp="${requestComp} \"\""
+        requestArgs+=("")
     fi
 
-    out=("${(@f)$(eval ${requestComp} 2>/dev/null)}")
+    out=("${(@f)$(IB_ACTIVE_HELP=0 IB_SHELL_PID=$$ "${words[1]}" __complete "${requestArgs[@]}" 2>/dev/null)}")
     directive=0
     for line in "${out[@]}"; do
         if [[ "${line}" == :* ]]; then
@@ -1049,8 +1070,14 @@ func dynamicFishCompletionScript() string {
 function __ib_dynamic_completion
     set -l args (commandline -opc)
     set -l last_arg (commandline -ct)
-    set -l request "IB_ACTIVE_HELP=0 $args[1] __complete $args[2..-1] $last_arg"
-    set -l output (eval $request 2>/dev/null)
+    set -l cmd $args[1]
+    set -e args[1]
+    set -l output
+    if test -z "$last_arg"
+        set output (env IB_ACTIVE_HELP=0 IB_SHELL_PID=$fish_pid $cmd __complete $args "" 2>/dev/null)
+    else
+        set output (env IB_ACTIVE_HELP=0 IB_SHELL_PID=$fish_pid $cmd __complete $args $last_arg 2>/dev/null)
+    end
 
     if test (count $output) -eq 0
         return 0

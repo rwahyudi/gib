@@ -201,6 +201,93 @@ func TestDNSEditWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
+func TestDNSEditAManagedPTRDeletesOldPTRAndRefreshesReverseCaches(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		switch {
+		case r.Method == http.MethodPut && trimWAPIPath(r.URL.Path) == "record:a/ref":
+			_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "record:a/ref"})
+		case r.Method == http.MethodGet && trimWAPIPath(r.URL.Path) == zoneObject:
+			switch r.URL.Query().Get("fqdn") {
+			case "100.51.198.in-addr.arpa":
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+					"fqdn":        "100.51.198.in-addr.arpa",
+					"view":        "default",
+					"zone_format": "IPV4",
+				}}})
+			case "2.0.192.in-addr.arpa":
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+					"fqdn":        "2.0.192.in-addr.arpa",
+					"view":        "default",
+					"zone_format": "IPV4",
+				}}})
+			default:
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+			}
+		case r.Method == http.MethodGet && trimWAPIPath(r.URL.Path) == "record:ptr":
+			switch r.URL.Query().Get("ipv4addr") {
+			case "198.51.100.20":
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+			case "192.0.2.10":
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+					"_ref":     "record:ptr/old-ref",
+					"ipv4addr": "192.0.2.10",
+					"ptrdname": "app.example.com",
+					"zone":     "2.0.192.in-addr.arpa",
+				}}})
+			default:
+				t.Fatalf("unexpected PTR lookup query: %s", r.URL.RawQuery)
+			}
+		case r.Method == http.MethodPost && trimWAPIPath(r.URL.Path) == "record:ptr":
+			_ = json.NewEncoder(w).Encode("record:ptr/new-ref")
+		case r.Method == http.MethodDelete && trimWAPIPath(r.URL.Path) == "record:ptr/old-ref":
+			_ = json.NewEncoder(w).Encode("record:ptr/old-ref")
+		default:
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer primary.Close()
+
+	var readRequests []string
+	read := recordLookupServer(t, &readRequests)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	if err := app.writeCachedRecords(profile, "2.0.192.in-addr.arpa", "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "10", "ipv4addr": "192.0.2.10", "ptrdname": "app.example.com", "zone": "2.0.192.in-addr.arpa"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write old reverse record cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "100.51.198.in-addr.arpa", "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "20", "ipv4addr": "198.51.100.20", "ptrdname": "old.example.com", "zone": "100.51.198.in-addr.arpa"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write new reverse record cache: %v", err)
+	}
+	refreshes := captureRecordRefreshes(app)
+
+	if err := app.Execute([]string{"dns", "edit", "app", "a", "198.51.100.20"}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	for _, want := range []string{"PUT record:a/ref", "POST record:ptr", "DELETE record:ptr/old-ref"} {
+		if !containsString(primaryRequests, want) {
+			t.Fatalf("primary requests missing %q: %#v", want, primaryRequests)
+		}
+	}
+	if len(readRequests) == 0 {
+		t.Fatalf("expected record lookup requests on read server")
+	}
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordCacheInvalidated(t, app, profile, "2.0.192.in-addr.arpa")
+	assertRecordCacheInvalidated(t, app, profile, "100.51.198.in-addr.arpa")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "100.51.198.in-addr.arpa")
+	assertRecordRefreshQueued(t, refreshes, "2.0.192.in-addr.arpa")
+}
+
 func TestDNSEditCNAMEQualifiesShortTarget(t *testing.T) {
 	var putPayload map[string]any
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -235,12 +322,21 @@ func TestDNSEditCNAMEQualifiesShortTarget(t *testing.T) {
 
 func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	var primaryRequests []string
+	reverseZone := "2.0.192.in-addr.arpa"
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
-		if r.Method != http.MethodDelete || trimWAPIPath(r.URL.Path) != "record:a/ref" {
+		switch {
+		case r.Method == http.MethodDelete && trimWAPIPath(r.URL.Path) == "record:a/ref":
+			_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "record:a/ref"})
+		case r.Method == http.MethodGet && trimWAPIPath(r.URL.Path) == zoneObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"fqdn": reverseZone, "view": "default", "zone_format": "IPV4"},
+				},
+			})
+		default:
 			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "record:a/ref"})
 	}))
 	defer primary.Close()
 
@@ -251,6 +347,14 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
 	profile := mustLoadProfile(t, app)
 	writeWorkflowRecordCache(t, app, profile)
+	if err := app.writeCachedZones(profile, []map[string]any{{"fqdn": reverseZone, "zone_format": "IPV4", "view": "default"}}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, reverseZone, "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "10", "address": "192.0.2.10", "ptrdname": "app.example.com", "zone": reverseZone},
+	}, time.Now()); err != nil {
+		t.Fatalf("write reverse record cache: %v", err)
+	}
 	refreshes := captureRecordRefreshes(app)
 	app.dnsDeleteConfirmer = func(target string, record TypedRecord) (bool, error) {
 		t.Fatalf("confirmation prompt should be skipped when -y is provided")
@@ -268,7 +372,9 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 		t.Fatalf("expected record lookup requests on read server")
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordCacheInvalidated(t, app, profile, reverseZone)
 	assertRecordRefreshQueued(t, refreshes, "example.com")
+	assertRecordRefreshQueued(t, refreshes, reverseZone)
 }
 
 func TestZoneCreateQueuesZoneAndRecordCacheRefresh(t *testing.T) {

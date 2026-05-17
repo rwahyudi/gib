@@ -505,6 +505,33 @@ func TestDNSDeleteCompletesRecordNames(t *testing.T) {
 	}
 }
 
+func TestDNSDeleteCompletionTreatsCurrentTokenAsRecordName(t *testing.T) {
+	app, _ := completionAppWithRecords(t)
+	cmd, _, err := app.RootCommand().Find([]string{"dns", "delete"})
+	if err != nil {
+		t.Fatalf("find delete command: %v", err)
+	}
+
+	rows, directive := app.existingRecordArgCompletion(cmd, []string{"ap"}, "ap")
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("directive = %v", directive)
+	}
+	if !containsCompletionRow(rows, "app") {
+		t.Fatalf("record completion rows = %#v", rows)
+	}
+	if containsCompletionRow(rows, "example.com") {
+		t.Fatalf("record-name completion included zone rows: %#v", rows)
+	}
+
+	rows, directive = app.existingRecordArgCompletion(cmd, []string{"app", "ex"}, "ex")
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("zone directive = %v", directive)
+	}
+	if !containsCompletionRow(rows, "example.com") {
+		t.Fatalf("zone completion rows = %#v", rows)
+	}
+}
+
 func TestDNSEditCompletesRecordNamesAndTypes(t *testing.T) {
 	app, stdout := completionAppWithRecords(t)
 	if err := app.Execute([]string{"__complete", "dns", "edit", "ap"}); err != nil {
@@ -1095,6 +1122,7 @@ func TestGeneratedBashCompletionScript(t *testing.T) {
 		"__ib_dynamic_completion",
 		"__ib_create_usage_on_second_tab",
 		"__completeNoDesc",
+		"IB_SHELL_PID=$$",
 		`${COMP_WORDS[0]}`,
 	} {
 		if !strings.Contains(output, want) {
@@ -1364,6 +1392,12 @@ func TestGeneratedZshAndFishCompletionScriptsAreDynamic(t *testing.T) {
 				t.Fatalf("%s completion contains static Cobra tree marker %q:\n%s", tt.shell, unwanted, output)
 			}
 		}
+		if strings.Contains(output, "eval ") || strings.Contains(output, "eval $") {
+			t.Fatalf("%s completion invokes eval:\n%s", tt.shell, output)
+		}
+		if !strings.Contains(output, "IB_SHELL_PID") {
+			t.Fatalf("%s completion does not pass shell PID:\n%s", tt.shell, output)
+		}
 	}
 }
 
@@ -1398,6 +1432,15 @@ func completionAppWithRecords(t *testing.T) (*App, *bytes.Buffer) {
 		t.Fatalf("write record cache: %v", err)
 	}
 	return app, stdout
+}
+
+func containsCompletionRow(rows []string, value string) bool {
+	for _, row := range rows {
+		if strings.SplitN(row, "\t", 2)[0] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func writeCompletionProfiles(t *testing.T, app *App) {

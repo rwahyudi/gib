@@ -92,3 +92,31 @@ func TestWapiClientExplainsNonJSONResponse(t *testing.T) {
 		t.Fatalf("error exposed raw JSON parser message:\n%s", message)
 	}
 }
+
+func TestNormalizeServerStripsFullWAPIObjectURL(t *testing.T) {
+	normalized, err := normalizeServer("infoblox.example/wapi/v2.12.3/record:a/ZG5zLmJpbmRfYSQuX2RlZmF1bHQuZXhhbXBsZS5jb20")
+	if err != nil {
+		t.Fatalf("normalize server: %v", err)
+	}
+	if normalized != "https://infoblox.example" {
+		t.Fatalf("normalized server = %q", normalized)
+	}
+
+	normalized, err = normalizeServer("https://proxy.example/nios/wapi/v2.12.3/record:a/ref?_return_fields=name#top")
+	if err != nil {
+		t.Fatalf("normalize proxied server: %v", err)
+	}
+	if normalized != "https://proxy.example/nios" {
+		t.Fatalf("normalized proxied server = %q", normalized)
+	}
+}
+
+func TestNormalizeServerRejectsUnsupportedScheme(t *testing.T) {
+	_, err := normalizeServer("ftp://infoblox.example")
+	if err == nil {
+		t.Fatal("ftp scheme succeeded")
+	}
+	if !strings.Contains(err.Error(), "use https:// or http://") {
+		t.Fatalf("error = %v", err)
+	}
+}

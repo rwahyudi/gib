@@ -1515,10 +1515,16 @@ func (a *App) runDNSEdit(recordNameValue, requestedType string, value *string, z
 		return err
 	}
 	var ptrAddress netip.Addr
+	var oldPTRAddress netip.Addr
+	oldPTRAddressChanged := false
 	ptrName := target
 	syncPTR := ptrManagedRecordType(record.Type) && !noptr
 	if syncPTR {
 		ptrAddress, err = managedPTRAddress(record.Type, value, record.Item)
+		if err != nil {
+			return err
+		}
+		oldPTRAddress, oldPTRAddressChanged, err = changedManagedPTRAddress(record.Type, value, record.Item)
 		if err != nil {
 			return err
 		}
@@ -1536,6 +1542,11 @@ func (a *App) runDNSEdit(recordNameValue, requestedType string, value *string, z
 	if syncPTR {
 		if _, err := a.syncPTRForAddress(profile, client, ptrAddress, ptrName, ttl, comment); err != nil {
 			return cliError("updated %s record %s, but PTR sync failed: %v", strings.ToUpper(record.Type), target, err)
+		}
+		if oldPTRAddressChanged {
+			if _, err := a.deleteManagedPTRForAddress(profile, client, oldPTRAddress, ptrName); err != nil {
+				return cliError("updated %s record %s and synced PTR for %s, but old PTR cleanup failed: %v", strings.ToUpper(record.Type), target, ptrAddress, err)
+			}
 		}
 	}
 	if !a.isTableOutput() {
@@ -1559,6 +1570,24 @@ func managedPTRAddress(recordType string, value *string, item map[string]any) (n
 		return managedPTRAddressFromValue(recordType, *value)
 	}
 	return managedPTRAddressFromValue(recordType, recordValue(recordType, item))
+}
+
+func changedManagedPTRAddress(recordType string, value *string, item map[string]any) (netip.Addr, bool, error) {
+	if value == nil {
+		return netip.Addr{}, false, nil
+	}
+	oldAddress, err := managedPTRAddress(recordType, nil, item)
+	if err != nil {
+		return netip.Addr{}, false, err
+	}
+	newAddress, err := managedPTRAddressFromValue(recordType, *value)
+	if err != nil {
+		return netip.Addr{}, false, err
+	}
+	if oldAddress == newAddress {
+		return netip.Addr{}, false, nil
+	}
+	return oldAddress, true, nil
 }
 
 func managedPTRAddressFromValue(recordType, value string) (netip.Addr, error) {
@@ -1613,6 +1642,44 @@ func (a *App) syncPTRForAddress(profile Profile, client *WapiClient, address net
 		return "", err
 	}
 	if _, err := client.Request(http.MethodPut, ref, nil, payload); err != nil {
+		return "", err
+	}
+	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
+	return reverseZone, nil
+}
+
+func (a *App) deleteManagedPTRForAddress(profile Profile, client *WapiClient, address netip.Addr, ptrdname string) (string, error) {
+	ptrdname = cleanDNSName(ptrdname)
+	if ptrdname == "" {
+		return "", cliError("old PTR target name is required")
+	}
+	lookupClient := primaryReadClient(client)
+	reverseZone, err := reverseZoneForIP(lookupClient, address)
+	if err != nil {
+		return "", err
+	}
+	matches, err := ptrMatchesInZone(lookupClient, address, reverseZone)
+	if err != nil {
+		return "", err
+	}
+	var targetMatches []TypedRecord
+	for _, match := range matches {
+		if strings.EqualFold(cleanDNSName(recordValue("ptr", match.Item)), ptrdname) {
+			targetMatches = append(targetMatches, match)
+		}
+	}
+	if len(targetMatches) == 0 {
+		a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
+		return reverseZone, nil
+	}
+	if len(targetMatches) > 1 {
+		return "", cliError("multiple old PTR records found for %s in reverse zone %s. Delete one _ref manually", address, reverseZone)
+	}
+	ref, err := recordRef(targetMatches[0])
+	if err != nil {
+		return "", err
+	}
+	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return "", err
 	}
 	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
@@ -1684,11 +1751,31 @@ func (a *App) runDNSDelete(recordName, zone string, skipConfirm bool) error {
 		return err
 	}
 	a.queueRecordCacheRefreshAfterWrite(profile, cleanString(record.Item["zone"]))
+	a.queueManagedPTRCacheRefreshAfterDelete(profile, client, record)
 	if !a.isTableOutput() {
 		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", strings.ToUpper(record.Type), target, cleanString(record.Item["zone"]), client.View, "deleted DNS record"))
 	}
 	a.PrintSuccess("SUCCESS: deleted " + strings.ToUpper(record.Type) + " record " + target)
 	return nil
+}
+
+func (a *App) queueManagedPTRCacheRefreshAfterDelete(profile Profile, client *WapiClient, record TypedRecord) {
+	if !ptrManagedRecordType(record.Type) {
+		return
+	}
+	// Forward A/AAAA deletes can also make reverse data stale when the matching
+	// PTR is managed outside this request path. Keep the reverse-zone cache on
+	// the same clear-and-refresh path as direct PTR writes, but do not fail the
+	// already-completed delete if the reverse zone cannot be resolved.
+	address, err := managedPTRAddress(record.Type, nil, record.Item)
+	if err != nil {
+		return
+	}
+	reverseZone, err := a.reverseZoneForIPForCacheRefresh(profile, primaryReadClient(client), address)
+	if err != nil {
+		return
+	}
+	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 }
 
 func (a *App) selectDuplicateDeleteRecord(target string, matches []TypedRecord) (TypedRecord, error) {

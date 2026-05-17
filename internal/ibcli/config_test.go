@@ -30,6 +30,43 @@ func testApp(t *testing.T) *App {
 	return app
 }
 
+func TestReadSessionZoneUsesShellPIDEnv(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv(sessionParentPIDEnv, "12345")
+	app := testApp(t)
+	if err := writeSessionValue(sessionFileForPID("active-zones", "active-zone-session", 12345), map[string]any{
+		"zone":       "latrobe-test.edu.au",
+		"profile":    defaultProfileName,
+		"parent_pid": 12345,
+	}); err != nil {
+		t.Fatalf("write session zone: %v", err)
+	}
+
+	if got := app.readSessionZone(defaultProfileName); got != "latrobe-test.edu.au" {
+		t.Fatalf("session zone = %q, want latrobe-test.edu.au", got)
+	}
+}
+
+func TestReadSessionZoneFallsBackToGrandparentPID(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	parentPID := processParentPID(os.Getppid())
+	if parentPID <= 0 {
+		t.Skip("parent process ID not available")
+	}
+	app := testApp(t)
+	if err := writeSessionValue(sessionFileForPID("active-zones", "active-zone-session", parentPID), map[string]any{
+		"zone":       "latrobe-test.edu.au",
+		"profile":    defaultProfileName,
+		"parent_pid": parentPID,
+	}); err != nil {
+		t.Fatalf("write session zone: %v", err)
+	}
+
+	if got := app.readSessionZone(defaultProfileName); got != "latrobe-test.edu.au" {
+		t.Fatalf("session zone = %q, want latrobe-test.edu.au", got)
+	}
+}
+
 func writeConfigForSettings(t *testing.T, app *App, settings ConfigSettings) {
 	t.Helper()
 	profiles := map[string]Profile{
@@ -95,6 +132,36 @@ func TestWriteConfigProfilesEncryptsPasswordAndReadsItBack(t *testing.T) {
 	}
 	if loaded["default"].Password != "secret-password" {
 		t.Fatalf("loaded password = %q", loaded["default"].Password)
+	}
+}
+
+func TestGetOrCreateConfigKeyReturnsUnreadableKeyError(t *testing.T) {
+	app := testApp(t)
+	if err := app.ensureConfigDir(); err != nil {
+		t.Fatalf("ensure config dir: %v", err)
+	}
+	if err := os.WriteFile(app.ConfigKeyFile, []byte("existing-key\n"), 0o000); err != nil {
+		t.Fatalf("write unreadable key: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(app.ConfigKeyFile, 0o600)
+	})
+	if _, err := os.ReadFile(app.ConfigKeyFile); err == nil {
+		t.Skip("key file remains readable after chmod 000")
+	}
+
+	if _, err := app.getOrCreateConfigKey(); err == nil {
+		t.Fatal("getOrCreateConfigKey succeeded with unreadable key")
+	}
+	if err := os.Chmod(app.ConfigKeyFile, 0o600); err != nil {
+		t.Fatalf("restore key permissions: %v", err)
+	}
+	raw, err := os.ReadFile(app.ConfigKeyFile)
+	if err != nil {
+		t.Fatalf("read restored key: %v", err)
+	}
+	if string(raw) != "existing-key\n" {
+		t.Fatalf("key file was replaced: %q", raw)
 	}
 }
 
