@@ -23,6 +23,7 @@ From the repository root:
 spectool -g -R gib.spec
 go_vendor_archive create -c go-vendor-tools.toml gib.spec
 go_vendor_license -c go-vendor-tools.toml -C gib.spec report --update-spec --prompt --autofill=auto
+go_vendor_license -c go-vendor-tools.toml -C gib.spec report --verify-spec
 rpmbuild -bs gib.spec
 ```
 

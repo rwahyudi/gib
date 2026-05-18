@@ -1,0 +1,36 @@
+name: License
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOCACHE: /tmp/go-build
+  GOMODCACHE: /tmp/go-mod
+
+jobs:
+  license:
+    name: License policy and notices
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Check generated third-party notices and blocked licenses
+        run: scripts/check-licenses.sh

@@ -20,7 +20,7 @@ credentials, DNS view and zone context, record workflows, cache inspection,
 next available IP lookup, and shell completion.}
 
 %global golicenses LICENSE
-%global godocs README.md docs/performance-caching.md
+%global godocs README.md docs/performance-caching.md docs/licensing.md
 %{!?bash_completions_dir:%global bash_completions_dir %{_datadir}/bash-completion/completions}
 
 Name:           gib

@@ -49,6 +49,7 @@ Run the same checks locally when the tools are installed:
 
 ```bash
 env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go test ./...
+scripts/check-licenses.sh
 env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod govulncheck ./...
 gosec ./...
 trivy fs --scanners vuln,secret,license .
@@ -396,3 +397,10 @@ new PowerShell window so the updated script is loaded.
 
 The generated or installed completion calls the live `ib` binary, so profiles, zones, records, flags, and output formats are resolved dynamically.
 Installing from RPM or DEB puts the Bash completion file in `/etc/bash_completion.d/ib`.
+
+## License
+
+`gib` is licensed under the MIT License. See [LICENSE](LICENSE). Binary release
+archives also include [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for
+bundled Go dependency notices. The dependency policy is documented in
+[docs/licensing.md](docs/licensing.md).
