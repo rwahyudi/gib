@@ -104,6 +104,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib":
 		return sectionWithLines("Workflow", []string{
 			"ib config new --default  ->  ib dns zone use example.com  ->  ib dns list",
+			"ib net list  ->  ib net next-ip 192.0.2.0/24 -n 3",
 			`ib dns create app host 192.0.2.10 -c "Application host"`,
 		})
 	case "ib config":
@@ -193,6 +194,63 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"columns", "-C name,value prints selected output columns"},
 		})
 	case "ib dns next-ip":
+		return sectionWithRows("Next IP Usage", [][]string{
+			{"network", "IPv4 CIDR such as 192.0.2.0/24"},
+			{"view", "--network-view chooses the IPAM network view when a CIDR is ambiguous"},
+			{"num", "-n 3 or --num 3 requests multiple addresses"},
+			{"exclude", "-e 192.0.2.10 excludes an address from allocation; repeatable"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib net":
+		return sectionWithRows("IPAM Usage", [][]string{
+			{"views", "ib net view list shows IPAM network views"},
+			{"networks", "ib net list [SEARCH] lists IPv4 networks"},
+			{"search", "ib net search KEYWORD matches CIDR, network view, or comment"},
+			{"details", "ib net show NETWORK displays one network"},
+			{"address", "ib net address IP displays IPv4 address state"},
+			{"next-ip", "ib net next-ip NETWORK requests available IPv4 addresses"},
+		})
+	case "ib net view":
+		return sectionWithRows("Network View Usage", [][]string{
+			{"list", "ib net view list"},
+			{"shows", "IPAM network view name and comment"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib net view list":
+		return sectionWithRows("Network View List Usage", [][]string{
+			{"shows", "IPAM network view name and comment"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib net list":
+		return sectionWithRows("Network List Usage", [][]string{
+			{"search", "optional positional search matches CIDR, network view, or comment"},
+			{"view", "--network-view filters to one IPAM network view"},
+			{"sort", "-s network or --sort=-comment sorts by field; blank --sort uses network"},
+			{"columns", "-C network,comment prints selected output columns"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib net search":
+		return sectionWithRows("Network Search Usage", [][]string{
+			{"keyword", "matches CIDR, network view, or comment"},
+			{"view", "--network-view filters to one IPAM network view"},
+			{"sort", "-s network_view or --sort=-network sorts by field"},
+			{"columns", "-C network,network_view prints selected output columns"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib net show":
+		return sectionWithRows("Network Details Usage", [][]string{
+			{"network", "IPv4 CIDR such as 192.0.2.0/24"},
+			{"view", "--network-view chooses the IPAM network view when a CIDR is ambiguous"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib net address":
+		return sectionWithRows("Address Details Usage", [][]string{
+			{"ip", "IPv4 address such as 192.0.2.10"},
+			{"view", "--network-view narrows the lookup to one IPAM network view"},
+			{"shows", "network, status, types, names, MAC, lease state, and comment when available"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib net next-ip":
 		return sectionWithRows("Next IP Usage", [][]string{
 			{"network", "IPv4 CIDR such as 192.0.2.0/24"},
 			{"view", "--network-view chooses the IPAM network view when a CIDR is ambiguous"},
@@ -311,6 +369,16 @@ func usageDetails(cmd *cobra.Command) string {
 		return strings.Join([]string{
 			sectionWithLines("Example", []string{"ib dns next-ip 192.0.2.0/24 -n 3"}),
 			helpSubtitleStyle.Render(`Use "ib dns next-ip -h" for more info.`),
+		}, "\n")
+	case "ib net next-ip":
+		return strings.Join([]string{
+			sectionWithLines("Example", []string{"ib net next-ip 192.0.2.0/24 -n 3"}),
+			helpSubtitleStyle.Render(`Use "ib net next-ip -h" for more info.`),
+		}, "\n")
+	case "ib net search":
+		return strings.Join([]string{
+			sectionWithLines("Example", []string{"ib net search production"}),
+			helpSubtitleStyle.Render(`Use "ib net search -h" for more info.`),
 		}, "\n")
 	}
 	return ""

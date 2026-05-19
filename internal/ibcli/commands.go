@@ -206,6 +206,121 @@ func (a *App) dnsCommand() *cobra.Command {
 	return cmd
 }
 
+func (a *App) netCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "net",
+		Short: "Manage Infoblox IPAM networks",
+	}
+	cmd.AddCommand(a.netViewCommand())
+	cmd.AddCommand(a.netListCommand())
+	cmd.AddCommand(a.netSearchCommand())
+	cmd.AddCommand(a.netShowCommand())
+	cmd.AddCommand(a.netAddressCommand())
+	cmd.AddCommand(a.netNextIPCommand())
+	return cmd
+}
+
+func (a *App) netViewCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "view", Short: "Manage IPAM network views"}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List IPAM network views",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runNetViewList()
+		},
+	})
+	return cmd
+}
+
+func (a *App) netListCommand() *cobra.Command {
+	var networkView string
+	var sortRaw string
+	var columnsRaw string
+	cmd := &cobra.Command{
+		Use:               "list [SEARCH]",
+		Short:             "List IPAM networks",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: zoneListArgCompletion,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			netSort, err := parseNetSort(sortRaw, cmd.Flags().Changed("sort"))
+			if err != nil {
+				return err
+			}
+			columns, err := parseNetworkColumns(columnsRaw)
+			if err != nil {
+				return err
+			}
+			search := ""
+			if len(args) > 0 {
+				search = args[0]
+			}
+			return a.runNetList(search, networkView, netSort, columns)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	addNetSortFlag(cmd, &sortRaw)
+	addNetworkColumnsFlag(cmd, &columnsRaw)
+	return cmd
+}
+
+func (a *App) netSearchCommand() *cobra.Command {
+	var networkView string
+	var sortRaw string
+	var columnsRaw string
+	cmd := &cobra.Command{
+		Use:               "search KEYWORD",
+		Short:             "Search IPAM networks by CIDR, view, or comment",
+		Args:              exactArgsOrUsage(1),
+		ValidArgsFunction: completeFlagsAfterArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			netSort, err := parseNetSort(sortRaw, cmd.Flags().Changed("sort"))
+			if err != nil {
+				return err
+			}
+			columns, err := parseNetworkColumns(columnsRaw)
+			if err != nil {
+				return err
+			}
+			return a.runNetList(args[0], networkView, netSort, columns)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	addNetSortFlag(cmd, &sortRaw)
+	addNetworkColumnsFlag(cmd, &columnsRaw)
+	return cmd
+}
+
+func (a *App) netShowCommand() *cobra.Command {
+	var networkView string
+	cmd := &cobra.Command{
+		Use:               "show NETWORK",
+		Short:             "Show IPAM network details",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.networkArgCompletion,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runNetShow(args[0], networkView)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the target network")
+	return cmd
+}
+
+func (a *App) netAddressCommand() *cobra.Command {
+	var networkView string
+	cmd := &cobra.Command{
+		Use:               "address IP",
+		Short:             "Show IPAM address details",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeFlagsAfterArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runNetAddress(args[0], networkView)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the address lookup")
+	return cmd
+}
+
 func (a *App) dnsViewCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "view", Short: "Manage active DNS views"}
 	cmd.AddCommand(&cobra.Command{
@@ -423,6 +538,14 @@ func (a *App) dnsCreateCommand() *cobra.Command {
 }
 
 func (a *App) dnsNextIPCommand() *cobra.Command {
+	return a.nextIPCommand(a.runDNSNextIP)
+}
+
+func (a *App) netNextIPCommand() *cobra.Command {
+	return a.nextIPCommand(a.runNetNextIP)
+}
+
+func (a *App) nextIPCommand(run func(string, string, int, []string) error) *cobra.Command {
 	var networkView string
 	var num int
 	var exclude []string
@@ -433,7 +556,7 @@ func (a *App) dnsNextIPCommand() *cobra.Command {
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.networkArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.runDNSNextIP(args[0], networkView, num, exclude)
+			return run(args[0], networkView, num, exclude)
 		},
 	}
 	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the target network")
@@ -620,6 +743,16 @@ func addZoneSortFlag(cmd *cobra.Command, target *string) {
 func addZoneColumnsFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVarP(target, "columns", "C", "", "zone output columns, comma-separated")
 	_ = cmd.RegisterFlagCompletionFunc("columns", zoneColumnFlagCompletion)
+}
+
+func addNetSortFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "sort", "s", "", "sort networks by field: network, network_view, or comment; prefix with - for descending")
+	_ = cmd.RegisterFlagCompletionFunc("sort", netSortFlagCompletion)
+}
+
+func addNetworkColumnsFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "columns", "C", "", "network output columns, comma-separated")
+	_ = cmd.RegisterFlagCompletionFunc("columns", networkColumnFlagCompletion)
 }
 
 func (a *App) dnsDeleteCommand() *cobra.Command {
@@ -1346,21 +1479,6 @@ func (a *App) runZoneDelete(zoneName string) error {
 	}
 	a.PrintSuccess("SUCCESS: deleted DNS zone " + target)
 	return nil
-}
-
-func (a *App) runDNSNextIP(network string, networkView string, num int, exclude []string) error {
-	_, client, err := a.configuredClient()
-	if err != nil {
-		return err
-	}
-	rows, err := nextAvailableIPRows(client, network, networkView, num, exclude)
-	if err != nil {
-		return err
-	}
-	if a.isTableOutput() {
-		a.PrintContext()
-	}
-	return a.emitRows("Next Available IPs", nextIPOutputColumns, rows)
 }
 
 func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr bool, comment string) error {

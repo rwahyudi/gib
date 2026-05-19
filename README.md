@@ -26,8 +26,8 @@ various caching techniques and multi threading to ensure snappy experience.
 - DNS record workflows for listing, searching, creating, editing, and deleting
   records, including filtering, field sorting, selected output columns,
   interactive duplicate selection, and confirmation.
-- Next available IP lookup for IPv4 networks, with network-view selection,
-  multiple address requests, and excluded-address support.
+- IPAM read workflows for network views, IPv4 network list/search/details,
+  address details, and next available IP lookup with network-view selection.
 - Large-zone performance through `/allrecords`, local SQLite caching,
   worker-limited global search, and stale-while-revalidate refreshes.
 - Dynamic shell completion for profiles, views, zones, records, flags, record
@@ -272,7 +272,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib dns` | Show DNS help and the current profile/view/zone context. |
 | `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones, `-t/--type` to filter record types, `-e/--exclude` to hide matching records, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns search KEYWORD` | Search records by name, value, or comment. Use `--global` for all searchable zones, `-r` for child zones under the current/root zone, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
-| `ib dns next-ip NETWORK` | Find the next available IPv4 address in a network. Use `--network-view` for ambiguous CIDRs, `-n/--num` for multiple addresses, and repeat `-e/--exclude` to skip addresses. |
+| `ib dns next-ip NETWORK` | Compatibility path for next available IPv4 address lookup. Prefer `ib net next-ip NETWORK` for IPAM work. |
 | `ib dns create NAME TYPE VALUE` | Create a DNS record, for example `ib dns create app host 192.0.2.10 -c "Application host"`. |
 | `ib dns edit NAME [TYPE] [VALUE]` | Edit an existing DNS record. |
 | `ib dns delete NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
@@ -284,6 +284,18 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib dns zone delete ZONE` | Delete an authoritative DNS zone. |
 | `ib dns zone use ZONE` | Set the active DNS zone for the current shell session. |
 
+### IPAM
+
+| Command | Description |
+| --- | --- |
+| `ib net` | Show IPAM command help. |
+| `ib net view list` | List IPAM network views. |
+| `ib net list [SEARCH]` | List IPv4 networks. Add `--network-view` to filter by IPAM network view, `-s/--sort FIELD` to sort by `network`, `network_view`, or `comment`, and `-C/--columns LIST` to print selected columns. |
+| `ib net search KEYWORD` | Search IPv4 networks by CIDR, network view, or comment. |
+| `ib net show NETWORK` | Show details for one IPv4 network. Use `--network-view` when a CIDR exists in multiple network views. |
+| `ib net address IP` | Show IPAM details for an IPv4 address, including network, status, types, names, MAC address, lease state, and comment when available. |
+| `ib net next-ip NETWORK` | Find the next available IPv4 address in a network. Use `--network-view` for ambiguous CIDRs, `-n/--num` for multiple addresses, and repeat `-e/--exclude` to skip addresses. |
+
 Common examples:
 
 ```bash
@@ -293,7 +305,10 @@ ib dns zone list
 ib dns zone use example.com
 ib dns list
 ib dns search app
-ib dns next-ip 192.0.2.0/24 -n 3
+ib net view list
+ib net list prod --network-view default
+ib net address 192.0.2.10 --network-view default
+ib net next-ip 192.0.2.0/24 -n 3
 ib dns create app host 192.0.2.10 -c "Application host"
 ib dns edit app host 192.0.2.20 -t 300 -c "Application host"
 ib dns delete app
@@ -303,12 +318,16 @@ ib dns delete app
 
 `ib dns zone list` supports the same output control pattern for zones. `--type` filters zone formats `FORWARD`, `IPV4`, or `IPV6`; `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment`; and `--columns` selects from the same zone fields. Use `--view` to list zones from another DNS view; `--zone` and `-z` are not accepted by this command.
 
+`ib net list` and `ib net search` are read-only IPAM workflows. They query the WAPI `network` object, optionally filter by `--network-view`, and match search text against network CIDR, network view, and comment. Add `-s` or `--sort` to sort by `network`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `network`, `network_view`, and `comment`.
+
+`ib net next-ip` performs the network lookup with read-only routing, then sends the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
+
 `ib dns delete` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records match, interactive table mode shows a Huh select list so one record can be chosen.
 
 #### Output Controls
 
-Record and zone list-style commands can sort rows, select columns, and emit
-machine-readable output:
+Record, zone, and network list-style commands can sort rows, select columns,
+and emit machine-readable output:
 
 ```bash
 ib dns list --sort name --columns name,value,ttl
@@ -316,13 +335,15 @@ ib dns list --sort=-name --columns zone,name,value -o csv
 ib dns search app --global --sort zone --columns zone,name,value -o csv
 ib dns list -o json | jq -r '.[] | [.name, .value] | @tsv'
 ib dns zone list --sort zone --columns zone,format,comment -o json | jq '.[]'
+ib net list --sort network --columns network,comment -o json | jq '.[]'
 ```
 
 Use `--sort FIELD` for ascending order and `--sort=-FIELD` for descending
 order. Record fields are `name`, `type`, `value`, `zone`, `ttl`, and `comment`;
-zone fields are `zone`, `view`, `format`, `ns_group`, and `comment`. Use
-`--columns` or `-C` with a comma-separated list to keep only the fields you need.
-Use `-o csv` for CSV output, or `-o json` when the next step is a `jq` pipeline.
+zone fields are `zone`, `view`, `format`, `ns_group`, and `comment`; network
+fields are `network`, `network_view`, and `comment`. Use `--columns` or `-C`
+with a comma-separated list to keep only the fields you need. Use `-o csv` for
+CSV output, or `-o json` when the next step is a `jq` pipeline.
 
 
 

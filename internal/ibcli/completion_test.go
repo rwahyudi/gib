@@ -316,21 +316,29 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 	app.Stderr = &bytes.Buffer{}
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 
-	if err := app.Execute([]string{"__complete", "dns", "next-ip", "--network-view", "default", "192"}); err != nil {
-		t.Fatalf("completion: %v", err)
-	}
-	output := stdout.String()
-	if networkView != "default" {
-		t.Fatalf("network_view query = %q, want default", networkView)
-	}
-	if !strings.Contains(output, "192.0.2.0/24\tdefault") {
-		t.Fatalf("network completion missing CIDR:\n%s", output)
-	}
-	if strings.Contains(output, "10.0.0.0/24") {
-		t.Fatalf("network completion did not filter prefix:\n%s", output)
-	}
-	if !strings.Contains(output, ":4") {
-		t.Fatalf("completion did not disable file completion:\n%s", output)
+	for _, args := range [][]string{
+		{"__complete", "dns", "next-ip", "--network-view", "default", "192"},
+		{"__complete", "net", "next-ip", "--network-view", "default", "192"},
+		{"__complete", "net", "show", "--network-view", "default", "192"},
+	} {
+		networkView = ""
+		stdout.Reset()
+		if err := app.Execute(args); err != nil {
+			t.Fatalf("completion %v: %v", args, err)
+		}
+		output := stdout.String()
+		if networkView != "default" {
+			t.Fatalf("completion %v network_view query = %q, want default", args, networkView)
+		}
+		if !strings.Contains(output, "192.0.2.0/24\tdefault") {
+			t.Fatalf("completion %v missing CIDR:\n%s", args, output)
+		}
+		if strings.Contains(output, "10.0.0.0/24") {
+			t.Fatalf("completion %v did not filter prefix:\n%s", args, output)
+		}
+		if !strings.Contains(output, ":4") {
+			t.Fatalf("completion %v did not disable file completion:\n%s", args, output)
+		}
 	}
 }
 
@@ -486,6 +494,30 @@ func TestDNSRecordSortCompletesValues(t *testing.T) {
 	}
 	if strings.Contains(output, "\nname\trecord name ascending") {
 		t.Fatalf("descending completion included ascending name:\n%s", output)
+	}
+}
+
+func TestNetSortCompletesValues(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"__complete", "net", "list", "--sort", ""}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"network\tnetwork CIDR ascending",
+		"-network\tnetwork CIDR descending",
+		"network_view\tIPAM network view ascending",
+		"-comment\tnetwork comment descending",
+		":4",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion output missing %q:\n%s", want, output)
+		}
 	}
 }
 

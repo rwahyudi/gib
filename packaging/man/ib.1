@@ -6,17 +6,21 @@ ib \- operator-focused Infoblox DNS CLI
 [\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
 .SH DESCRIPTION
 .B ib
-is a command line interface for managing Infoblox DNS records from the shell.
+is a command line interface for managing Infoblox DNS and IPAM records from the shell.
 It supports profile setup, encrypted credentials, DNS view and zone context,
-record workflows, cache inspection, next available IP lookup, and shell
-completion.
+record workflows, IPAM network lookup, cache inspection, next available IP
+lookup, and shell completion.
 .SH COMMANDS
 .TP
 .B ib config
 Manage profiles, completion, and local cache data.
 .TP
 .B ib dns
-Manage DNS views, zones, records, searches, and network IP lookups.
+Manage DNS views, zones, records, and searches.
+.TP
+.B ib net
+Manage IPAM network views, IPv4 networks, address details, and next available
+IP lookups.
 .SH OPTIONS
 .TP
 .B \-h, \-\-help
@@ -35,7 +39,13 @@ List records in the current DNS context.
 .B ib dns search app
 Search records by name, value, or comment.
 .TP
-.B ib dns next-ip 192.0.2.0/24 -n 3
+.B ib net list prod --network-view default
+List IPv4 networks matching prod in the default IPAM network view.
+.TP
+.B ib net address 192.0.2.10 --network-view default
+Show IPAM address details for 192.0.2.10.
+.TP
+.B ib net next-ip 192.0.2.0/24 -n 3
 Find available IPv4 addresses in a network.
 .SH FILES
 .TP

@@ -564,6 +564,122 @@ func zoneColumnCompletions(toComplete string) []string {
 	return rows
 }
 
+var netSortDescriptions = map[string]string{
+	"network":      "network CIDR",
+	"network_view": "IPAM network view",
+	"comment":      "network comment",
+}
+
+func netSortFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return netSortCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func (a *App) completeNetSortValue(args []string) bool {
+	prefix, ok := netSortCompletionPrefix(args)
+	if !ok {
+		return false
+	}
+	rows := netSortCompletions(prefix)
+	noDescriptions := args[0] == "__completeNoDesc"
+	for _, row := range rows {
+		if noDescriptions {
+			row = strings.SplitN(row, "\t", 2)[0]
+		}
+		fmt.Fprintln(a.Stdout, row)
+	}
+	fmt.Fprintln(a.Stdout, ":4")
+	return true
+}
+
+func netSortCompletionPrefix(args []string) (string, bool) {
+	if len(args) < 4 || !strings.HasPrefix(args[0], "__complete") || !isNetListOrSearchArgs(args) {
+		return "", false
+	}
+	current := args[len(args)-1]
+	if current == "--sort" || current == "-s" {
+		return "", true
+	}
+	if value, ok := strings.CutPrefix(current, "--sort="); ok {
+		return value, true
+	}
+	if value, ok := strings.CutPrefix(current, "-s="); ok {
+		return value, true
+	}
+	previous := args[len(args)-2]
+	if previous == "--sort" || previous == "-s" {
+		return current, true
+	}
+	return "", false
+}
+
+func netSortCompletions(toComplete string) []string {
+	prefix := strings.ToLower(strings.TrimSpace(toComplete))
+	var rows []string
+	for _, field := range netSortFields {
+		appendNetSortCompletion(&rows, field, "ascending", prefix)
+		appendNetSortCompletion(&rows, "-"+field, "descending", prefix)
+	}
+	return rows
+}
+
+func appendNetSortCompletion(rows *[]string, value string, direction string, prefix string) {
+	if prefix != "" && !strings.HasPrefix(value, prefix) {
+		return
+	}
+	field := strings.TrimPrefix(value, "-")
+	description := netSortDescriptions[field]
+	if description == "" {
+		*rows = append(*rows, value)
+		return
+	}
+	*rows = append(*rows, value+"\t"+description+" "+direction)
+}
+
+var networkColumnDescriptions = map[string]string{
+	"network":      "network CIDR",
+	"network_view": "IPAM network view",
+	"comment":      "network comment",
+}
+
+func networkColumnFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return networkColumnCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func networkColumnCompletions(toComplete string) []string {
+	raw := strings.ToLower(strings.TrimSpace(toComplete))
+	parts := strings.Split(raw, ",")
+	prefix := parts[len(parts)-1]
+	selected := map[string]bool{}
+	for _, part := range parts[:len(parts)-1] {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			selected[part] = true
+		}
+	}
+	base := ""
+	if len(parts) > 1 {
+		base = strings.Join(parts[:len(parts)-1], ",") + ","
+	}
+
+	var rows []string
+	for _, column := range networkOutputColumns {
+		if selected[column] {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(column, prefix) {
+			continue
+		}
+		candidate := base + column
+		description := networkColumnDescriptions[column]
+		if description == "" {
+			rows = append(rows, candidate)
+			continue
+		}
+		rows = append(rows, candidate+"\t"+description)
+	}
+	return rows
+}
+
 func commandZoneFlag(cmd *cobra.Command) string {
 	return commandCompletionFlagValue(cmd, "zone")
 }

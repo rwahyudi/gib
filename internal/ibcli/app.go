@@ -33,6 +33,8 @@ const (
 	gridObject                    = "grid"
 	memberObject                  = "member"
 	networkObject                 = "network"
+	networkViewObject             = "networkview"
+	ipv4AddressObject             = "ipv4address"
 	allRecordsObject              = "allrecords"
 	wapiPageSize                  = 2000
 )
@@ -94,7 +96,7 @@ func NewDefaultApp() (*App, error) {
 
 func (a *App) Execute(args []string) error {
 	a.startCompletionCachePrefetch(args)
-	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeZoneListFlagNames(args) {
+	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeNetSortValue(args) || a.completeZoneListFlagNames(args) {
 		return nil
 	}
 	root := a.RootCommand()
@@ -121,11 +123,11 @@ func (a *App) Execute(args []string) error {
 func (a *App) RootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:               "ib",
-		Short:             "Infoblox DNS command line client",
+		Short:             "Infoblox DNS and IPAM command line client",
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
-		Long: strings.TrimSpace(`Infoblox DNS command line client.
+		Long: strings.TrimSpace(`Infoblox DNS and IPAM command line client.
 
 Run "ib config new [PROFILE]" first to save an Infoblox profile with server,
 credentials, DNS view, and default zone.
@@ -137,6 +139,8 @@ Common usage:
 	  ib dns zone use example.com
 	  ib dns list
 	  ib dns search app
+	  ib net list
+	  ib net next-ip 192.0.2.0/24 -n 3
 	  ib dns create app host 192.0.2.10 -c "Application host"
 	  ib dns edit app host 192.0.2.20 -t 300 -c "Application host"
 	  ib dns delete app`),
@@ -173,6 +177,7 @@ Common usage:
 
 	root.AddCommand(a.configCommand())
 	root.AddCommand(a.dnsCommand())
+	root.AddCommand(a.netCommand())
 	a.installHelp(root)
 	return root
 }
@@ -254,7 +259,7 @@ func normalizeSortArgs(args []string) []string {
 }
 
 func normalizeSortCompletionArgs(args []string) []string {
-	if len(args) < 4 || (!isRecordListOrSearchArgs(args) && !isZoneListArgs(args)) {
+	if len(args) < 4 || (!isRecordListOrSearchArgs(args) && !isZoneListArgs(args) && !isNetListOrSearchArgs(args)) {
 		return args
 	}
 	normalized := append([]string(nil), args...)
@@ -272,6 +277,9 @@ func defaultSortFieldForArgs(args []string) string {
 	if isZoneListArgs(args) {
 		return defaultZoneSortField
 	}
+	if isNetListOrSearchArgs(args) {
+		return defaultNetSortField
+	}
 	return defaultRecordSortField
 }
 
@@ -285,6 +293,9 @@ func shouldConsumeSortValue(args []string, value string) bool {
 		if isZoneListArgs(args) {
 			return isZoneSortField(field)
 		}
+		if isNetListOrSearchArgs(args) {
+			return isNetSortField(field)
+		}
 		return isRecordSortField(field)
 	}
 	return true
@@ -296,6 +307,10 @@ func isRecordListOrSearchArgs(args []string) bool {
 
 func isZoneListArgs(args []string) bool {
 	return containsArgSequence(args, []string{"dns", "zone", "list"})
+}
+
+func isNetListOrSearchArgs(args []string) bool {
+	return containsArgSequence(args, []string{"net", "list"}) || containsArgSequence(args, []string{"net", "search"})
 }
 
 func containsArgSequence(args []string, sequence []string) bool {

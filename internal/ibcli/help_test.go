@@ -23,6 +23,7 @@ func TestRootHelpUsesModules(t *testing.T) {
 		"Modules",
 		"config  Manage Infoblox configuration",
 		"dns     Manage Infoblox DNS records",
+		"net     Manage Infoblox IPAM networks",
 		`Use "ib <module> --help" for more detail.`,
 	} {
 		if !strings.Contains(output, want) {
@@ -37,6 +38,39 @@ func TestRootHelpUsesModules(t *testing.T) {
 		if strings.Contains(output, unwanted) {
 			t.Fatalf("root help output contains old wording %q:\n%s", unwanted, output)
 		}
+	}
+}
+
+func TestNetModuleHelpShowsIPAMCommands(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"net", "--help"}); err != nil {
+		t.Fatalf("net help: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"ib net <command>",
+		"IPAM Usage",
+		"ib net list [SEARCH] lists IPv4 networks",
+		"ib net next-ip NETWORK requests available IPv4 addresses",
+		"Commands",
+		"address",
+		"Show IPAM address details",
+		"next-ip",
+		"Find the next available IP in a network",
+		"view",
+		"Manage IPAM network views",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("net help output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "Current Context:") {
+		t.Fatalf("net help output should not show DNS context:\n%s", output)
 	}
 }
 
@@ -181,6 +215,68 @@ func TestDNSNextIPHelpShowsOptions(t *testing.T) {
 	} {
 		if strings.Contains(output, unwanted) {
 			t.Fatalf("dns next-ip help output contains unused DNS context flag %q:\n%s", unwanted, output)
+		}
+	}
+}
+
+func TestNetHelpShowsIPAMOptions(t *testing.T) {
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{
+			args: []string{"net", "list", "--help"},
+			want: []string{
+				"Network List Usage",
+				"--network-view filters to one IPAM network view",
+				"-s network or --sort=-comment sorts by field",
+				"-C network,comment prints selected output columns",
+				"--network-view STRING",
+				"-C, --columns STRING",
+				"-s, --sort STRING",
+			},
+		},
+		{
+			args: []string{"net", "address", "--help"},
+			want: []string{
+				"Address Details Usage",
+				"IPv4 address such as 192.0.2.10",
+				"--network-view narrows the lookup",
+				"--network-view STRING",
+			},
+		},
+		{
+			args: []string{"net", "next-ip", "--help"},
+			want: []string{
+				"Next IP Usage",
+				"IPv4 CIDR such as 192.0.2.0/24",
+				"--network-view chooses the IPAM network view",
+				"-n 3 or --num 3 requests multiple addresses",
+				"-e 192.0.2.10 excludes an address",
+				"--network-view STRING",
+				"-n, --num INT",
+				"-e, --exclude STRINGARRAY",
+			},
+		},
+	}
+	for _, tt := range tests {
+		app := testApp(t)
+		var stdout bytes.Buffer
+		app.Stdout = &stdout
+		app.Stderr = &bytes.Buffer{}
+		app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+		if err := app.Execute(tt.args); err != nil {
+			t.Fatalf("%v help: %v", tt.args, err)
+		}
+		output := stdout.String()
+		for _, want := range tt.want {
+			if !strings.Contains(output, want) {
+				t.Fatalf("%v help output missing %q:\n%s", tt.args, want, output)
+			}
+		}
+		if strings.Contains(output, "--zone STRING") || strings.Contains(output, "--view STRING") {
+			t.Fatalf("%v help output contains DNS context flags:\n%s", tt.args, output)
 		}
 	}
 }
