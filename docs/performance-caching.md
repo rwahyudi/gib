@@ -1,17 +1,19 @@
 # Performance & Caching
 
-`ib` is built for large Infoblox DNS zones. List and search commands prefer a
-local SQLite cache, use `/allrecords` to avoid one request per record type, and
-run multi-zone searches with a bounded worker pool.
+`ib` is built for large Infoblox DNS zones and IPAM read workflows. List and
+search commands prefer a local SQLite cache, DNS record reads use `/allrecords`
+to avoid one request per record type, and multi-zone searches run with a bounded
+worker pool.
 
 ## Quick Model
 
 | Area | Behavior |
 | --- | --- |
-| Cache scope | Cache rows are keyed by profile, DNS view, and zone. |
+| Cache scope | DNS rows are keyed by profile, DNS view, and zone. IPAM rows are keyed by profile plus network view or IP. |
 | Freshness | Fresh until `cached_at + cache_ttl`; `fresh_until` is not stored. |
-| Stale window | Record rows can be served stale until `stale_expires_at`. |
+| Stale window | Record and IPAM rows can be served stale until `stale_expires_at`. |
 | Revalidation | Stale rows inside SWR return immediately and start one background refresh. |
+| IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. |
 | Read endpoint | GET requests use `read_server` when configured. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
 | Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`. |
@@ -21,8 +23,8 @@ Default tuning in the profile config `[meta]` section:
 
 | Setting | Default | Meaning |
 | --- | ---: | --- |
-| `cache_ttl` | `300` seconds | Normal freshness for zone and record cache rows. |
-| `records_cache_swr_ttl` | `259200` seconds | How long expired record rows can be served stale while revalidating. |
+| `cache_ttl` | `300` seconds | Normal freshness for zone, record, and IPAM cache rows. |
+| `records_cache_swr_ttl` | `259200` seconds | How long expired record and IPAM rows can be served stale while revalidating. |
 | `dns_search_worker_limit` | `16` | Maximum parallel zone workers during multi-zone search. |
 | `max_background_worker_wait` | `3` seconds | Maximum wait for an active same-zone refresh before foreground WAPI work. |
 | `completion_cache_prefetch` | `true` | Whether shell completion starts background refresh helpers for missing or stale DNS context caches. |
@@ -33,11 +35,11 @@ Default tuning in the profile config `[meta]` section:
 ![Nord cache decision flow](assets/cache-decision-flow.svg)
 
 The important performance point is the stale-while-revalidate path: if a record
-cache row is expired but still inside `records_cache_swr_ttl`, the user gets
-cached records immediately. `ib` only blocks on Infoblox when the row is missing
-or already outside the stale window. Before doing that foreground work, it waits
-up to `max_background_worker_wait` seconds for an active refresh of the same
-profile, DNS view, and zone to finish.
+or IPAM cache row is expired but still inside `records_cache_swr_ttl`, the user
+gets cached data immediately. `ib` only blocks on Infoblox when the row is
+missing or already outside the stale window. Before doing that foreground work,
+it waits up to `max_background_worker_wait` seconds for an active refresh of the
+same cache scope to finish.
 
 Shell completion never performs a foreground Infoblox refresh for zone or record
 names. With `completion_cache_prefetch = true`, completion checks the current DNS
@@ -82,12 +84,14 @@ normalization happen before matching.
 
 `cache_meta` stores cache schema metadata. `zone_cache` caches authoritative
 zone list payloads per profile and view. `record_cache` stores `/allrecords`
-payloads per profile, view, and zone. `record_refresh_locks` prevents duplicate
-background refreshes for the same profile, view, and zone.
+payloads per profile, view, and zone. `network_view_cache`, `network_cache`,
+and `ipv4_address_cache` store IPAM read payloads. `record_refresh_locks` and
+`net_refresh_locks` prevent duplicate background refreshes for the same cache
+scope.
 
-`zone_cache` and `record_cache` store Infoblox payloads as JSON text. The CLI
-normalizes those payloads into typed records when listing, searching, completing,
-or displaying records.
+Cache tables store Infoblox payloads as JSON text. The CLI normalizes those
+payloads into typed records or IPAM rows when listing, searching, completing, or
+displaying data.
 
 ## Cache Updates After Changes
 

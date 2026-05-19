@@ -474,15 +474,15 @@ func TestConfigCacheAndCompletionHelpCoversOperationalDetails(t *testing.T) {
 			args: []string{"config", "cache", "--help"},
 			want: []string{
 				"Cache Usage",
-				"show zone and record cache entries with age and expiry",
-				"cache entries are separated by profile, DNS view, and zone",
+				"show DNS and IPAM cache entries with age and expiry",
+				"DNS caches use profile/view/zone; IPAM caches use profile/network view/IP",
 			},
 		},
 		{
 			args: []string{"config", "cache", "status", "--help"},
 			want: []string{
 				"Cache Status",
-				"kind, profile, view, zone, serial, items, age, stale_expires",
+				"kind, profile, view/network view, zone/IP, serial, items, age, stale_expires",
 				"table output adds a colored summary footer",
 				"returns statistics and entries",
 				"keeps row-only output for scripts",
@@ -493,7 +493,7 @@ func TestConfigCacheAndCompletionHelpCoversOperationalDetails(t *testing.T) {
 			args: []string{"config", "cache", "clear", "--help"},
 			want: []string{
 				"Cache Clear",
-				"local zone and record cache entries",
+				"local DNS and IPAM cache entries",
 				"configuration profiles, encryption key, and active session files",
 			},
 		},

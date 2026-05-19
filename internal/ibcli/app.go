@@ -71,6 +71,7 @@ type App struct {
 	dnsViewOverride             string
 	backgroundRecordRevalidator func(Profile, string) error
 	backgroundZoneRefresher     func(Profile) error
+	backgroundNetRefresher      func(Profile, string, string, string) error
 	dnsDeleteRecordSelector     func(string, []TypedRecord) (TypedRecord, bool, error)
 	dnsDeleteConfirmer          func(string, TypedRecord) (bool, error)
 }

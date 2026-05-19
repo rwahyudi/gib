@@ -16,7 +16,7 @@ import (
 
 const (
 	cacheFileName         = "cache.sqlite3"
-	cacheSchemaVersion    = "6"
+	cacheSchemaVersion    = "7"
 	recordRefreshLeaseTTL = 300 * time.Second
 	zoneRefreshLockName   = "<zone-cache>"
 )
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS cache_meta (
 );
 
 INSERT OR IGNORE INTO cache_meta (key, value)
-VALUES ('schema_version', '6');
+VALUES ('schema_version', '7');
 
 CREATE TABLE IF NOT EXISTS zone_cache (
   cache_key TEXT PRIMARY KEY,
@@ -71,6 +71,54 @@ CREATE TABLE IF NOT EXISTS record_refresh_locks (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_record_refresh_locks_scope_zone
 ON record_refresh_locks (profile, view, zone);
+
+CREATE TABLE IF NOT EXISTS network_view_cache (
+  cache_key TEXT PRIMARY KEY,
+  profile TEXT NOT NULL,
+  cached_at INTEGER NOT NULL,
+  stale_expires_at INTEGER NOT NULL,
+  payload_json TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_network_view_cache_profile
+ON network_view_cache (profile);
+
+CREATE TABLE IF NOT EXISTS network_cache (
+  cache_key TEXT PRIMARY KEY,
+  profile TEXT NOT NULL,
+  network_view TEXT NOT NULL,
+  cached_at INTEGER NOT NULL,
+  stale_expires_at INTEGER NOT NULL,
+  payload_json TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_network_cache_scope
+ON network_cache (profile, network_view);
+
+CREATE TABLE IF NOT EXISTS ipv4_address_cache (
+  cache_key TEXT PRIMARY KEY,
+  profile TEXT NOT NULL,
+  network_view TEXT NOT NULL,
+  ip TEXT NOT NULL,
+  cached_at INTEGER NOT NULL,
+  stale_expires_at INTEGER NOT NULL,
+  payload_json TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ipv4_address_cache_scope
+ON ipv4_address_cache (profile, network_view, ip);
+
+CREATE TABLE IF NOT EXISTS net_refresh_locks (
+  cache_key TEXT PRIMARY KEY,
+  profile TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_net_refresh_locks_scope
+ON net_refresh_locks (profile, kind, scope);
 `
 
 var (
@@ -102,14 +150,17 @@ type cacheStatusSnapshot struct {
 }
 
 type cacheStatusStatistics struct {
-	CacheEntries    int `json:"cache_entries"`
-	ZoneEntries     int `json:"zone_entries"`
-	RecordEntries   int `json:"record_entries"`
-	CachedRecords   int `json:"cached_records"`
-	FreshEntries    int `json:"fresh_entries"`
-	SWRStaleEntries int `json:"swr_stale_entries"`
-	ExpiredEntries  int `json:"expired_entries"`
-	ActiveRefreshes int `json:"active_refreshes"`
+	CacheEntries       int `json:"cache_entries"`
+	ZoneEntries        int `json:"zone_entries"`
+	RecordEntries      int `json:"record_entries"`
+	NetworkViewEntries int `json:"network_view_entries"`
+	NetworkEntries     int `json:"network_entries"`
+	IPv4AddressEntries int `json:"ipv4_address_entries"`
+	CachedRecords      int `json:"cached_records"`
+	FreshEntries       int `json:"fresh_entries"`
+	SWRStaleEntries    int `json:"swr_stale_entries"`
+	ExpiredEntries     int `json:"expired_entries"`
+	ActiveRefreshes    int `json:"active_refreshes"`
 }
 
 func (a *App) cachePath() string {
@@ -206,6 +257,22 @@ func cacheSchemaIsCurrent(db *sql.DB) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	networkViewColumns, err := tableColumnSet(db, "network_view_cache")
+	if err != nil {
+		return false, err
+	}
+	networkColumns, err := tableColumnSet(db, "network_cache")
+	if err != nil {
+		return false, err
+	}
+	addressColumns, err := tableColumnSet(db, "ipv4_address_cache")
+	if err != nil {
+		return false, err
+	}
+	netLockColumns, err := tableColumnSet(db, "net_refresh_locks")
+	if err != nil {
+		return false, err
+	}
 	if zoneColumns["expires_at"] || recordColumns["expires_at"] {
 		return false, nil
 	}
@@ -221,6 +288,26 @@ func cacheSchemaIsCurrent(db *sql.DB) (bool, error) {
 	}
 	for _, column := range []string{"cache_key", "profile", "view", "zone", "started_at", "expires_at"} {
 		if !lockColumns[column] {
+			return false, nil
+		}
+	}
+	for _, column := range []string{"cache_key", "profile", "cached_at", "stale_expires_at", "payload_json"} {
+		if !networkViewColumns[column] {
+			return false, nil
+		}
+	}
+	for _, column := range []string{"cache_key", "profile", "network_view", "cached_at", "stale_expires_at", "payload_json"} {
+		if !networkColumns[column] {
+			return false, nil
+		}
+	}
+	for _, column := range []string{"cache_key", "profile", "network_view", "ip", "cached_at", "stale_expires_at", "payload_json"} {
+		if !addressColumns[column] {
+			return false, nil
+		}
+	}
+	for _, column := range []string{"cache_key", "profile", "kind", "scope", "started_at", "expires_at"} {
+		if !netLockColumns[column] {
 			return false, nil
 		}
 	}
@@ -362,6 +449,10 @@ DROP TABLE IF EXISTS zone_cache_entries;
 DROP TABLE IF EXISTS zone_cache;
 DROP TABLE IF EXISTS record_cache;
 DROP TABLE IF EXISTS record_refresh_locks;
+DROP TABLE IF EXISTS network_view_cache;
+DROP TABLE IF EXISTS network_cache;
+DROP TABLE IF EXISTS ipv4_address_cache;
+DROP TABLE IF EXISTS net_refresh_locks;
 DELETE FROM cache_meta WHERE key = 'schema_version';
 `); err != nil {
 		return err
@@ -371,15 +462,20 @@ DELETE FROM cache_meta WHERE key = 'schema_version';
 }
 
 func cacheScope(profile Profile) (string, string) {
-	name := strings.TrimSpace(profile.Name)
-	if name == "" {
-		name = defaultProfileName
-	}
+	name := cacheProfileName(profile)
 	view := strings.TrimSpace(profile.DNSView)
 	if view == "" {
 		view = "default"
 	}
 	return name, view
+}
+
+func cacheProfileName(profile Profile) string {
+	name := strings.TrimSpace(profile.Name)
+	if name == "" {
+		name = defaultProfileName
+	}
+	return name
 }
 
 func cacheKey(parts ...string) string {
@@ -444,6 +540,156 @@ func (a *App) writeCachedZones(profile Profile, rows []map[string]any, now time.
 	_, err = db.Exec(`
 INSERT OR REPLACE INTO zone_cache (cache_key, profile, view, cached_at, payload_json)
 VALUES (?, ?, ?, ?, ?)`, key, profileName, view, cachedAt, string(payload))
+	return err
+}
+
+func (a *App) readCachedNetworkViews(profile Profile) (cachedPayload, error) {
+	profileName := cacheProfileName(profile)
+	key := cacheKey("network-views", profileName)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	defer db.Close()
+
+	var raw string
+	var cachedAt, staleExpiresAt int64
+	err = db.QueryRow(`SELECT payload_json, cached_at, stale_expires_at FROM network_view_cache WHERE cache_key = ?`, key).Scan(&raw, &cachedAt, &staleExpiresAt)
+	if err == sql.ErrNoRows {
+		return cachedPayload{}, nil
+	}
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	rows, err := rowsFromJSON(raw)
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	return cachedPayload{Rows: rows, CachedAt: cachedAt, StaleExpiresAt: staleExpiresAt, CacheFound: true}, nil
+}
+
+func (a *App) writeCachedNetworkViews(profile Profile, rows []map[string]any, now time.Time) error {
+	return a.writeCachedNetworkViewsEntry(profile, rows, now.Unix(), now.Add(a.recordsCacheSWRTTL()).Unix())
+}
+
+func (a *App) writeCachedNetworkViewsEntry(profile Profile, rows []map[string]any, cachedAt int64, staleExpiresAt int64) error {
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	profileName := cacheProfileName(profile)
+	key := cacheKey("network-views", profileName)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+INSERT OR REPLACE INTO network_view_cache (cache_key, profile, cached_at, stale_expires_at, payload_json)
+VALUES (?, ?, ?, ?, ?)`, key, profileName, cachedAt, staleExpiresAt, string(payload))
+	return err
+}
+
+func (a *App) readCachedNetworks(profile Profile, networkView string) (cachedPayload, error) {
+	profileName := cacheProfileName(profile)
+	networkView = strings.TrimSpace(networkView)
+	key := cacheKey("networks", profileName, networkView)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	defer db.Close()
+
+	var raw string
+	var cachedAt, staleExpiresAt int64
+	err = db.QueryRow(`SELECT payload_json, cached_at, stale_expires_at FROM network_cache WHERE cache_key = ?`, key).Scan(&raw, &cachedAt, &staleExpiresAt)
+	if err == sql.ErrNoRows {
+		return cachedPayload{}, nil
+	}
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	rows, err := rowsFromJSON(raw)
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	return cachedPayload{Rows: rows, CachedAt: cachedAt, StaleExpiresAt: staleExpiresAt, CacheFound: true}, nil
+}
+
+func (a *App) writeCachedNetworks(profile Profile, networkView string, rows []map[string]any, now time.Time) error {
+	return a.writeCachedNetworksEntry(profile, networkView, rows, now.Unix(), now.Add(a.recordsCacheSWRTTL()).Unix())
+}
+
+func (a *App) writeCachedNetworksEntry(profile Profile, networkView string, rows []map[string]any, cachedAt int64, staleExpiresAt int64) error {
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	profileName := cacheProfileName(profile)
+	networkView = strings.TrimSpace(networkView)
+	key := cacheKey("networks", profileName, networkView)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+INSERT OR REPLACE INTO network_cache (cache_key, profile, network_view, cached_at, stale_expires_at, payload_json)
+VALUES (?, ?, ?, ?, ?, ?)`, key, profileName, networkView, cachedAt, staleExpiresAt, string(payload))
+	return err
+}
+
+func (a *App) readCachedIPv4Addresses(profile Profile, ip string, networkView string) (cachedPayload, error) {
+	profileName := cacheProfileName(profile)
+	ip = strings.TrimSpace(ip)
+	networkView = strings.TrimSpace(networkView)
+	key := cacheKey("ipv4-address", profileName, networkView, ip)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	defer db.Close()
+
+	var raw string
+	var cachedAt, staleExpiresAt int64
+	err = db.QueryRow(`SELECT payload_json, cached_at, stale_expires_at FROM ipv4_address_cache WHERE cache_key = ?`, key).Scan(&raw, &cachedAt, &staleExpiresAt)
+	if err == sql.ErrNoRows {
+		return cachedPayload{}, nil
+	}
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	rows, err := rowsFromJSON(raw)
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	return cachedPayload{Rows: rows, CachedAt: cachedAt, StaleExpiresAt: staleExpiresAt, CacheFound: true}, nil
+}
+
+func (a *App) writeCachedIPv4Addresses(profile Profile, ip string, networkView string, rows []map[string]any, now time.Time) error {
+	return a.writeCachedIPv4AddressesEntry(profile, ip, networkView, rows, now.Unix(), now.Add(a.recordsCacheSWRTTL()).Unix())
+}
+
+func (a *App) writeCachedIPv4AddressesEntry(profile Profile, ip string, networkView string, rows []map[string]any, cachedAt int64, staleExpiresAt int64) error {
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	profileName := cacheProfileName(profile)
+	ip = strings.TrimSpace(ip)
+	networkView = strings.TrimSpace(networkView)
+	key := cacheKey("ipv4-address", profileName, networkView, ip)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+INSERT OR REPLACE INTO ipv4_address_cache (cache_key, profile, network_view, ip, cached_at, stale_expires_at, payload_json)
+VALUES (?, ?, ?, ?, ?, ?, ?)`, key, profileName, networkView, ip, cachedAt, staleExpiresAt, string(payload))
 	return err
 }
 
@@ -613,7 +859,7 @@ func (a *App) clearCache() error {
 		return err
 	}
 	defer db.Close()
-	if _, err := db.Exec(`DELETE FROM zone_cache; DELETE FROM record_cache; DELETE FROM record_refresh_locks;`); err != nil {
+	if _, err := db.Exec(`DELETE FROM zone_cache; DELETE FROM record_cache; DELETE FROM record_refresh_locks; DELETE FROM network_view_cache; DELETE FROM network_cache; DELETE FROM ipv4_address_cache; DELETE FROM net_refresh_locks;`); err != nil {
 		return err
 	}
 	return nil
@@ -632,7 +878,11 @@ func (a *App) clearProfileCache(profileName string) error {
 	_, err = db.Exec(`
 DELETE FROM zone_cache WHERE profile = ?;
 DELETE FROM record_cache WHERE profile = ?;
-DELETE FROM record_refresh_locks WHERE profile = ?;`, profileName, profileName, profileName)
+DELETE FROM record_refresh_locks WHERE profile = ?;
+DELETE FROM network_view_cache WHERE profile = ?;
+DELETE FROM network_cache WHERE profile = ?;
+DELETE FROM ipv4_address_cache WHERE profile = ?;
+DELETE FROM net_refresh_locks WHERE profile = ?;`, profileName, profileName, profileName, profileName, profileName, profileName, profileName)
 	return err
 }
 
@@ -739,6 +989,101 @@ func (a *App) releaseZoneRefreshLease(profile Profile) error {
 	return a.releaseRecordRefreshLease(profile, zoneRefreshLockName)
 }
 
+func netRefreshScope(kind string, networkView string, ip string) string {
+	return cacheKey(kind, strings.TrimSpace(networkView), strings.TrimSpace(ip))
+}
+
+func (a *App) tryAcquireNetRefreshLease(profile Profile, kind string, networkView string, ip string, now time.Time, ttl time.Duration) (bool, error) {
+	profileName := cacheProfileName(profile)
+	scope := netRefreshScope(kind, networkView, ip)
+	key := cacheKey("net-refresh", profileName, kind, scope)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	nowUnix := now.Unix()
+	_, _ = db.Exec(`DELETE FROM net_refresh_locks WHERE expires_at <= ?`, nowUnix)
+	_, err = db.Exec(`
+INSERT INTO net_refresh_locks (cache_key, profile, kind, scope, started_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?)`, key, profileName, kind, scope, nowUnix, now.Add(ttl).Unix())
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *App) releaseNetRefreshLease(profile Profile, kind string, networkView string, ip string) error {
+	profileName := cacheProfileName(profile)
+	scope := netRefreshScope(kind, networkView, ip)
+	key := cacheKey("net-refresh", profileName, kind, scope)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.Exec(`DELETE FROM net_refresh_locks WHERE cache_key = ?`, key)
+	return err
+}
+
+func (a *App) netRefreshLeaseActive(profile Profile, kind string, networkView string, ip string, now time.Time) (bool, error) {
+	profileName := cacheProfileName(profile)
+	scope := netRefreshScope(kind, networkView, ip)
+	key := cacheKey("net-refresh", profileName, kind, scope)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	var expiresAt int64
+	err = db.QueryRow(`SELECT expires_at FROM net_refresh_locks WHERE cache_key = ?`, key).Scan(&expiresAt)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return expiresAt > now.Unix(), nil
+}
+
+func (a *App) waitForActiveNetRefresh(profile Profile, kind string, networkView string, ip string, maxWait time.Duration, pollInterval time.Duration) (bool, error) {
+	if maxWait <= 0 {
+		return false, nil
+	}
+	if pollInterval <= 0 {
+		pollInterval = 2 * time.Millisecond
+	}
+	active, err := a.netRefreshLeaseActive(profile, kind, networkView, ip, time.Now())
+	if err != nil || !active {
+		return false, err
+	}
+
+	deadline := time.Now().Add(maxWait)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false, nil
+		}
+		sleepFor := pollInterval
+		if remaining < sleepFor {
+			sleepFor = remaining
+		}
+		time.Sleep(sleepFor)
+		active, err = a.netRefreshLeaseActive(profile, kind, networkView, ip, time.Now())
+		if err != nil {
+			return false, err
+		}
+		if !active {
+			return true, nil
+		}
+	}
+}
+
 func (a *App) cacheStatusRows() ([]map[string]any, error) {
 	snapshot, err := a.cacheStatusSnapshot()
 	if err != nil {
@@ -760,6 +1105,15 @@ FROM zone_cache
 UNION ALL
 SELECT 'records' AS kind, profile, view, zone, COALESCE(zone_serial, '') AS serial, cached_at, stale_expires_at, payload_json
 FROM record_cache
+UNION ALL
+SELECT 'network_views' AS kind, profile, '' AS view, '' AS zone, '' AS serial, cached_at, stale_expires_at, payload_json
+FROM network_view_cache
+UNION ALL
+SELECT 'networks' AS kind, profile, network_view AS view, '' AS zone, '' AS serial, cached_at, stale_expires_at, payload_json
+FROM network_cache
+UNION ALL
+SELECT 'ipv4_addresses' AS kind, profile, network_view AS view, ip AS zone, '' AS serial, cached_at, stale_expires_at, payload_json
+FROM ipv4_address_cache
 ORDER BY kind, profile, view, zone`)
 	if err != nil {
 		return cacheStatusSnapshot{}, err
@@ -778,7 +1132,7 @@ ORDER BY kind, profile, view, zone`)
 		}
 		itemCount := payloadItemCount(raw)
 		staleExpiry := ""
-		if kind == "records" {
+		if cacheKindUsesSWR(kind) {
 			staleExpiry = cacheExpiryText(now, staleExpiresAt)
 		}
 		snapshot.Entries = append(snapshot.Entries, map[string]any{
@@ -796,10 +1150,20 @@ ORDER BY kind, profile, view, zone`)
 	if err := rows.Err(); err != nil {
 		return cacheStatusSnapshot{}, err
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM record_refresh_locks WHERE expires_at > ?`, now).Scan(&snapshot.Statistics.ActiveRefreshes); err != nil {
+	var recordRefreshes int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM record_refresh_locks WHERE expires_at > ?`, now).Scan(&recordRefreshes); err != nil {
 		return cacheStatusSnapshot{}, err
 	}
+	var netRefreshes int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM net_refresh_locks WHERE expires_at > ?`, now).Scan(&netRefreshes); err != nil {
+		return cacheStatusSnapshot{}, err
+	}
+	snapshot.Statistics.ActiveRefreshes = recordRefreshes + netRefreshes
 	return snapshot, nil
+}
+
+func cacheKindUsesSWR(kind string) bool {
+	return kind != "zones"
 }
 
 func (s *cacheStatusStatistics) addEntry(kind string, itemCount int, staleExpiresAt, freshUntil int64, now time.Time) {
@@ -811,12 +1175,18 @@ func (s *cacheStatusStatistics) addEntry(kind string, itemCount int, staleExpire
 	case "records":
 		s.RecordEntries++
 		s.CachedRecords += itemCount
+	case "network_views":
+		s.NetworkViewEntries++
+	case "networks":
+		s.NetworkEntries++
+	case "ipv4_addresses":
+		s.IPv4AddressEntries++
 	}
 	if nowUnix < freshUntil {
 		s.FreshEntries++
 		return
 	}
-	if kind == "records" && nowUnix < staleExpiresAt {
+	if cacheKindUsesSWR(kind) && nowUnix < staleExpiresAt {
 		s.SWRStaleEntries++
 		return
 	}
@@ -848,6 +1218,9 @@ func renderCacheStatusStatistics(stats cacheStatusStatistics) string {
 	badges := []string{
 		renderCacheStatusBadge(cacheStatsEntryStyle, "Cache entries", stats.CacheEntries),
 		renderCacheStatusBadge(cacheStatsRecordStyle, "Cached records", stats.CachedRecords),
+		renderCacheStatusBadge(cacheStatsEntryStyle, "Network views", stats.NetworkViewEntries),
+		renderCacheStatusBadge(cacheStatsEntryStyle, "Networks", stats.NetworkEntries),
+		renderCacheStatusBadge(cacheStatsEntryStyle, "IPv4 addresses", stats.IPv4AddressEntries),
 		renderCacheStatusBadge(cacheStatsFreshStyle, "Fresh", stats.FreshEntries),
 		renderCacheStatusBadge(cacheStatsStaleStyle, "SWR stale", stats.SWRStaleEntries),
 		renderCacheStatusBadge(cacheStatsExpiredStyle, "Expired", stats.ExpiredEntries),

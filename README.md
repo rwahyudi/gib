@@ -218,12 +218,13 @@ ib dns --view "DNS Zone View" search app
 | --- | --- | --- |
 | `config` | Manage profiles, encrypted credentials, completion, and local cache. | `ib config new --default` |
 | `dns` | Manage Infoblox DNS views, zones, records, searches, and context overrides. | `ib dns list` |
+| `net` | Manage IPAM network views, IPv4 networks, addresses, and next-IP lookups. | `ib net list` |
 
 ## How It Works
 
 `cmd/ib/main.go` starts the Cobra CLI and hands command behavior to `internal/ibcli`. Profile loading decrypts the stored password, resolves the current DNS view/zone, and builds a WAPI client. GET requests can use a configured GCM read endpoint, while create, update, and delete requests always use the primary server.
 
-DNS listing and search prefer local SQLite cache rows. Freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` are returned immediately while one detached refresh process revalidates the zone serial and refreshes `/allrecords` when required.
+DNS listing/search and IPAM read workflows prefer local SQLite cache rows. Freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` are returned immediately while one detached refresh process updates the cache. DNS records revalidate with the zone serial before refreshing `/allrecords`; IPAM cache refreshes skip serial checks and re-download the relevant WAPI object.
 
 Code comments are intentionally concentrated around routing, config validation, cache/SWR, leases, completion, and background refresh handoff. Update those comments in the same change whenever the related behavior changes.
 
@@ -356,19 +357,22 @@ answering the WAPI request instead of Infoblox JSON.
 
 ## Cache
 
-Zone and record caches are stored in `~/.ib/cache.sqlite3`.
+Zone, record, and IPAM caches are stored in `~/.ib/cache.sqlite3`.
 
-Record cache freshness uses `cached_at + cache_ttl`. Expired records inside `records_cache_swr_ttl` are returned immediately while a single background refresh process revalidates the zone serial and refreshes `/allrecords` when needed.
+Record and IPAM cache freshness uses `cached_at + cache_ttl`. Expired records and IPAM rows inside `records_cache_swr_ttl` are returned immediately while a single background refresh process updates the cache. DNS records revalidate the zone serial before refreshing `/allrecords`; IPAM rows skip serial checks and refresh the relevant `networkview`, `network`, or `ipv4address` WAPI data.
 
 Multi-zone search preloads matching record-cache rows with one SQLite connection before workers start. Workers still fall back to per-zone cache/WAPI checks for missing or expired rows. The WAPI HTTP client keeps a larger per-host connection pool sized from `dns_search_worker_limit` so parallel search can reuse TLS connections instead of repeatedly reconnecting.
 
-When cache is missing or already outside the stale window, list/search waits up to `max_background_worker_wait` seconds for an active background refresh of the same profile, DNS view, and zone before doing foreground WAPI refresh work.
+When cache is missing or already outside the stale window, list/search waits up to `max_background_worker_wait` seconds for an active background refresh of the same profile and cache scope before doing foreground WAPI refresh work.
+
+`ib net next-ip` can use cached network rows to find the target network `_ref`, but the `next_available_ip` function call is always sent live to the primary server so returned addresses are current.
 
 Shell completion prefetches cache freshness in the background by default. When `ib __complete` or `ib __completeNoDesc` runs and `completion_cache_prefetch = true`, it checks the current DNS view and zone, then starts lease-protected zone-list or current-zone record refresh helpers when cache rows are missing or stale. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
 
 `ib config cache status` keeps the detailed cache row table and adds a colored
 summary footer for table output: cache entries, cached records, fresh entries,
-SWR-stale entries, expired entries, and active refreshes. With `-o json`, it
+network views, networks, IPv4 addresses, SWR-stale entries, expired entries,
+and active refreshes. With `-o json`, it
 returns `statistics` and `entries`; with `-o csv`, output remains row-only for
 scripts.
 

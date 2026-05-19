@@ -293,14 +293,14 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		}, "\n")
 	case "ib config cache":
 		return sectionWithRows("Cache Usage", [][]string{
-			{"status", "show zone and record cache entries with age and expiry"},
-			{"clear", "delete local zone and record cache entries"},
-			{"scope", "cache entries are separated by profile, DNS view, and zone"},
+			{"status", "show DNS and IPAM cache entries with age and expiry"},
+			{"clear", "delete local DNS and IPAM cache entries"},
+			{"scope", "DNS caches use profile/view/zone; IPAM caches use profile/network view/IP"},
 			{"storage", "local SQLite cache under ~/.ib"},
 		})
 	case "ib config cache status":
 		return sectionWithRows("Cache Status", [][]string{
-			{"shows", "kind, profile, view, zone, serial, items, age, stale_expires"},
+			{"shows", "kind, profile, view/network view, zone/IP, serial, items, age, stale_expires"},
 			{"stats", "table output adds a colored summary footer"},
 			{"json", "returns statistics and entries"},
 			{"csv", "keeps row-only output for scripts"},
@@ -308,7 +308,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		})
 	case "ib config cache clear":
 		return sectionWithRows("Cache Clear", [][]string{
-			{"clears", "local zone and record cache entries"},
+			{"clears", "local DNS and IPAM cache entries"},
 			{"keeps", "configuration profiles, encryption key, and active session files"},
 		})
 	}

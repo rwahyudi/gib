@@ -4,14 +4,20 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"os"
+	"os/exec"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
 	networkViewReturnFields = "name,comment"
 	ipv4AddressReturnFields = "ip_address,network,network_view,status,types,names,mac_address,lease_state,usage,comment"
 	defaultNetSortField     = "network"
+	netCacheKindViews       = "network_views"
+	netCacheKindNetworks    = "networks"
+	netCacheKindAddresses   = "ipv4_addresses"
 )
 
 var (
@@ -29,11 +35,11 @@ type NetSort struct {
 }
 
 func (a *App) runNetViewList() error {
-	_, client, err := a.configuredClient()
+	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
-	views, err := queryNetworkViews(client)
+	views, err := a.cachedNetworkViews(profile, client)
 	if err != nil {
 		return err
 	}
@@ -54,11 +60,11 @@ func (a *App) runNetViewList() error {
 }
 
 func (a *App) runNetList(search string, networkView string, option NetSort, columns []string) error {
-	_, client, err := a.configuredClient()
+	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
-	networks, err := queryNetworks(client, networkView)
+	networks, err := a.cachedNetworks(profile, client, networkView)
 	if err != nil {
 		return err
 	}
@@ -77,11 +83,11 @@ func (a *App) runNetList(search string, networkView string, option NetSort, colu
 }
 
 func (a *App) runNetShow(network string, networkView string) error {
-	_, client, err := a.configuredClient()
+	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
-	matchedNetwork, err := findNetwork(client, network, networkView)
+	matchedNetwork, err := a.cachedFindNetwork(profile, client, network, networkView)
 	if err != nil {
 		return err
 	}
@@ -99,15 +105,11 @@ func (a *App) runNetAddress(address string, networkView string) error {
 	if err != nil {
 		return err
 	}
-	_, client, err := a.configuredClient()
+	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
-	params := url.Values{"_return_fields": []string{ipv4AddressReturnFields}, "ip_address": []string{ip}}
-	if strings.TrimSpace(networkView) != "" {
-		params.Set("network_view", strings.TrimSpace(networkView))
-	}
-	results, err := pagedQuery(client, ipv4AddressObject, params)
+	results, err := a.cachedIPv4Addresses(profile, client, ip, networkView)
 	if err != nil {
 		return err
 	}
@@ -128,19 +130,28 @@ func (a *App) runNetAddress(address string, networkView string) error {
 }
 
 func (a *App) runDNSNextIP(network string, networkView string, num int, exclude []string) error {
-	return a.runNextIP(network, networkView, num, exclude, true)
+	return a.runNextIP(network, networkView, num, exclude, true, false)
 }
 
 func (a *App) runNetNextIP(network string, networkView string, num int, exclude []string) error {
-	return a.runNextIP(network, networkView, num, exclude, false)
+	return a.runNextIP(network, networkView, num, exclude, false, true)
 }
 
-func (a *App) runNextIP(network string, networkView string, num int, exclude []string, printContext bool) error {
-	_, client, err := a.configuredClient()
+func (a *App) runNextIP(network string, networkView string, num int, exclude []string, printContext bool, cachedLookup bool) error {
+	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
-	rows, err := nextAvailableIPRows(client, network, networkView, num, exclude)
+	var rows []map[string]any
+	if cachedLookup {
+		matchedNetwork, findErr := a.cachedFindNetwork(profile, client, network, networkView)
+		if findErr != nil {
+			return findErr
+		}
+		rows, err = nextAvailableIPRowsForNetwork(client, matchedNetwork, network, num, exclude)
+	} else {
+		rows, err = nextAvailableIPRows(client, network, networkView, num, exclude)
+	}
 	if err != nil {
 		return err
 	}
@@ -153,6 +164,206 @@ func (a *App) runNextIP(network string, networkView string, num int, exclude []s
 func queryNetworkViews(client *WapiClient) ([]map[string]any, error) {
 	params := url.Values{"_return_fields": []string{networkViewReturnFields}}
 	return pagedQuery(client, networkViewObject, params)
+}
+
+func (a *App) cachedNetworkViews(profile Profile, client *WapiClient) ([]map[string]any, error) {
+	return a.cachedNetRows(
+		profile,
+		netCacheKindViews,
+		"",
+		"",
+		func() (cachedPayload, error) { return a.readCachedNetworkViews(profile) },
+		func() ([]map[string]any, error) { return a.refreshNetworkViewCache(profile, client) },
+	)
+}
+
+func (a *App) cachedNetworks(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	networkView = strings.TrimSpace(networkView)
+	return a.cachedNetRows(
+		profile,
+		netCacheKindNetworks,
+		networkView,
+		"",
+		func() (cachedPayload, error) { return a.readCachedNetworks(profile, networkView) },
+		func() ([]map[string]any, error) { return a.refreshNetworkCache(profile, client, networkView) },
+	)
+}
+
+func (a *App) cachedIPv4Addresses(profile Profile, client *WapiClient, ip string, networkView string) ([]map[string]any, error) {
+	networkView = strings.TrimSpace(networkView)
+	return a.cachedNetRows(
+		profile,
+		netCacheKindAddresses,
+		networkView,
+		ip,
+		func() (cachedPayload, error) { return a.readCachedIPv4Addresses(profile, ip, networkView) },
+		func() ([]map[string]any, error) { return a.refreshIPv4AddressCache(profile, client, ip, networkView) },
+	)
+}
+
+func (a *App) cachedNetRows(profile Profile, kind string, networkView string, ip string, read func() (cachedPayload, error), refresh func() ([]map[string]any, error)) ([]map[string]any, error) {
+	now := time.Now()
+	entry, err := read()
+	if err == nil && entry.CacheFound {
+		if a.cacheEntryFresh(entry, now) {
+			return entry.Rows, nil
+		}
+		// IPAM has no cheap serial equivalent. Inside SWR, return cached data and
+		// let one lease-protected background worker re-download the same WAPI data.
+		if now.Unix() < entry.StaleExpiresAt {
+			a.startNetCacheRefreshAsync(profile, kind, networkView, ip)
+			return entry.Rows, nil
+		}
+	}
+
+	if waited, waitErr := a.waitForActiveNetRefresh(profile, kind, networkView, ip, a.maxBackgroundWorkerWait(), 2*time.Millisecond); waitErr == nil && waited {
+		now = time.Now()
+		entry, err = read()
+		if err == nil && entry.CacheFound {
+			if a.cacheEntryFresh(entry, now) {
+				return entry.Rows, nil
+			}
+			if now.Unix() < entry.StaleExpiresAt {
+				a.startNetCacheRefreshAsync(profile, kind, networkView, ip)
+				return entry.Rows, nil
+			}
+		}
+	}
+	return refresh()
+}
+
+func (a *App) refreshNetworkViewCache(profile Profile, client *WapiClient) ([]map[string]any, error) {
+	rows, err := queryNetworkViews(client)
+	if err != nil {
+		return nil, err
+	}
+	_ = a.writeCachedNetworkViews(profile, rows, time.Now())
+	return rows, nil
+}
+
+func (a *App) refreshNetworkCache(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	rows, err := queryNetworks(client, networkView)
+	if err != nil {
+		return nil, err
+	}
+	_ = a.writeCachedNetworks(profile, networkView, rows, time.Now())
+	return rows, nil
+}
+
+func (a *App) refreshIPv4AddressCache(profile Profile, client *WapiClient, ip string, networkView string) ([]map[string]any, error) {
+	params := url.Values{"_return_fields": []string{ipv4AddressReturnFields}, "ip_address": []string{ip}}
+	if strings.TrimSpace(networkView) != "" {
+		params.Set("network_view", strings.TrimSpace(networkView))
+	}
+	rows, err := pagedQuery(client, ipv4AddressObject, params)
+	if err != nil {
+		return nil, err
+	}
+	_ = a.writeCachedIPv4Addresses(profile, ip, networkView, rows, time.Now())
+	return rows, nil
+}
+
+func (a *App) cachedFindNetwork(profile Profile, client *WapiClient, network string, networkView string) (map[string]any, error) {
+	cidr, err := normalizeNextIPNetwork(network)
+	if err != nil {
+		return nil, err
+	}
+	networks, err := a.cachedNetworks(profile, client, networkView)
+	if err != nil {
+		return nil, err
+	}
+	return findNetworkInRows(networks, cidr)
+}
+
+func findNetworkInRows(networks []map[string]any, cidr string) (map[string]any, error) {
+	var matches []map[string]any
+	for _, network := range networks {
+		if cleanString(network["network"]) == cidr {
+			matches = append(matches, network)
+		}
+	}
+	if len(matches) == 0 {
+		return nil, cliError("no network found for %s", cidr)
+	}
+	if len(matches) > 1 {
+		return nil, cliError("multiple networks found for %s; use --network-view to choose one", cidr)
+	}
+	return matches[0], nil
+}
+
+func (a *App) startNetCacheRefreshAsync(profile Profile, kind string, networkView string, ip string) {
+	_ = a.startNetCacheRefresh(profile, kind, networkView, ip)
+}
+
+func (a *App) startNetCacheRefresh(profile Profile, kind string, networkView string, ip string) error {
+	acquired, err := a.tryAcquireNetRefreshLease(profile, kind, networkView, ip, time.Now(), recordRefreshLeaseTTL)
+	if err != nil || !acquired {
+		return err
+	}
+	if a.backgroundNetRefresher != nil {
+		if err := a.backgroundNetRefresher(profile, kind, networkView, ip); err != nil {
+			_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+			return err
+		}
+		return nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+		return err
+	}
+	args := []string{
+		"config", "cache", "refresh-net",
+		"--profile", firstNonEmpty(strings.TrimSpace(profile.Name), defaultProfileName),
+		"--kind", kind,
+	}
+	if strings.TrimSpace(networkView) != "" {
+		args = append(args, "--network-view", strings.TrimSpace(networkView))
+	}
+	if strings.TrimSpace(ip) != "" {
+		args = append(args, "--ip", strings.TrimSpace(ip))
+	}
+	cmd := exec.Command(executable, args...) // #nosec G204 -- executable is this ib binary and args are fixed internal cache-refresh flags
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+		return err
+	}
+	go func() {
+		_ = cmd.Wait()
+	}()
+	return nil
+}
+
+func (a *App) runNetCacheRefresh(profileName string, kind string, networkView string, ip string) error {
+	releaseProfile := Profile{Name: strings.TrimSpace(profileName)}
+	if releaseProfile.Name == "" {
+		releaseProfile.Name = defaultProfileName
+	}
+	defer func() {
+		_ = a.releaseNetRefreshLease(releaseProfile, kind, networkView, ip)
+	}()
+	profile, err := a.loadConfigProfile(profileName, true)
+	if err != nil {
+		return err
+	}
+	releaseProfile = profile
+	client := a.newClient(profile)
+	switch kind {
+	case netCacheKindViews:
+		_, err = a.refreshNetworkViewCache(profile, client)
+	case netCacheKindNetworks:
+		_, err = a.refreshNetworkCache(profile, client, networkView)
+	case netCacheKindAddresses:
+		if strings.TrimSpace(ip) == "" {
+			err = cliError("--ip is required for %s refresh", netCacheKindAddresses)
+			break
+		}
+		_, err = a.refreshIPv4AddressCache(profile, client, ip, networkView)
+	default:
+		err = cliError("unsupported net cache refresh kind %q", kind)
+	}
+	return err
 }
 
 func filterNetworks(networks []map[string]any, search string) []map[string]any {

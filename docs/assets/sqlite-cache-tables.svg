@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="610" viewBox="0 0 980 610" role="img" aria-labelledby="title desc">
   <title id="title">Nord SQLite cache tables</title>
-  <desc id="desc">SQLite cache table diagram for cache_meta, zone_cache, record_cache, and record_refresh_locks.</desc>
+  <desc id="desc">SQLite cache table diagram for DNS and IPAM cache tables, including refresh lock tables.</desc>
   <defs>
     <linearGradient id="page-bg" x1="0" y1="0" x2="980" y2="610" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#2E3440" />
@@ -57,7 +57,7 @@
   <rect class="bg" width="980" height="610" />
   <rect class="panel" x="32" y="36" width="916" height="534" rx="5" />
   <text class="title" x="60" y="72">SQLite Cache Tables</text>
-  <text class="subtitle" x="60" y="95">Local cache rows are separated by profile, DNS view, and zone so multi-profile use stays isolated.</text>
+  <text class="subtitle" x="60" y="95">DNS rows use profile/view/zone; IPAM rows use profile plus network view or IP so multi-profile use stays isolated.</text>
 
   <g class="table">
     <rect class="meta" x="60" y="122" width="390" height="126" rx="4" />
@@ -102,16 +102,18 @@
   <g class="table">
     <rect class="lock" x="530" y="356" width="390" height="188" rx="4" />
     <rect class="header" x="530" y="356" width="390" height="38" rx="4" />
-    <text class="table-title" x="552" y="380">record_refresh_locks</text>
+    <text class="table-title" x="552" y="380">refresh_locks</text>
     <line class="row" x1="530" y1="394" x2="920" y2="394" />
     <text class="col pk" x="552" y="419">cache_key text PK</text>
     <line class="row" x1="530" y1="432" x2="920" y2="432" />
-    <text class="col" x="552" y="457">profile text, view text, zone text</text>
+    <text class="col" x="552" y="457">record: profile, view, zone</text>
     <line class="row" x1="530" y1="470" x2="920" y2="470" />
-    <text class="col" x="552" y="495">started_at integer</text>
+    <text class="col" x="552" y="495">net: profile, kind, scope</text>
     <line class="row" x1="530" y1="508" x2="920" y2="508" />
-    <text class="col" x="552" y="529">expires_at integer</text>
+    <text class="col" x="552" y="529">started_at integer, expires_at integer</text>
   </g>
+
+  <text class="note" x="60" y="575">IPAM tables: network_view_cache, network_cache, ipv4_address_cache store payload_json with cached_at and stale_expires_at.</text>
 
   <path class="line" d="M450 190 L530 190" />
   <path class="line" d="M450 432 L530 432" />

@@ -542,11 +542,15 @@ func findNetwork(client *WapiClient, network string, networkView string) (map[st
 }
 
 func nextAvailableIPRows(client *WapiClient, network string, networkView string, num int, exclude []string) ([]map[string]any, error) {
-	excluded, err := validateNextIPRequest(num, exclude)
+	matchedNetwork, err := findNetwork(client, network, networkView)
 	if err != nil {
 		return nil, err
 	}
-	matchedNetwork, err := findNetwork(client, network, networkView)
+	return nextAvailableIPRowsForNetwork(client, matchedNetwork, network, num, exclude)
+}
+
+func nextAvailableIPRowsForNetwork(client *WapiClient, matchedNetwork map[string]any, requestedNetwork string, num int, exclude []string) ([]map[string]any, error) {
+	excluded, err := validateNextIPRequest(num, exclude)
 	if err != nil {
 		return nil, err
 	}
@@ -567,7 +571,7 @@ func nextAvailableIPRows(client *WapiClient, network string, networkView string,
 	if err != nil {
 		return nil, err
 	}
-	networkName := firstNonEmpty(cleanString(matchedNetwork["network"]), network)
+	networkName := firstNonEmpty(cleanString(matchedNetwork["network"]), requestedNetwork)
 	view := cleanString(matchedNetwork["network_view"])
 	rows := make([]map[string]any, 0, len(ips))
 	for _, ip := range ips {

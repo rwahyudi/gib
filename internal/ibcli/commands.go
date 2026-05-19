@@ -146,6 +146,23 @@ func (a *App) cacheCommand() *cobra.Command {
 	refreshZonesCmd.Flags().String("profile", "", "profile name")
 	refreshZonesCmd.Flags().String("view", "", "DNS view")
 	cmd.AddCommand(refreshZonesCmd)
+	refreshNetCmd := &cobra.Command{
+		Use:    "refresh-net",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profileName, _ := cmd.Flags().GetString("profile")
+			kind, _ := cmd.Flags().GetString("kind")
+			networkView, _ := cmd.Flags().GetString("network-view")
+			ip, _ := cmd.Flags().GetString("ip")
+			return a.runNetCacheRefresh(profileName, kind, networkView, ip)
+		},
+	}
+	refreshNetCmd.Flags().String("profile", "", "profile name")
+	refreshNetCmd.Flags().String("kind", "", "net cache kind")
+	refreshNetCmd.Flags().String("network-view", "", "IPAM network view")
+	refreshNetCmd.Flags().String("ip", "", "IPv4 address")
+	cmd.AddCommand(refreshNetCmd)
 	return cmd
 }
 

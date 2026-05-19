@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="500" viewBox="0 0 980 500" role="img" aria-labelledby="title desc">
   <title id="title">Nord cache decision flow</title>
-  <desc id="desc">Compact flow showing how ib returns fresh cache, serves stale records inside SWR, or refreshes records from Infoblox.</desc>
+  <desc id="desc">Compact flow showing how ib returns fresh cache, serves stale rows inside SWR, or refreshes DNS/IPAM data from Infoblox.</desc>
   <defs>
     <linearGradient id="page-bg" x1="0" y1="0" x2="980" y2="500" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#2E3440" />
@@ -59,12 +59,12 @@
   <text class="subtitle" x="60" y="95">Fresh rows return immediately. Stale rows inside SWR return immediately and refresh in the background.</text>
 
   <rect class="entry node" x="60" y="133" width="150" height="56" rx="4" />
-  <text class="label" x="83" y="157">Record request</text>
-  <text class="small" x="83" y="175">list or search</text>
+  <text class="label" x="83" y="157">Read request</text>
+  <text class="small" x="83" y="175">DNS or IPAM</text>
 
   <rect class="entry node" x="255" y="133" width="170" height="56" rx="4" />
-  <text class="label" x="281" y="157">Read record_cache</text>
-  <text class="small" x="281" y="175">profile + view + zone</text>
+  <text class="label" x="281" y="157">Read cache row</text>
+  <text class="small" x="281" y="175">profile + scope</text>
 
   <rect class="fresh node" x="470" y="126" width="185" height="70" rx="4" />
   <text class="label" x="493" y="151">Fresh row</text>
@@ -72,7 +72,7 @@
   <text class="small" x="493" y="184">+ cache_ttl</text>
 
   <rect class="fresh node" x="715" y="126" width="175" height="70" rx="4" />
-  <text class="label" x="740" y="151">Return records</text>
+  <text class="label" x="740" y="151">Return rows</text>
   <text class="small" x="740" y="169">no Infoblox call</text>
 
   <rect class="stale node" x="470" y="232" width="185" height="70" rx="4" />
@@ -86,12 +86,12 @@
 
   <rect class="fetch node" x="470" y="344" width="185" height="70" rx="4" />
   <text class="label" x="493" y="369">Missing or too stale</text>
-  <text class="small" x="493" y="387">foreground SOA serial</text>
+  <text class="small" x="493" y="387">foreground refresh</text>
 
   <rect class="fetch node" x="715" y="330" width="175" height="98" rx="4" />
   <text class="label" x="739" y="354">Refresh cache</text>
-  <text class="small" x="739" y="372">renew timestamps</text>
-  <text class="small" x="739" y="388">or fetch /allrecords</text>
+  <text class="small" x="739" y="372">DNS: check serial</text>
+  <text class="small" x="739" y="388">IPAM: skip serial</text>
   <text class="small" x="739" y="404">then return rows</text>
 
   <path class="line" d="M210 161 L255 161" />
