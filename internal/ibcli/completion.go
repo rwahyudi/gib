@@ -827,15 +827,31 @@ func (a *App) completeNetworkCIDRs(cmd *cobra.Command, toComplete string) []stri
 	if err != nil {
 		return nil
 	}
-	networkView := ""
-	if flag := cmd.Flags().Lookup("network-view"); flag != nil {
-		networkView = strings.TrimSpace(flag.Value.String())
-	}
-	networks, err := queryNetworks(a.newClient(profile), networkView)
+	networkView := commandCompletionFlagValue(cmd, "network-view")
+	networks, err := a.cachedNetworkCIDRsForCompletion(profile, networkView)
 	if err != nil {
 		return nil
 	}
 	return matchingNetworkCIDRs(networks, toComplete)
+}
+
+func (a *App) cachedNetworkCIDRsForCompletion(profile Profile, networkView string) ([]map[string]any, error) {
+	networkView = strings.TrimSpace(networkView)
+	entry, err := a.readCachedNetworks(profile, networkView)
+	if err != nil {
+		return nil, err
+	}
+	prefetchEnabled := a.completionCachePrefetchEnabled()
+	if !entry.CacheFound {
+		if prefetchEnabled {
+			a.startNetCacheRefreshAsync(profile, netCacheKindNetworks, networkView, "")
+		}
+		return nil, nil
+	}
+	if prefetchEnabled && !a.cacheEntryFresh(entry, time.Now()) {
+		a.startNetCacheRefreshAsync(profile, netCacheKindNetworks, networkView, "")
+	}
+	return entry.Rows, nil
 }
 
 func (a *App) cachedZoneNames(profile Profile) ([]string, error) {

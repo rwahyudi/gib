@@ -367,7 +367,7 @@ When cache is missing or already outside the stale window, list/search waits up 
 
 `ib net next-ip` can use cached network rows to find the target network `_ref`, but the `next_available_ip` function call is always sent live to the primary server so returned addresses are current.
 
-Shell completion prefetches cache freshness in the background by default. When `ib __complete` or `ib __completeNoDesc` runs and `completion_cache_prefetch = true`, it checks the current DNS view and zone, then starts lease-protected zone-list or current-zone record refresh helpers when cache rows are missing or stale. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
+Shell completion prefetches cache freshness in the background by default. With `completion_cache_prefetch = true`, DNS completion checks the current DNS view and zone, and network CIDR completion checks the selected IPAM network view, then starts lease-protected zone-list, current-zone record, or network-list refresh helpers when cache rows are missing or stale. Completion returns local cached rows when available, including stale rows, and does not perform foreground Infoblox refresh work. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
 
 `ib config cache status` keeps the detailed cache row table and adds a colored
 summary footer for table output: cache entries, cached records, fresh entries,
@@ -420,7 +420,7 @@ Documents profile locations. If `ib dns <Tab>` offers `dns` instead of DNS
 subcommands, replace `ib.exe`, rerun `ib config completion windows`, and open a
 new PowerShell window so the updated script is loaded.
 
-The generated or installed completion calls the live `ib` binary, so profiles, zones, records, flags, and output formats are resolved dynamically.
+The generated or installed completion calls the live `ib` binary, so profiles, zones, records, IPAM networks, flags, and output formats are resolved dynamically.
 Installing from RPM or DEB puts the Bash completion file in `/etc/bash_completion.d/ib`.
 
 ## License

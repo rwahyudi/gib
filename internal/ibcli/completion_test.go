@@ -2,7 +2,6 @@ package ibcli
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -294,23 +293,19 @@ func TestZoneCompletionsAreWiredToCommandsAndFlags(t *testing.T) {
 }
 
 func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
-	var networkView string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/wapi/"+defaultWAPIVersion+"/"+networkObject {
-			t.Fatalf("path = %s", r.URL.Path)
-		}
-		networkView = r.URL.Query().Get("network_view")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result": []map[string]any{
-				{"network": "192.0.2.0/24", "network_view": "default"},
-				{"network": "10.0.0.0/24", "network_view": "default"},
-			},
-		})
+		t.Fatalf("network completion made live WAPI request: %s %s", r.Method, r.URL.String())
 	}))
 	defer server.Close()
 
 	app := testApp(t)
-	writeCompletionProfile(t, app, server.URL)
+	profile := writeCompletionProfile(t, app, server.URL)
+	if err := app.writeCachedNetworks(profile, "default", []map[string]any{
+		{"network": "192.0.2.0/24", "network_view": "default"},
+		{"network": "10.0.0.0/24", "network_view": "default"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write network cache: %v", err)
+	}
 	var stdout bytes.Buffer
 	app.Stdout = &stdout
 	app.Stderr = &bytes.Buffer{}
@@ -321,15 +316,11 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 		{"__complete", "net", "next-ip", "--network-view", "default", "192"},
 		{"__complete", "net", "show", "--network-view", "default", "192"},
 	} {
-		networkView = ""
 		stdout.Reset()
 		if err := app.Execute(args); err != nil {
 			t.Fatalf("completion %v: %v", args, err)
 		}
 		output := stdout.String()
-		if networkView != "default" {
-			t.Fatalf("completion %v network_view query = %q, want default", args, networkView)
-		}
 		if !strings.Contains(output, "192.0.2.0/24\tdefault") {
 			t.Fatalf("completion %v missing CIDR:\n%s", args, output)
 		}
@@ -339,6 +330,38 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 		if !strings.Contains(output, ":4") {
 			t.Fatalf("completion %v did not disable file completion:\n%s", args, output)
 		}
+	}
+}
+
+func TestNetworkCompletionReturnsStaleCacheAndQueuesRefresh(t *testing.T) {
+	app := testApp(t)
+	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")
+	refreshes := make(chan string, 1)
+	app.backgroundNetRefresher = func(profile Profile, kind string, networkView string, ip string) error {
+		refreshes <- kind + "|" + networkView + "|" + ip
+		return nil
+	}
+	now := time.Now()
+	if err := app.writeCachedNetworksEntry(profile, "default", []map[string]any{
+		{"network": "10.10.0.0/16", "network_view": "default"},
+	}, now.Add(-time.Hour).Unix(), now.Add(-time.Second).Unix()); err != nil {
+		t.Fatalf("write stale network cache: %v", err)
+	}
+
+	matches, err := app.cachedNetworkCIDRsForCompletion(profile, "default")
+	if err != nil {
+		t.Fatalf("network completion cache: %v", err)
+	}
+	if got := strings.Join(matchingNetworkCIDRs(matches, "10."), ","); got != "10.10.0.0/16\tdefault" {
+		t.Fatalf("matches = %q", got)
+	}
+	select {
+	case refreshed := <-refreshes:
+		if refreshed != netCacheKindNetworks+"|default|" {
+			t.Fatalf("refresh target = %q", refreshed)
+		}
+	default:
+		t.Fatal("network cache refresh was not queued")
 	}
 }
 
