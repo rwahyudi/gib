@@ -56,7 +56,7 @@ func TestNetModuleHelpShowsIPAMCommands(t *testing.T) {
 		"ib net <command>",
 		"IPAM Usage",
 		"ib net list [SEARCH] lists IPv4 networks and containers",
-		"CIDR matches include related parent and child networks in the same view",
+		"CIDR matches include related parent and child networks or containers in the same view",
 		"ib net next-ip NETWORK requests available IPv4 addresses",
 		"Commands",
 		"address",
