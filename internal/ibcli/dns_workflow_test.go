@@ -1251,6 +1251,8 @@ func dnsNextIPServer(t *testing.T, networks []map[string]any, functionResponse m
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+networkObject):
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": networks})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+networkContainerObject):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/network/ref"):
 			if got := r.URL.Query().Get("_function"); got != "next_available_ip" {
 				t.Fatalf("_function = %q, want next_available_ip", got)

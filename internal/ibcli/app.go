@@ -33,6 +33,7 @@ const (
 	gridObject                    = "grid"
 	memberObject                  = "member"
 	networkObject                 = "network"
+	networkContainerObject        = "networkcontainer"
 	networkViewObject             = "networkview"
 	ipv4AddressObject             = "ipv4address"
 	allRecordsObject              = "allrecords"

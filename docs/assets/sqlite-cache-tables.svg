@@ -113,7 +113,7 @@
     <text class="col" x="552" y="529">started_at integer, expires_at integer</text>
   </g>
 
-  <text class="note" x="60" y="575">IPAM tables: network_view_cache, network_cache, ipv4_address_cache store payload_json with cached_at and stale_expires_at.</text>
+  <text class="note" x="60" y="575">IPAM tables: network_view_cache, network_cache, network_container_cache, ipv4_address_cache store payload_json with cached_at and stale_expires_at.</text>
 
   <path class="line" d="M450 190 L530 190" />
   <path class="line" d="M450 432 L530 432" />

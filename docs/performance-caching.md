@@ -45,8 +45,8 @@ Shell completion never performs a foreground Infoblox refresh for zone names,
 record names, or IPAM network CIDRs. With `completion_cache_prefetch = true`,
 DNS completion checks the current DNS view and zone, and network CIDR completion
 checks the selected IPAM network view, then starts detached zone-list,
-current-zone record, or network-list refresh helpers when those cache rows are
-missing or stale. With `completion_cache_prefetch = false`, completion only
+current-zone record, network-list, or container-list refresh helpers when those
+cache rows are missing or stale. With `completion_cache_prefetch = false`, completion only
 reads local cache rows and does not start background refresh helpers.
 
 ## Read, Write, And Worker Flow
@@ -86,9 +86,9 @@ normalization happen before matching.
 `cache_meta` stores cache schema metadata. `zone_cache` caches authoritative
 zone list payloads per profile and view. `record_cache` stores `/allrecords`
 payloads per profile, view, and zone. `network_view_cache`, `network_cache`,
-and `ipv4_address_cache` store IPAM read payloads. `record_refresh_locks` and
-`net_refresh_locks` prevent duplicate background refreshes for the same cache
-scope.
+`network_container_cache`, and `ipv4_address_cache` store IPAM read payloads.
+`record_refresh_locks` and `net_refresh_locks` prevent duplicate background
+refreshes for the same cache scope.
 
 Cache tables store Infoblox payloads as JSON text. The CLI normalizes those
 payloads into typed records or IPAM rows when listing, searching, completing, or

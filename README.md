@@ -26,7 +26,7 @@ various caching techniques and multi threading to ensure snappy experience.
 - DNS record workflows for listing, searching, creating, editing, and deleting
   records, including filtering, field sorting, selected output columns,
   interactive duplicate selection, and confirmation.
-- IPAM read workflows for network views, IPv4 network list/search/details,
+- IPAM read workflows for network views, IPv4 network/container list/search/details,
   address details, and next available IP lookup with network-view selection.
 - Large-zone performance through `/allrecords`, local SQLite caching,
   worker-limited global search, and stale-while-revalidate refreshes.
@@ -218,7 +218,7 @@ ib dns --view "DNS Zone View" search app
 | --- | --- | --- |
 | `config` | Manage profiles, encrypted credentials, completion, and local cache. | `ib config new --default` |
 | `dns` | Manage Infoblox DNS views, zones, records, searches, and context overrides. | `ib dns list` |
-| `net` | Manage IPAM network views, IPv4 networks, addresses, and next-IP lookups. | `ib net list` |
+| `net` | Manage IPAM network views, IPv4 networks and containers, addresses, and next-IP lookups. | `ib net list` |
 
 ## How It Works
 
@@ -291,11 +291,11 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | --- | --- |
 | `ib net` | Show IPAM command help. |
 | `ib net view list` | List IPAM network views. |
-| `ib net list [SEARCH]` | List IPv4 networks. Add `--network-view` to filter by IPAM network view, `-s/--sort FIELD` to sort by `network`, `network_view`, or `comment`, and `-C/--columns LIST` to print selected columns. |
-| `ib net search KEYWORD` | Search IPv4 networks by CIDR, network view, or comment. |
-| `ib net show NETWORK` | Show details for one IPv4 network. Use `--network-view` when a CIDR exists in multiple network views. |
-| `ib net address IP` | Show IPAM details for an IPv4 address, including network, status, types, names, MAC address, lease state, and comment when available. |
-| `ib net next-ip NETWORK` | Find the next available IPv4 address in a network. Use `--network-view` for ambiguous CIDRs, `-n/--num` for multiple addresses, and repeat `-e/--exclude` to skip addresses. |
+| `ib net list [SEARCH]` | List IPv4 networks and containers. Add `--network-view` to filter by IPAM network view, `-s/--sort FIELD` to sort by `type`, `network`, `network_view`, or `comment`, and `-C/--columns LIST` to print selected columns. |
+| `ib net search KEYWORD` | Search IPv4 networks and containers by type, CIDR, network view, or comment. |
+| `ib net show NETWORK` | Show details for one IPv4 network or container. Use `--network-view` when a CIDR exists in multiple network views. |
+| `ib net address IP` | Show IPAM details for an IPv4 address, including network, parent container, status, types, names, MAC address, lease state, and comment when available. |
+| `ib net next-ip NETWORK` | Find the next available IPv4 address in a network or container. Use `--network-view` for ambiguous CIDRs, `-n/--num` for multiple addresses, and repeat `-e/--exclude` to skip addresses. |
 
 Common examples:
 
@@ -319,9 +319,9 @@ ib dns delete app
 
 `ib dns zone list` supports the same output control pattern for zones. `--type` filters zone formats `FORWARD`, `IPV4`, or `IPV6`; `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment`; and `--columns` selects from the same zone fields. Use `--view` to list zones from another DNS view; `--zone` and `-z` are not accepted by this command.
 
-`ib net list` and `ib net search` are read-only IPAM workflows. They query the WAPI `network` object, optionally filter by `--network-view`, and match search text against network CIDR, network view, and comment. Add `-s` or `--sort` to sort by `network`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `network`, `network_view`, and `comment`.
+`ib net list` and `ib net search` are read-only IPAM workflows. They query the WAPI `network` and `networkcontainer` objects, optionally filter by `--network-view`, and match search text against type, CIDR, network view, and comment. Add `-s` or `--sort` to sort by `type`, `network`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `type`, `network`, `network_view`, and `comment`.
 
-`ib net next-ip` performs the network lookup with read-only routing, then sends the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
+`ib net show` and `ib net next-ip` resolve both networks and containers; when the same CIDR exists as both, the container is preferred. `ib net next-ip` performs the object lookup with read-only routing, then sends the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
 
 `ib dns delete` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records match, interactive table mode shows a Huh select list so one record can be chosen.
 
@@ -336,13 +336,13 @@ ib dns list --sort=-name --columns zone,name,value -o csv
 ib dns search app --global --sort zone --columns zone,name,value -o csv
 ib dns list -o json | jq -r '.[] | [.name, .value] | @tsv'
 ib dns zone list --sort zone --columns zone,format,comment -o json | jq '.[]'
-ib net list --sort network --columns network,comment -o json | jq '.[]'
+ib net list --sort network --columns type,network,comment -o json | jq '.[]'
 ```
 
 Use `--sort FIELD` for ascending order and `--sort=-FIELD` for descending
 order. Record fields are `name`, `type`, `value`, `zone`, `ttl`, and `comment`;
 zone fields are `zone`, `view`, `format`, `ns_group`, and `comment`; network
-fields are `network`, `network_view`, and `comment`. Use `--columns` or `-C`
+fields are `type`, `network`, `network_view`, and `comment`. Use `--columns` or `-C`
 with a comma-separated list to keep only the fields you need. Use `-o csv` for
 CSV output, or `-o json` when the next step is a `jq` pipeline.
 
@@ -359,19 +359,19 @@ answering the WAPI request instead of Infoblox JSON.
 
 Zone, record, and IPAM caches are stored in `~/.ib/cache.sqlite3`.
 
-Record and IPAM cache freshness uses `cached_at + cache_ttl`. Expired records and IPAM rows inside `records_cache_swr_ttl` are returned immediately while a single background refresh process updates the cache. DNS records revalidate the zone serial before refreshing `/allrecords`; IPAM rows skip serial checks and refresh the relevant `networkview`, `network`, or `ipv4address` WAPI data.
+Record and IPAM cache freshness uses `cached_at + cache_ttl`. Expired records and IPAM rows inside `records_cache_swr_ttl` are returned immediately while a single background refresh process updates the cache. DNS records revalidate the zone serial before refreshing `/allrecords`; IPAM rows skip serial checks and refresh the relevant `networkview`, `network`, `networkcontainer`, or `ipv4address` WAPI data.
 
 Multi-zone search preloads matching record-cache rows with one SQLite connection before workers start. Workers still fall back to per-zone cache/WAPI checks for missing or expired rows. The WAPI HTTP client keeps a larger per-host connection pool sized from `dns_search_worker_limit` so parallel search can reuse TLS connections instead of repeatedly reconnecting.
 
 When cache is missing or already outside the stale window, list/search waits up to `max_background_worker_wait` seconds for an active background refresh of the same profile and cache scope before doing foreground WAPI refresh work.
 
-`ib net next-ip` can use cached network rows to find the target network `_ref`, but the `next_available_ip` function call is always sent live to the primary server so returned addresses are current.
+`ib net next-ip` can use cached network or container rows to find the target `_ref`, but the `next_available_ip` function call is always sent live to the primary server so returned addresses are current.
 
-Shell completion prefetches cache freshness in the background by default. With `completion_cache_prefetch = true`, DNS completion checks the current DNS view and zone, and network CIDR completion checks the selected IPAM network view, then starts lease-protected zone-list, current-zone record, or network-list refresh helpers when cache rows are missing or stale. Completion returns local cached rows when available, including stale rows, and does not perform foreground Infoblox refresh work. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
+Shell completion prefetches cache freshness in the background by default. With `completion_cache_prefetch = true`, DNS completion checks the current DNS view and zone, and network CIDR completion checks the selected IPAM network view, then starts lease-protected zone-list, current-zone record, network-list, or container-list refresh helpers when cache rows are missing or stale. Completion returns local cached rows when available, including stale rows, and does not perform foreground Infoblox refresh work. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
 
 `ib config cache status` keeps the detailed cache row table and adds a colored
 summary footer for table output: cache entries, cached records, fresh entries,
-network views, networks, IPv4 addresses, SWR-stale entries, expired entries,
+network views, networks, containers, IPv4 addresses, SWR-stale entries, expired entries,
 and active refreshes. With `-o json`, it
 returns `statistics` and `entries`; with `-o csv`, output remains row-only for
 scripts.

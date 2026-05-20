@@ -19,8 +19,8 @@ Manage profiles, completion, and local cache data.
 Manage DNS views, zones, records, and searches.
 .TP
 .B ib net
-Manage IPAM network views, IPv4 networks, address details, and next available
-IP lookups.
+Manage IPAM network views, IPv4 networks and containers, address details, and
+next available IP lookups.
 .SH OPTIONS
 .TP
 .B \-h, \-\-help
@@ -40,13 +40,13 @@ List records in the current DNS context.
 Search records by name, value, or comment.
 .TP
 .B ib net list prod --network-view default
-List IPv4 networks matching prod in the default IPAM network view.
+List IPv4 networks and containers matching prod in the default IPAM network view.
 .TP
 .B ib net address 192.0.2.10 --network-view default
 Show IPAM address details for 192.0.2.10.
 .TP
 .B ib net next-ip 192.0.2.0/24 -n 3
-Find available IPv4 addresses in a network.
+Find available IPv4 addresses in a network or container.
 .SH FILES
 .TP
 .I ~/.ib/config

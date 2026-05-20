@@ -256,7 +256,7 @@ func (a *App) netListCommand() *cobra.Command {
 	var columnsRaw string
 	cmd := &cobra.Command{
 		Use:               "list [SEARCH]",
-		Short:             "List IPAM networks",
+		Short:             "List IPAM networks and containers",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: zoneListArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -287,7 +287,7 @@ func (a *App) netSearchCommand() *cobra.Command {
 	var columnsRaw string
 	cmd := &cobra.Command{
 		Use:               "search KEYWORD",
-		Short:             "Search IPAM networks by CIDR, view, or comment",
+		Short:             "Search IPAM networks and containers by type, CIDR, view, or comment",
 		Args:              exactArgsOrUsage(1),
 		ValidArgsFunction: completeFlagsAfterArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -312,7 +312,7 @@ func (a *App) netShowCommand() *cobra.Command {
 	var networkView string
 	cmd := &cobra.Command{
 		Use:               "show NETWORK",
-		Short:             "Show IPAM network details",
+		Short:             "Show IPAM network or container details",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.networkArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -559,7 +559,12 @@ func (a *App) dnsNextIPCommand() *cobra.Command {
 }
 
 func (a *App) netNextIPCommand() *cobra.Command {
-	return a.nextIPCommand(a.runNetNextIP)
+	cmd := a.nextIPCommand(a.runNetNextIP)
+	cmd.Short = "Find the next available IP in a network or container"
+	if flag := cmd.Flags().Lookup("network-view"); flag != nil {
+		flag.Usage = "network view for the target network or container"
+	}
+	return cmd
 }
 
 func (a *App) nextIPCommand(run func(string, string, int, []string) error) *cobra.Command {
@@ -763,7 +768,7 @@ func addZoneColumnsFlag(cmd *cobra.Command, target *string) {
 }
 
 func addNetSortFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVarP(target, "sort", "s", "", "sort networks by field: network, network_view, or comment; prefix with - for descending")
+	cmd.Flags().StringVarP(target, "sort", "s", "", "sort networks by field: type, network, network_view, or comment; prefix with - for descending")
 	_ = cmd.RegisterFlagCompletionFunc("sort", netSortFlagCompletion)
 }
 

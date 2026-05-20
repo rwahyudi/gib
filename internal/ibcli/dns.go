@@ -573,13 +573,18 @@ func nextAvailableIPRowsForNetwork(client *WapiClient, matchedNetwork map[string
 	}
 	networkName := firstNonEmpty(cleanString(matchedNetwork["network"]), requestedNetwork)
 	view := cleanString(matchedNetwork["network_view"])
+	objectType := cleanString(matchedNetwork["type"])
 	rows := make([]map[string]any, 0, len(ips))
 	for _, ip := range ips {
-		rows = append(rows, map[string]any{
+		row := map[string]any{
 			"network":      networkName,
 			"network_view": view,
 			"ip":           ip,
-		})
+		}
+		if objectType != "" {
+			row["type"] = objectType
+		}
+		rows = append(rows, row)
 	}
 	return rows, nil
 }

@@ -38,17 +38,30 @@ func TestNetViewList(t *testing.T) {
 
 func TestNetListSearchesSortsAndSelectsColumns(t *testing.T) {
 	var networkView string
+	var containerView string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || trimWAPIPath(r.URL.Path) != networkObject {
+		if r.Method != http.MethodGet {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		networkView = r.URL.Query().Get("network_view")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result": []map[string]any{
-				{"network": "10.0.0.0/24", "network_view": "default", "comment": "Lab"},
-				{"network": "192.0.2.0/24", "network_view": "default", "comment": "Production hosts"},
-			},
-		})
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			networkView = r.URL.Query().Get("network_view")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "10.0.0.0/24", "network_view": "default", "comment": "Lab"},
+					{"network": "192.0.2.0/24", "network_view": "default", "comment": "Production hosts"},
+				},
+			})
+		case networkContainerObject:
+			containerView = r.URL.Query().Get("network_view")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "10.0.0.0/8", "network_view": "default", "comment": "Lab container"},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
 	}))
 	defer server.Close()
 
@@ -59,6 +72,9 @@ func TestNetListSearchesSortsAndSelectsColumns(t *testing.T) {
 	if networkView != "default" {
 		t.Fatalf("network_view query = %q, want default", networkView)
 	}
+	if containerView != "default" {
+		t.Fatalf("container network_view query = %q, want default", containerView)
+	}
 	var rows []map[string]any
 	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
 		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
@@ -68,6 +84,49 @@ func TestNetListSearchesSortsAndSelectsColumns(t *testing.T) {
 	}
 	if _, ok := rows[0]["network_view"]; ok {
 		t.Fatalf("network_view column should not be selected: %#v", rows[0])
+	}
+}
+
+func TestNetListIncludesNetworksAndContainers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "192.0.2.0/24", "network_view": "default", "comment": "Production network"},
+				},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "192.0.0.0/16", "network_view": "default", "comment": "Production container"},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "list", "prod", "--sort", "type"}); err != nil {
+		t.Fatalf("net list: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 2 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	if cleanString(rows[0]["type"]) != ipamTypeContainer || cleanString(rows[0]["network"]) != "192.0.0.0/16" {
+		t.Fatalf("container row = %#v", rows[0])
+	}
+	if cleanString(rows[1]["type"]) != ipamTypeNetwork || cleanString(rows[1]["network"]) != "192.0.2.0/24" {
+		t.Fatalf("network row = %#v", rows[1])
 	}
 }
 
@@ -87,6 +146,14 @@ func TestNetListUsesFreshCache(t *testing.T) {
 	}}, time.Now()); err != nil {
 		t.Fatalf("write network cache: %v", err)
 	}
+	if err := app.writeCachedNetworkContainers(profile, "default", []map[string]any{{
+		"_ref":         "networkcontainer/ref",
+		"network":      "198.51.0.0/16",
+		"network_view": "default",
+		"comment":      "Cached production container",
+	}}, time.Now()); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
 
 	if err := app.Execute([]string{"-o", "json", "net", "list", "prod", "--network-view", "default"}); err != nil {
 		t.Fatalf("net list cached: %v\nstdout:\n%s", err, stdout.String())
@@ -95,8 +162,14 @@ func TestNetListUsesFreshCache(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
 		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
 	}
-	if len(rows) != 1 || cleanString(rows[0]["network"]) != "192.0.2.0/24" || cleanString(rows[0]["comment"]) != "Cached production" {
+	if len(rows) != 2 {
 		t.Fatalf("cached network rows = %#v", rows)
+	}
+	if cleanString(rows[0]["type"]) != ipamTypeNetwork || cleanString(rows[0]["network"]) != "192.0.2.0/24" || cleanString(rows[0]["comment"]) != "Cached production" {
+		t.Fatalf("cached network row = %#v", rows[0])
+	}
+	if cleanString(rows[1]["type"]) != ipamTypeContainer || cleanString(rows[1]["network"]) != "198.51.0.0/16" || cleanString(rows[1]["comment"]) != "Cached production container" {
+		t.Fatalf("cached container row = %#v", rows[1])
 	}
 }
 
@@ -117,43 +190,66 @@ func TestNetListReturnsSWRCacheAndStartsRefresh(t *testing.T) {
 	}}, now.Add(-time.Hour).Unix(), now.Add(time.Hour).Unix()); err != nil {
 		t.Fatalf("write stale network cache: %v", err)
 	}
-	var refreshKind, refreshView string
+	if err := app.writeCachedNetworkContainersEntry(profile, "default", []map[string]any{{
+		"_ref":         "networkcontainer/ref",
+		"network":      "198.51.0.0/16",
+		"network_view": "default",
+		"comment":      "Stale production container",
+	}}, now.Add(-time.Hour).Unix(), now.Add(time.Hour).Unix()); err != nil {
+		t.Fatalf("write stale container cache: %v", err)
+	}
+	var refreshes []string
 	app.backgroundNetRefresher = func(profile Profile, kind string, networkView string, ip string) error {
-		refreshKind = kind
-		refreshView = networkView
+		refreshes = append(refreshes, kind+"|"+networkView)
 		return nil
 	}
 
 	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default"}); err != nil {
 		t.Fatalf("net list swr: %v\nstdout:\n%s", err, stdout.String())
 	}
-	if refreshKind != netCacheKindNetworks || refreshView != "default" {
-		t.Fatalf("background refresh kind=%q view=%q", refreshKind, refreshView)
+	if strings.Join(refreshes, ",") != netCacheKindNetworks+"|default,"+netCacheKindContainers+"|default" {
+		t.Fatalf("background refreshes = %#v", refreshes)
 	}
 	var rows []map[string]any
 	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
 		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
 	}
-	if len(rows) != 1 || cleanString(rows[0]["comment"]) != "Stale production" {
+	if len(rows) != 2 || cleanString(rows[0]["comment"]) != "Stale production" || cleanString(rows[1]["comment"]) != "Stale production container" {
 		t.Fatalf("SWR network rows = %#v", rows)
 	}
 }
 
 func TestNetListRefreshesExpiredCacheWithoutSerialCheck(t *testing.T) {
 	var networkRequests int
+	var containerRequests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || trimWAPIPath(r.URL.Path) != networkObject {
+		if r.Method != http.MethodGet {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		networkRequests++
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result": []map[string]any{{
-				"_ref":         "network/live",
-				"network":      "198.51.100.0/24",
-				"network_view": "default",
-				"comment":      "Live production",
-			}},
-		})
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			networkRequests++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":         "network/live",
+					"network":      "198.51.100.0/24",
+					"network_view": "default",
+					"comment":      "Live production",
+				}},
+			})
+		case networkContainerObject:
+			containerRequests++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":         "networkcontainer/live",
+					"network":      "203.0.113.0/24",
+					"network_view": "default",
+					"comment":      "Live container",
+				}},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
 	}))
 	defer server.Close()
 
@@ -168,6 +264,14 @@ func TestNetListRefreshesExpiredCacheWithoutSerialCheck(t *testing.T) {
 	}}, now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix()); err != nil {
 		t.Fatalf("write expired network cache: %v", err)
 	}
+	if err := app.writeCachedNetworkContainersEntry(profile, "default", []map[string]any{{
+		"_ref":         "networkcontainer/old",
+		"network":      "198.51.100.0/24",
+		"network_view": "default",
+		"comment":      "Expired container",
+	}}, now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix()); err != nil {
+		t.Fatalf("write expired container cache: %v", err)
+	}
 
 	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default"}); err != nil {
 		t.Fatalf("net list expired: %v\nstdout:\n%s", err, stdout.String())
@@ -175,11 +279,14 @@ func TestNetListRefreshesExpiredCacheWithoutSerialCheck(t *testing.T) {
 	if networkRequests != 1 {
 		t.Fatalf("network requests = %d, want 1", networkRequests)
 	}
+	if containerRequests != 1 {
+		t.Fatalf("container requests = %d, want 1", containerRequests)
+	}
 	var rows []map[string]any
 	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
 		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
 	}
-	if len(rows) != 1 || cleanString(rows[0]["network"]) != "198.51.100.0/24" {
+	if len(rows) != 2 || cleanString(rows[0]["network"]) != "198.51.100.0/24" || cleanString(rows[1]["network"]) != "203.0.113.0/24" {
 		t.Fatalf("refreshed network rows = %#v", rows)
 	}
 }
@@ -196,8 +303,51 @@ func TestNetShowRequiresNetworkViewWhenNetworkIsAmbiguous(t *testing.T) {
 	if err == nil {
 		t.Fatal("ambiguous network succeeded, want error")
 	}
-	if !strings.Contains(err.Error(), "multiple networks found for 192.0.2.0/24; use --network-view to choose one") {
+	if !strings.Contains(err.Error(), "multiple networks or containers found for 192.0.2.0/24; use --network-view to choose one") {
 		t.Fatalf("error = %v\nstdout:\n%s", err, stdout.String())
+	}
+}
+
+func TestNetShowPrefersContainerForDuplicateCIDR(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":         "network/ref",
+					"network":      "192.0.0.0/16",
+					"network_view": "default",
+					"comment":      "Network",
+				}},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":         "networkcontainer/ref",
+					"network":      "192.0.0.0/16",
+					"network_view": "default",
+					"comment":      "Container",
+				}},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "show", "192.0.0.0/16", "--network-view", "default"}); err != nil {
+		t.Fatalf("net show: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var row map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &row); err != nil {
+		t.Fatalf("decode show: %v\n%s", err, stdout.String())
+	}
+	if cleanString(row["type"]) != ipamTypeContainer || cleanString(row["comment"]) != "Container" {
+		t.Fatalf("show row = %#v", row)
 	}
 }
 
@@ -218,6 +368,12 @@ func TestNetAddressUsesFreshCache(t *testing.T) {
 	}}, time.Now()); err != nil {
 		t.Fatalf("write address cache: %v", err)
 	}
+	if err := app.writeCachedNetworkContainers(profile, "default", []map[string]any{{
+		"network":      "192.0.0.0/16",
+		"network_view": "default",
+	}}, time.Now()); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
 
 	if err := app.Execute([]string{"-o", "json", "net", "address", "192.0.2.10", "--network-view", "default"}); err != nil {
 		t.Fatalf("net address cached: %v\nstdout:\n%s", err, stdout.String())
@@ -226,7 +382,7 @@ func TestNetAddressUsesFreshCache(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
 		t.Fatalf("decode addresses: %v\n%s", err, stdout.String())
 	}
-	if len(rows) != 1 || cleanString(rows[0]["comment"]) != "Cached address" {
+	if len(rows) != 1 || cleanString(rows[0]["comment"]) != "Cached address" || cleanString(rows[0]["container"]) != "192.0.0.0/16" {
 		t.Fatalf("cached address rows = %#v", rows)
 	}
 }
@@ -235,24 +391,36 @@ func TestNetAddressShowsIPv4AddressDetails(t *testing.T) {
 	var gotIP string
 	var gotNetworkView string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || trimWAPIPath(r.URL.Path) != ipv4AddressObject {
+		if r.Method != http.MethodGet {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		gotIP = r.URL.Query().Get("ip_address")
-		gotNetworkView = r.URL.Query().Get("network_view")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result": []map[string]any{{
-				"ip_address":   "192.0.2.10",
-				"network":      "192.0.2.0/24",
-				"network_view": "default",
-				"status":       "USED",
-				"types":        []any{"HOST", "DHCP"},
-				"names":        []any{"app.example.com"},
-				"mac_address":  "00:11:22:33:44:55",
-				"lease_state":  "ACTIVE",
-				"comment":      "Application host",
-			}},
-		})
+		switch trimWAPIPath(r.URL.Path) {
+		case ipv4AddressObject:
+			gotIP = r.URL.Query().Get("ip_address")
+			gotNetworkView = r.URL.Query().Get("network_view")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"ip_address":   "192.0.2.10",
+					"network":      "192.0.2.0/24",
+					"network_view": "default",
+					"status":       "USED",
+					"types":        []any{"HOST", "DHCP"},
+					"names":        []any{"app.example.com"},
+					"mac_address":  "00:11:22:33:44:55",
+					"lease_state":  "ACTIVE",
+					"comment":      "Application host",
+				}},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "192.0.0.0/16", "network_view": "default"},
+					{"network": "192.0.2.0/25", "network_view": "default"},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
 	}))
 	defer server.Close()
 
@@ -274,6 +442,7 @@ func TestNetAddressShowsIPv4AddressDetails(t *testing.T) {
 	for key, want := range map[string]string{
 		"ip":           "192.0.2.10",
 		"network":      "192.0.2.0/24",
+		"container":    "192.0.2.0/25",
 		"network_view": "default",
 		"status":       "USED",
 		"types":        "HOST, DHCP",
@@ -312,6 +481,9 @@ func TestNetNextIPUsesCachedNetworkLookupButLiveFunction(t *testing.T) {
 	}}, time.Now()); err != nil {
 		t.Fatalf("write network cache: %v", err)
 	}
+	if err := app.writeCachedNetworkContainers(profile, "default", nil, time.Now()); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
 
 	if err := app.Execute([]string{"-o", "json", "net", "next-ip", "192.0.2.0/24", "--network-view", "default"}); err != nil {
 		t.Fatalf("net next-ip cached lookup: %v\nstdout:\n%s", err, stdout.String())
@@ -320,6 +492,57 @@ func TestNetNextIPUsesCachedNetworkLookupButLiveFunction(t *testing.T) {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
 	assertJSONNextIPRows(t, stdout.String(), []string{"192.0.2.20"}, "192.0.2.0/24", "default")
+}
+
+func TestNetNextIPUsesContainerRefWhenCIDRMatchesContainer(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "networkcontainer/ref" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("_function"); got != "next_available_ip" {
+			t.Fatalf("_function = %q, want next_available_ip", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ips": []string{"192.0.2.20"}})
+	}))
+	defer primary.Close()
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("net next-ip should use cached object lookup, got read request %s %s", r.Method, r.URL.Path)
+	}))
+	defer read.Close()
+
+	app, stdout := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedNetworks(profile, "default", []map[string]any{{
+		"_ref":         "network/ref",
+		"network":      "192.0.2.0/24",
+		"network_view": "default",
+	}}, now); err != nil {
+		t.Fatalf("write network cache: %v", err)
+	}
+	if err := app.writeCachedNetworkContainers(profile, "default", []map[string]any{{
+		"_ref":         "networkcontainer/ref",
+		"network":      "192.0.2.0/24",
+		"network_view": "default",
+	}}, now); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "net", "next-ip", "192.0.2.0/24", "--network-view", "default"}); err != nil {
+		t.Fatalf("net next-ip container lookup: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if strings.Join(primaryRequests, ",") != "POST networkcontainer/ref" {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode next-ip: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 1 || cleanString(rows[0]["type"]) != ipamTypeContainer || cleanString(rows[0]["ip"]) != "192.0.2.20" {
+		t.Fatalf("next-ip rows = %#v", rows)
+	}
 }
 
 func TestNetNextIPRoutesLookupToReadAndFunctionToPrimary(t *testing.T) {
@@ -338,16 +561,23 @@ func TestNetNextIPRoutesLookupToReadAndFunctionToPrimary(t *testing.T) {
 	defer primary.Close()
 	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		readRequests = append(readRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
-		if r.Method != http.MethodGet || trimWAPIPath(r.URL.Path) != networkObject {
+		if r.Method != http.MethodGet {
 			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result": []map[string]any{{
-				"_ref":         "network/ref",
-				"network":      "192.0.2.0/24",
-				"network_view": "default",
-			}},
-		})
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":         "network/ref",
+					"network":      "192.0.2.0/24",
+					"network_view": "default",
+				}},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		default:
+			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
 	}))
 	defer read.Close()
 
@@ -355,7 +585,7 @@ func TestNetNextIPRoutesLookupToReadAndFunctionToPrimary(t *testing.T) {
 	if err := app.Execute([]string{"-o", "json", "net", "next-ip", "192.0.2.0/24", "--network-view", "default"}); err != nil {
 		t.Fatalf("net next-ip: %v\nstdout:\n%s", err, stdout.String())
 	}
-	if strings.Join(readRequests, ",") != "GET network" {
+	if strings.Join(readRequests, ",") != "GET network,GET networkcontainer" {
 		t.Fatalf("read requests = %#v", readRequests)
 	}
 	if strings.Join(primaryRequests, ",") != "POST network/ref" {

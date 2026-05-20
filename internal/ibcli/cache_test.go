@@ -27,6 +27,9 @@ func TestCacheStatusAndClear(t *testing.T) {
 	if err := app.writeCachedNetworks(profile, "default", []map[string]any{{"network": "192.0.2.0/24"}}, time.Now()); err != nil {
 		t.Fatalf("write network cache: %v", err)
 	}
+	if err := app.writeCachedNetworkContainers(profile, "default", []map[string]any{{"network": "192.0.0.0/16"}}, time.Now()); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
 	if err := app.writeCachedIPv4Addresses(profile, "192.0.2.10", "default", []map[string]any{{"ip_address": "192.0.2.10"}}, time.Now()); err != nil {
 		t.Fatalf("write address cache: %v", err)
 	}
@@ -35,7 +38,7 @@ func TestCacheStatusAndClear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cache status: %v", err)
 	}
-	if len(rows) != 5 {
+	if len(rows) != 6 {
 		t.Fatalf("status rows = %#v", rows)
 	}
 	for _, row := range rows {

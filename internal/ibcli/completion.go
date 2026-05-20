@@ -565,6 +565,7 @@ func zoneColumnCompletions(toComplete string) []string {
 }
 
 var netSortDescriptions = map[string]string{
+	"type":         "IPAM object type",
 	"network":      "network CIDR",
 	"network_view": "IPAM network view",
 	"comment":      "network comment",
@@ -636,6 +637,7 @@ func appendNetSortCompletion(rows *[]string, value string, direction string, pre
 }
 
 var networkColumnDescriptions = map[string]string{
+	"type":         "IPAM object type",
 	"network":      "network CIDR",
 	"network_view": "IPAM network view",
 	"comment":      "network comment",
@@ -828,30 +830,67 @@ func (a *App) completeNetworkCIDRs(cmd *cobra.Command, toComplete string) []stri
 		return nil
 	}
 	networkView := commandCompletionFlagValue(cmd, "network-view")
-	networks, err := a.cachedNetworkCIDRsForCompletion(profile, networkView)
+	networks, err := a.cachedNetworkCIDRsForCompletion(profile, networkView, strings.HasPrefix(cmd.CommandPath(), "ib net"))
 	if err != nil {
 		return nil
 	}
 	return matchingNetworkCIDRs(networks, toComplete)
 }
 
-func (a *App) cachedNetworkCIDRsForCompletion(profile Profile, networkView string) ([]map[string]any, error) {
+func (a *App) cachedNetworkCIDRsForCompletion(profile Profile, networkView string, includeContainers bool) ([]map[string]any, error) {
 	networkView = strings.TrimSpace(networkView)
-	entry, err := a.readCachedNetworks(profile, networkView)
+	networkEntry, err := a.readCachedNetworks(profile, networkView)
 	if err != nil {
 		return nil, err
 	}
+	containerEntry := cachedPayload{}
+	if includeContainers {
+		containerEntry, err = a.readCachedNetworkContainers(profile, networkView)
+		if err != nil {
+			return nil, err
+		}
+	}
 	prefetchEnabled := a.completionCachePrefetchEnabled()
-	if !entry.CacheFound {
-		if prefetchEnabled {
+	if prefetchEnabled {
+		if !networkEntry.CacheFound || !a.cacheEntryFresh(networkEntry, time.Now()) {
 			a.startNetCacheRefreshAsync(profile, netCacheKindNetworks, networkView, "")
 		}
+		if includeContainers && (!containerEntry.CacheFound || !a.cacheEntryFresh(containerEntry, time.Now())) {
+			a.startNetCacheRefreshAsync(profile, netCacheKindContainers, networkView, "")
+		}
+	}
+	if !networkEntry.CacheFound && (!includeContainers || !containerEntry.CacheFound) {
 		return nil, nil
 	}
-	if prefetchEnabled && !a.cacheEntryFresh(entry, time.Now()) {
-		a.startNetCacheRefreshAsync(profile, netCacheKindNetworks, networkView, "")
+	if !networkEntry.CacheFound {
+		networkEntry.Rows = nil
 	}
-	return entry.Rows, nil
+	if !containerEntry.CacheFound {
+		containerEntry.Rows = nil
+	}
+	return networkObjectRows(networkEntry.Rows, containerEntry.Rows), nil
+}
+
+func (a *App) prefetchNetworkCacheForCompletion(profile Profile, networkView string) {
+	entry, err := a.readCachedNetworks(profile, networkView)
+	if err == nil && entry.CacheFound && a.cacheEntryFresh(entry, time.Now()) {
+		return
+	}
+	if err != nil {
+		return
+	}
+	a.startNetCacheRefreshAsync(profile, netCacheKindNetworks, networkView, "")
+}
+
+func (a *App) prefetchNetworkContainerCacheForCompletion(profile Profile, networkView string) {
+	entry, err := a.readCachedNetworkContainers(profile, networkView)
+	if err == nil && entry.CacheFound && a.cacheEntryFresh(entry, time.Now()) {
+		return
+	}
+	if err != nil {
+		return
+	}
+	a.startNetCacheRefreshAsync(profile, netCacheKindContainers, networkView, "")
 }
 
 func (a *App) cachedZoneNames(profile Profile) ([]string, error) {
@@ -1031,7 +1070,14 @@ func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string
 			continue
 		}
 		seen[cidr] = true
-		description := cleanString(network["network_view"])
+		var descriptionParts []string
+		if itemType := cleanString(network["type"]); itemType != "" {
+			descriptionParts = append(descriptionParts, itemType)
+		}
+		if view := cleanString(network["network_view"]); view != "" {
+			descriptionParts = append(descriptionParts, view)
+		}
+		description := strings.Join(descriptionParts, " ")
 		if description != "" {
 			rows = append(rows, cidr+"\t"+description)
 			continue

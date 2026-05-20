@@ -306,29 +306,43 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 	}, time.Now()); err != nil {
 		t.Fatalf("write network cache: %v", err)
 	}
+	if err := app.writeCachedNetworkContainers(profile, "default", []map[string]any{
+		{"network": "192.0.0.0/16", "network_view": "default"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
 	var stdout bytes.Buffer
 	app.Stdout = &stdout
 	app.Stderr = &bytes.Buffer{}
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 
-	for _, args := range [][]string{
-		{"__complete", "dns", "next-ip", "--network-view", "default", "192"},
-		{"__complete", "net", "next-ip", "--network-view", "default", "192"},
-		{"__complete", "net", "show", "--network-view", "default", "192"},
+	for _, test := range []struct {
+		args          []string
+		wantContainer bool
+	}{
+		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "192"}},
+		{args: []string{"__complete", "net", "next-ip", "--network-view", "default", "192"}, wantContainer: true},
+		{args: []string{"__complete", "net", "show", "--network-view", "default", "192"}, wantContainer: true},
 	} {
 		stdout.Reset()
-		if err := app.Execute(args); err != nil {
-			t.Fatalf("completion %v: %v", args, err)
+		if err := app.Execute(test.args); err != nil {
+			t.Fatalf("completion %v: %v", test.args, err)
 		}
 		output := stdout.String()
-		if !strings.Contains(output, "192.0.2.0/24\tdefault") {
-			t.Fatalf("completion %v missing CIDR:\n%s", args, output)
+		if !strings.Contains(output, "192.0.2.0/24\tnetwork default") {
+			t.Fatalf("completion %v missing network CIDR:\n%s", test.args, output)
+		}
+		if test.wantContainer && !strings.Contains(output, "192.0.0.0/16\tcontainer default") {
+			t.Fatalf("completion %v missing container CIDR:\n%s", test.args, output)
+		}
+		if !test.wantContainer && strings.Contains(output, "192.0.0.0/16") {
+			t.Fatalf("completion %v included container CIDR:\n%s", test.args, output)
 		}
 		if strings.Contains(output, "10.0.0.0/24") {
-			t.Fatalf("completion %v did not filter prefix:\n%s", args, output)
+			t.Fatalf("completion %v did not filter prefix:\n%s", test.args, output)
 		}
 		if !strings.Contains(output, ":4") {
-			t.Fatalf("completion %v did not disable file completion:\n%s", args, output)
+			t.Fatalf("completion %v did not disable file completion:\n%s", test.args, output)
 		}
 	}
 }
@@ -336,7 +350,7 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 func TestNetworkCompletionReturnsStaleCacheAndQueuesRefresh(t *testing.T) {
 	app := testApp(t)
 	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")
-	refreshes := make(chan string, 1)
+	refreshes := make(chan string, 2)
 	app.backgroundNetRefresher = func(profile Profile, kind string, networkView string, ip string) error {
 		refreshes <- kind + "|" + networkView + "|" + ip
 		return nil
@@ -347,21 +361,33 @@ func TestNetworkCompletionReturnsStaleCacheAndQueuesRefresh(t *testing.T) {
 	}, now.Add(-time.Hour).Unix(), now.Add(-time.Second).Unix()); err != nil {
 		t.Fatalf("write stale network cache: %v", err)
 	}
+	if err := app.writeCachedNetworkContainersEntry(profile, "default", []map[string]any{
+		{"network": "10.0.0.0/8", "network_view": "default"},
+	}, now.Add(-time.Hour).Unix(), now.Add(-time.Second).Unix()); err != nil {
+		t.Fatalf("write stale container cache: %v", err)
+	}
 
-	matches, err := app.cachedNetworkCIDRsForCompletion(profile, "default")
+	matches, err := app.cachedNetworkCIDRsForCompletion(profile, "default", true)
 	if err != nil {
 		t.Fatalf("network completion cache: %v", err)
 	}
-	if got := strings.Join(matchingNetworkCIDRs(matches, "10."), ","); got != "10.10.0.0/16\tdefault" {
+	if got := strings.Join(matchingNetworkCIDRs(matches, "10."), ","); got != "10.0.0.0/8\tcontainer default,10.10.0.0/16\tnetwork default" {
 		t.Fatalf("matches = %q", got)
 	}
-	select {
-	case refreshed := <-refreshes:
-		if refreshed != netCacheKindNetworks+"|default|" {
-			t.Fatalf("refresh target = %q", refreshed)
+	wantRefreshes := map[string]bool{
+		netCacheKindNetworks + "|default|":   true,
+		netCacheKindContainers + "|default|": true,
+	}
+	for range wantRefreshes {
+		select {
+		case refreshed := <-refreshes:
+			if !wantRefreshes[refreshed] {
+				t.Fatalf("unexpected refresh target = %q", refreshed)
+			}
+			delete(wantRefreshes, refreshed)
+		default:
+			t.Fatalf("network cache refreshes were not queued: missing %#v", wantRefreshes)
 		}
-	default:
-		t.Fatal("network cache refresh was not queued")
 	}
 }
 

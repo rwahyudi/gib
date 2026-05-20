@@ -17,15 +17,19 @@ const (
 	defaultNetSortField     = "network"
 	netCacheKindViews       = "network_views"
 	netCacheKindNetworks    = "networks"
+	netCacheKindContainers  = "network_containers"
 	netCacheKindAddresses   = "ipv4_addresses"
+	ipamTypeNetwork         = "network"
+	ipamTypeContainer       = "container"
 )
 
 var (
 	networkViewOutputColumns   = []string{"name", "comment"}
-	networkOutputColumns       = []string{"network", "network_view", "comment"}
-	networkDetailOutputColumns = []string{"network", "network_view", "comment"}
-	ipv4AddressOutputColumns   = []string{"ip", "network", "network_view", "status", "types", "names", "mac_address", "lease_state", "comment"}
-	netSortFields              = []string{"network", "network_view", "comment"}
+	networkOutputColumns       = []string{"type", "network", "network_view", "comment"}
+	networkDetailOutputColumns = []string{"type", "network", "network_view", "comment"}
+	ipv4AddressOutputColumns   = []string{"ip", "network", "container", "network_view", "status", "types", "names", "mac_address", "lease_state", "comment"}
+	netNextIPOutputColumns     = []string{"type", "network", "network_view", "ip"}
+	netSortFields              = []string{"type", "network", "network_view", "comment"}
 )
 
 type NetSort struct {
@@ -68,18 +72,22 @@ func (a *App) runNetList(search string, networkView string, option NetSort, colu
 	if err != nil {
 		return err
 	}
-	networks = filterNetworks(networks, search)
-	rows := make([]map[string]any, 0, len(networks))
-	for _, network := range networks {
-		rows = append(rows, networkOutputRow(network))
+	containers, err := a.cachedNetworkContainers(profile, client, networkView)
+	if err != nil {
+		return err
+	}
+	objects := filterNetworks(networkObjectRows(networks, containers), search)
+	rows := make([]map[string]any, 0, len(objects))
+	for _, object := range objects {
+		rows = append(rows, networkOutputRow(object))
 	}
 	sortNetworkRows(rows)
 	applyNetSort(rows, option)
 	rows = selectNetworkOutputRows(rows, columns)
 	if len(rows) == 0 && a.isTableOutput() {
-		a.PrintWarning("No IPAM networks found.")
+		a.PrintWarning("No IPAM networks or containers found.")
 	}
-	return a.emitRows(fmt.Sprintf("IPAM Networks (%d)", len(rows)), columns, rows)
+	return a.emitRows(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), columns, rows)
 }
 
 func (a *App) runNetShow(network string, networkView string) error {
@@ -87,12 +95,12 @@ func (a *App) runNetShow(network string, networkView string) error {
 	if err != nil {
 		return err
 	}
-	matchedNetwork, err := a.cachedFindNetwork(profile, client, network, networkView)
+	matchedNetwork, err := a.cachedFindNetworkObject(profile, client, network, networkView)
 	if err != nil {
 		return err
 	}
 	row := networkDetailRow(matchedNetwork)
-	title := "IPAM Network: " + cleanString(row["network"])
+	title := ipamObjectTitle(row)
 	if a.isTableOutput() {
 		fmt.Fprintln(a.Stdout, renderTable(title, []string{"Field", "Value"}, objectDetailRows(networkDetailOutputColumns, row)))
 		return nil
@@ -116,9 +124,15 @@ func (a *App) runNetAddress(address string, networkView string) error {
 	if len(results) == 0 {
 		return cliError("no IPv4 address found for %s", ip)
 	}
+	containers, err := a.cachedNetworkContainers(profile, client, networkView)
+	if err != nil {
+		return err
+	}
 	rows := make([]map[string]any, 0, len(results))
 	for _, result := range results {
-		rows = append(rows, ipv4AddressOutputRow(result))
+		row := ipv4AddressOutputRow(result)
+		row["container"] = containingContainerForIP(ip, cleanString(row["network_view"]), containers)
+		rows = append(rows, row)
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		if result := compareCaseInsensitiveText(cleanString(rows[i]["network_view"]), cleanString(rows[j]["network_view"])); result != 0 {
@@ -144,7 +158,7 @@ func (a *App) runNextIP(network string, networkView string, num int, exclude []s
 	}
 	var rows []map[string]any
 	if cachedLookup {
-		matchedNetwork, findErr := a.cachedFindNetwork(profile, client, network, networkView)
+		matchedNetwork, findErr := a.cachedFindNetworkObject(profile, client, network, networkView)
 		if findErr != nil {
 			return findErr
 		}
@@ -158,12 +172,25 @@ func (a *App) runNextIP(network string, networkView string, num int, exclude []s
 	if printContext && a.isTableOutput() {
 		a.PrintContext()
 	}
-	return a.emitRows("Next Available IPs", nextIPOutputColumns, rows)
+	fields := nextIPOutputColumns
+	if cachedLookup {
+		fields = netNextIPOutputColumns
+	}
+	return a.emitRows("Next Available IPs", fields, rows)
 }
 
 func queryNetworkViews(client *WapiClient) ([]map[string]any, error) {
 	params := url.Values{"_return_fields": []string{networkViewReturnFields}}
 	return pagedQuery(client, networkViewObject, params)
+}
+
+func queryNetworkContainers(client *WapiClient, networkView string) ([]map[string]any, error) {
+	params := url.Values{}
+	params.Set("_return_fields", networkReturnFields)
+	if strings.TrimSpace(networkView) != "" {
+		params.Set("network_view", strings.TrimSpace(networkView))
+	}
+	return pagedQuery(client, networkContainerObject, params)
 }
 
 func (a *App) cachedNetworkViews(profile Profile, client *WapiClient) ([]map[string]any, error) {
@@ -186,6 +213,18 @@ func (a *App) cachedNetworks(profile Profile, client *WapiClient, networkView st
 		"",
 		func() (cachedPayload, error) { return a.readCachedNetworks(profile, networkView) },
 		func() ([]map[string]any, error) { return a.refreshNetworkCache(profile, client, networkView) },
+	)
+}
+
+func (a *App) cachedNetworkContainers(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	networkView = strings.TrimSpace(networkView)
+	return a.cachedNetRows(
+		profile,
+		netCacheKindContainers,
+		networkView,
+		"",
+		func() (cachedPayload, error) { return a.readCachedNetworkContainers(profile, networkView) },
+		func() ([]map[string]any, error) { return a.refreshNetworkContainerCache(profile, client, networkView) },
 	)
 }
 
@@ -250,6 +289,15 @@ func (a *App) refreshNetworkCache(profile Profile, client *WapiClient, networkVi
 	return rows, nil
 }
 
+func (a *App) refreshNetworkContainerCache(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	rows, err := queryNetworkContainers(client, networkView)
+	if err != nil {
+		return nil, err
+	}
+	_ = a.writeCachedNetworkContainers(profile, networkView, rows, time.Now())
+	return rows, nil
+}
+
 func (a *App) refreshIPv4AddressCache(profile Profile, client *WapiClient, ip string, networkView string) ([]map[string]any, error) {
 	params := url.Values{"_return_fields": []string{ipv4AddressReturnFields}, "ip_address": []string{ip}}
 	if strings.TrimSpace(networkView) != "" {
@@ -275,6 +323,22 @@ func (a *App) cachedFindNetwork(profile Profile, client *WapiClient, network str
 	return findNetworkInRows(networks, cidr)
 }
 
+func (a *App) cachedFindNetworkObject(profile Profile, client *WapiClient, network string, networkView string) (map[string]any, error) {
+	cidr, err := normalizeNextIPNetwork(network)
+	if err != nil {
+		return nil, err
+	}
+	networks, err := a.cachedNetworks(profile, client, networkView)
+	if err != nil {
+		return nil, err
+	}
+	containers, err := a.cachedNetworkContainers(profile, client, networkView)
+	if err != nil {
+		return nil, err
+	}
+	return findNetworkObjectInRows(networkObjectRows(networks, containers), cidr)
+}
+
 func findNetworkInRows(networks []map[string]any, cidr string) (map[string]any, error) {
 	var matches []map[string]any
 	for _, network := range networks {
@@ -287,6 +351,31 @@ func findNetworkInRows(networks []map[string]any, cidr string) (map[string]any, 
 	}
 	if len(matches) > 1 {
 		return nil, cliError("multiple networks found for %s; use --network-view to choose one", cidr)
+	}
+	return matches[0], nil
+}
+
+func findNetworkObjectInRows(objects []map[string]any, cidr string) (map[string]any, error) {
+	var matches []map[string]any
+	for _, object := range objects {
+		if cleanString(object["network"]) == cidr {
+			matches = append(matches, object)
+		}
+	}
+	if len(matches) == 0 {
+		return nil, cliError("no network or container found for %s", cidr)
+	}
+	containers := make([]map[string]any, 0, len(matches))
+	for _, match := range matches {
+		if cleanString(match["type"]) == ipamTypeContainer {
+			containers = append(containers, match)
+		}
+	}
+	if len(containers) > 0 {
+		matches = containers
+	}
+	if len(matches) > 1 {
+		return nil, cliError("multiple networks or containers found for %s; use --network-view to choose one", cidr)
 	}
 	return matches[0], nil
 }
@@ -354,6 +443,8 @@ func (a *App) runNetCacheRefresh(profileName string, kind string, networkView st
 		_, err = a.refreshNetworkViewCache(profile, client)
 	case netCacheKindNetworks:
 		_, err = a.refreshNetworkCache(profile, client, networkView)
+	case netCacheKindContainers:
+		_, err = a.refreshNetworkContainerCache(profile, client, networkView)
 	case netCacheKindAddresses:
 		if strings.TrimSpace(ip) == "" {
 			err = cliError("--ip is required for %s refresh", netCacheKindAddresses)
@@ -374,6 +465,7 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 	filtered := make([]map[string]any, 0, len(networks))
 	for _, network := range networks {
 		values := []string{
+			cleanString(network["type"]),
 			cleanString(network["network"]),
 			cleanString(network["network_view"]),
 			cleanString(network["comment"]),
@@ -385,8 +477,30 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 	return filtered
 }
 
+func networkObjectRows(networks []map[string]any, containers []map[string]any) []map[string]any {
+	rows := make([]map[string]any, 0, len(networks)+len(containers))
+	for _, container := range containers {
+		rows = append(rows, networkObjectRow(container, ipamTypeContainer))
+	}
+	for _, network := range networks {
+		rows = append(rows, networkObjectRow(network, ipamTypeNetwork))
+	}
+	return rows
+}
+
+func networkObjectRow(item map[string]any, itemType string) map[string]any {
+	return map[string]any{
+		"_ref":         cleanString(item["_ref"]),
+		"type":         firstNonEmpty(cleanString(item["type"]), itemType),
+		"network":      cleanString(item["network"]),
+		"network_view": cleanString(item["network_view"]),
+		"comment":      cleanString(item["comment"]),
+	}
+}
+
 func networkOutputRow(network map[string]any) map[string]any {
 	return map[string]any{
+		"type":         cleanString(network["type"]),
 		"network":      cleanString(network["network"]),
 		"network_view": cleanString(network["network_view"]),
 		"comment":      cleanString(network["comment"]),
@@ -395,16 +509,26 @@ func networkOutputRow(network map[string]any) map[string]any {
 
 func networkDetailRow(network map[string]any) map[string]any {
 	return map[string]any{
+		"type":         cleanString(network["type"]),
 		"network":      cleanString(network["network"]),
 		"network_view": cleanString(network["network_view"]),
 		"comment":      cleanString(network["comment"]),
 	}
 }
 
+func ipamObjectTitle(row map[string]any) string {
+	name := cleanString(row["network"])
+	if cleanString(row["type"]) == ipamTypeContainer {
+		return "IPAM Container: " + name
+	}
+	return "IPAM Network: " + name
+}
+
 func ipv4AddressOutputRow(item map[string]any) map[string]any {
 	return map[string]any{
 		"ip":           cleanString(firstNonEmpty(cleanString(item["ip_address"]), cleanString(item["ipv4addr"]))),
 		"network":      cleanString(item["network"]),
+		"container":    cleanString(item["container"]),
 		"network_view": cleanString(item["network_view"]),
 		"status":       cleanString(item["status"]),
 		"types":        strings.Join(stringValues(item["types"]), ", "),
@@ -413,6 +537,31 @@ func ipv4AddressOutputRow(item map[string]any) map[string]any {
 		"lease_state":  cleanString(item["lease_state"]),
 		"comment":      cleanString(item["comment"]),
 	}
+}
+
+func containingContainerForIP(ip string, networkView string, containers []map[string]any) string {
+	address, err := netip.ParseAddr(strings.TrimSpace(ip))
+	if err != nil || !address.Is4() {
+		return ""
+	}
+	networkView = strings.TrimSpace(networkView)
+	var best netip.Prefix
+	var bestCIDR string
+	for _, container := range containers {
+		if networkView != "" && cleanString(container["network_view"]) != networkView {
+			continue
+		}
+		cidr := cleanString(container["network"])
+		prefix, ok := parseIPv4Prefix(cidr)
+		if !ok || !prefix.Contains(address) {
+			continue
+		}
+		if bestCIDR == "" || prefix.Bits() > best.Bits() {
+			best = prefix
+			bestCIDR = cidr
+		}
+	}
+	return bestCIDR
 }
 
 func normalizeIPv4Address(raw string) (string, error) {
@@ -483,6 +632,8 @@ func compareNetworkRows(left map[string]any, right map[string]any, field string,
 		if result == 0 {
 			result = compareCaseInsensitiveText(cleanString(left["network_view"]), cleanString(right["network_view"]))
 		}
+	case "type":
+		result = compareCaseInsensitiveText(cleanString(left["type"]), cleanString(right["type"]))
 	case "network_view":
 		result = compareCaseInsensitiveText(cleanString(left["network_view"]), cleanString(right["network_view"]))
 	case "comment":
