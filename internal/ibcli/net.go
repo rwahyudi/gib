@@ -68,15 +68,11 @@ func (a *App) runNetList(search string, networkView string, option NetSort, colu
 	if err != nil {
 		return err
 	}
-	networks, err := a.cachedNetworks(profile, client, networkView)
+	objects, err := a.cachedNetworkObjectsForList(profile, client, networkView)
 	if err != nil {
 		return err
 	}
-	containers, err := a.cachedNetworkContainers(profile, client, networkView)
-	if err != nil {
-		return err
-	}
-	objects := filterNetworks(networkObjectRows(networks, containers), search)
+	objects = filterNetworks(objects, search)
 	rows := make([]map[string]any, 0, len(objects))
 	for _, object := range objects {
 		rows = append(rows, networkOutputRow(object))
@@ -88,6 +84,44 @@ func (a *App) runNetList(search string, networkView string, option NetSort, colu
 		a.PrintWarning("No IPAM networks or containers found.")
 	}
 	return a.emitRows(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), columns, rows)
+}
+
+func (a *App) cachedNetworkObjectsForList(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	networkView = strings.TrimSpace(networkView)
+	if networkView != "" {
+		return a.cachedNetworkObjectsForView(profile, client, networkView)
+	}
+
+	views, err := a.cachedNetworkViews(profile, client)
+	if err != nil {
+		return a.cachedNetworkObjectsForView(profile, client, "")
+	}
+	viewNames := networkViewNames(views)
+	if len(viewNames) == 0 {
+		return a.cachedNetworkObjectsForView(profile, client, "")
+	}
+
+	rows := make([]map[string]any, 0)
+	for _, viewName := range viewNames {
+		viewRows, err := a.cachedNetworkObjectsForView(profile, client, viewName)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, viewRows...)
+	}
+	return dedupeNetworkObjectRows(rows), nil
+}
+
+func (a *App) cachedNetworkObjectsForView(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	networks, err := a.cachedNetworks(profile, client, networkView)
+	if err != nil {
+		return nil, err
+	}
+	containers, err := a.cachedNetworkContainers(profile, client, networkView)
+	if err != nil {
+		return nil, err
+	}
+	return networkObjectRows(networks, containers), nil
 }
 
 func (a *App) runNetShow(network string, networkView string) error {
@@ -528,6 +562,32 @@ func networkPrefixesRelated(target netip.Prefix, candidate netip.Prefix) bool {
 	default:
 		return false
 	}
+}
+
+func networkViewNames(views []map[string]any) []string {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(views))
+	for _, view := range views {
+		name := cleanString(view["name"])
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.SliceStable(names, func(i, j int) bool {
+		return compareCaseInsensitiveText(names[i], names[j]) < 0
+	})
+	return names
+}
+
+func dedupeNetworkObjectRows(rows []map[string]any) []map[string]any {
+	seen := map[string]bool{}
+	deduped := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		appendNetworkSearchRow(&deduped, seen, row)
+	}
+	return deduped
 }
 
 func networkObjectRows(networks []map[string]any, containers []map[string]any) []map[string]any {

@@ -230,7 +230,7 @@ func TestNetHelpShowsIPAMOptions(t *testing.T) {
 			args: []string{"net", "list", "--help"},
 			want: []string{
 				"Network List Usage",
-				"--network-view filters to one IPAM network view",
+				"omit --network-view to scan all IPAM views, or set it to one view",
 				"-s type or --sort=-comment sorts by field",
 				"-C type,network,comment prints selected output columns",
 				"--network-view STRING",

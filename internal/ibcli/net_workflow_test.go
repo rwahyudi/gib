@@ -93,13 +93,23 @@ func TestNetListIncludesNetworksAndContainers(t *testing.T) {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
 		switch trimWAPIPath(r.URL.Path) {
+		case networkViewObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{"name": "default"}},
+			})
 		case networkObject:
+			if got := r.URL.Query().Get("network_view"); got != "default" {
+				t.Fatalf("network_view query = %q, want default", got)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
 					{"network": "192.0.2.0/24", "network_view": "default", "comment": "Production network"},
 				},
 			})
 		case networkContainerObject:
+			if got := r.URL.Query().Get("network_view"); got != "default" {
+				t.Fatalf("container network_view query = %q, want default", got)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
 					{"network": "192.0.0.0/16", "network_view": "default", "comment": "Production container"},
@@ -130,13 +140,154 @@ func TestNetListIncludesNetworksAndContainers(t *testing.T) {
 	}
 }
 
+func TestNetListWithoutNetworkViewQueriesAllViews(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkViewObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"name": "default"},
+					{"name": "lab"},
+				},
+			})
+		case networkObject:
+			switch r.URL.Query().Get("network_view") {
+			case "default":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"result": []map[string]any{{"network": "10.0.1.0/24", "network_view": "default", "comment": "Default network"}},
+				})
+			case "lab":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"result": []map[string]any{{"network": "172.16.1.0/24", "network_view": "lab", "comment": "Lab network"}},
+				})
+			default:
+				t.Fatalf("network query missing network_view: %s", r.URL.RawQuery)
+			}
+		case networkContainerObject:
+			switch r.URL.Query().Get("network_view") {
+			case "default":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"result": []map[string]any{{"network": "10.0.0.0/16", "network_view": "default", "comment": "Default container"}},
+				})
+			case "lab":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"result": []map[string]any{{"network": "172.16.0.0/16", "network_view": "lab", "comment": "Lab container"}},
+				})
+			default:
+				t.Fatalf("container query missing network_view: %s", r.URL.RawQuery)
+			}
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "list"}); err != nil {
+		t.Fatalf("net list: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 4 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	want := []struct {
+		itemType string
+		network  string
+		view     string
+	}{
+		{ipamTypeContainer, "10.0.0.0/16", "default"},
+		{ipamTypeNetwork, "10.0.1.0/24", "default"},
+		{ipamTypeContainer, "172.16.0.0/16", "lab"},
+		{ipamTypeNetwork, "172.16.1.0/24", "lab"},
+	}
+	for index, expected := range want {
+		if cleanString(rows[index]["type"]) != expected.itemType || cleanString(rows[index]["network"]) != expected.network || cleanString(rows[index]["network_view"]) != expected.view {
+			t.Fatalf("row %d = %#v, want %s %s %s", index, rows[index], expected.itemType, expected.network, expected.view)
+		}
+	}
+}
+
+func TestNetSearchWithoutNetworkViewQueriesAllViews(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkViewObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"name": "default"},
+					{"name": "lab"},
+				},
+			})
+		case networkObject:
+			switch r.URL.Query().Get("network_view") {
+			case "default":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"result": []map[string]any{{"network": "10.0.1.0/24", "network_view": "default", "comment": "Default network"}},
+				})
+			case "lab":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"result": []map[string]any{{"network": "172.16.1.0/24", "network_view": "lab", "comment": "Shared application"}},
+				})
+			default:
+				t.Fatalf("network query missing network_view: %s", r.URL.RawQuery)
+			}
+		case networkContainerObject:
+			switch r.URL.Query().Get("network_view") {
+			case "default":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"result": []map[string]any{{"network": "10.0.0.0/16", "network_view": "default", "comment": "Default container"}},
+				})
+			case "lab":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"result": []map[string]any{{"network": "172.16.0.0/16", "network_view": "lab", "comment": "Shared container"}},
+				})
+			default:
+				t.Fatalf("container query missing network_view: %s", r.URL.RawQuery)
+			}
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "search", "shared"}); err != nil {
+		t.Fatalf("net search: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 2 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	if cleanString(rows[0]["type"]) != ipamTypeContainer || cleanString(rows[0]["network_view"]) != "lab" || cleanString(rows[1]["type"]) != ipamTypeNetwork || cleanString(rows[1]["network_view"]) != "lab" {
+		t.Fatalf("search rows = %#v", rows)
+	}
+}
+
 func TestNetSearchIncludesParentContainerForMatchingNetworkCIDR(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
 		switch trimWAPIPath(r.URL.Path) {
+		case networkViewObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{"name": "default"}},
+			})
 		case networkObject:
+			if got := r.URL.Query().Get("network_view"); got != "default" {
+				t.Fatalf("network_view query = %q, want default", got)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
 					{"network": "10.129.42.0/23", "network_view": "default", "comment": "SAP HANA DR"},
@@ -144,6 +295,9 @@ func TestNetSearchIncludesParentContainerForMatchingNetworkCIDR(t *testing.T) {
 				},
 			})
 		case networkContainerObject:
+			if got := r.URL.Query().Get("network_view"); got != "default" {
+				t.Fatalf("container network_view query = %q, want default", got)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
 					{"network": "10.0.0.0/8", "network_view": "default", "comment": "Internal"},
@@ -189,7 +343,14 @@ func TestNetSearchIncludesChildObjectsForMatchingParentCIDR(t *testing.T) {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
 		switch trimWAPIPath(r.URL.Path) {
+		case networkViewObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{"name": "default"}},
+			})
 		case networkObject:
+			if got := r.URL.Query().Get("network_view"); got != "default" {
+				t.Fatalf("network_view query = %q, want default", got)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
 					{"network": "10.129.42.0/23", "network_view": "default", "comment": "SAP HANA DR"},
@@ -198,6 +359,9 @@ func TestNetSearchIncludesChildObjectsForMatchingParentCIDR(t *testing.T) {
 				},
 			})
 		case networkContainerObject:
+			if got := r.URL.Query().Get("network_view"); got != "default" {
+				t.Fatalf("container network_view query = %q, want default", got)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
 					{"network": "10.0.0.0/8", "network_view": "default", "comment": "Internal"},

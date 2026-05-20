@@ -13,7 +13,7 @@ worker pool.
 | Freshness | Fresh until `cached_at + cache_ttl`; `fresh_until` is not stored. |
 | Stale window | Record and IPAM rows can be served stale until `stale_expires_at`. |
 | Revalidation | Stale rows inside SWR return immediately and start one background refresh. |
-| IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. |
+| IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search loads each IPAM network view separately so all network and container rows are represented. |
 | Read endpoint | GET requests use `read_server` when configured. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
 | Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`. |
