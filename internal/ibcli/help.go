@@ -206,6 +206,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"views", "ib net view list shows IPAM network views"},
 			{"networks", "ib net list [SEARCH] lists IPv4 networks and containers"},
 			{"search", "ib net search KEYWORD matches type, CIDR, network view, or comment"},
+			{"cidr", "CIDR matches include related parent and child networks in the same view"},
 			{"details", "ib net show NETWORK displays one network or container"},
 			{"address", "ib net address IP displays IPv4 address state"},
 			{"next-ip", "ib net next-ip NETWORK requests available IPv4 addresses"},
@@ -224,6 +225,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib net list":
 		return sectionWithRows("Network List Usage", [][]string{
 			{"search", "optional positional search matches type, CIDR, network view, or comment"},
+			{"cidr", "CIDR matches include related parent and child networks in the same view"},
 			{"view", "--network-view filters to one IPAM network view"},
 			{"sort", "-s type or --sort=-comment sorts by field; blank --sort uses network"},
 			{"columns", "-C type,network,comment prints selected output columns"},
@@ -232,6 +234,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib net search":
 		return sectionWithRows("Network Search Usage", [][]string{
 			{"keyword", "matches type, CIDR, network view, or comment"},
+			{"cidr", "CIDR matches include related parent and child networks in the same view"},
 			{"view", "--network-view filters to one IPAM network view"},
 			{"sort", "-s network_view or --sort=-network sorts by field"},
 			{"columns", "-C type,network,network_view prints selected output columns"},
@@ -379,7 +382,7 @@ func usageDetails(cmd *cobra.Command) string {
 		}, "\n")
 	case "ib net search":
 		return strings.Join([]string{
-			sectionWithLines("Example", []string{"ib net search production"}),
+			sectionWithLines("Example", []string{"ib net search 10.129.0.0/16"}),
 			helpSubtitleStyle.Render(`Use "ib net search -h" for more info.`),
 		}, "\n")
 	}

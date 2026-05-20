@@ -292,7 +292,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib net` | Show IPAM command help. |
 | `ib net view list` | List IPAM network views. |
 | `ib net list [SEARCH]` | List IPv4 networks and containers. Add `--network-view` to filter by IPAM network view, `-s/--sort FIELD` to sort by `type`, `network`, `network_view`, or `comment`, and `-C/--columns LIST` to print selected columns. |
-| `ib net search KEYWORD` | Search IPv4 networks and containers by type, CIDR, network view, or comment. |
+| `ib net search KEYWORD` | Search IPv4 networks and containers by type, CIDR, network view, or comment. CIDR matches also include related parent containers and child networks/containers in the same network view. |
 | `ib net show NETWORK` | Show details for one IPv4 network or container. Use `--network-view` when a CIDR exists in multiple network views. |
 | `ib net address IP` | Show IPAM details for an IPv4 address, including network, parent container, status, types, names, MAC address, lease state, and comment when available. |
 | `ib net next-ip NETWORK` | Find the next available IPv4 address in a network or container. Use `--network-view` for ambiguous CIDRs, `-n/--num` for multiple addresses, and repeat `-e/--exclude` to skip addresses. |
@@ -319,7 +319,7 @@ ib dns delete app
 
 `ib dns zone list` supports the same output control pattern for zones. `--type` filters zone formats `FORWARD`, `IPV4`, or `IPV6`; `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment`; and `--columns` selects from the same zone fields. Use `--view` to list zones from another DNS view; `--zone` and `-z` are not accepted by this command.
 
-`ib net list` and `ib net search` are read-only IPAM workflows. They query the WAPI `network` and `networkcontainer` objects, optionally filter by `--network-view`, and match search text against type, CIDR, network view, and comment. Add `-s` or `--sort` to sort by `type`, `network`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `type`, `network`, `network_view`, and `comment`.
+`ib net list` and `ib net search` are read-only IPAM workflows. They query the WAPI `network` and `networkcontainer` objects, optionally filter by `--network-view`, and match search text against type, CIDR, network view, and comment. A CIDR-field match also includes related parent containers and child networks/containers in the same network view. Add `-s` or `--sort` to sort by `type`, `network`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `type`, `network`, `network_view`, and `comment`.
 
 `ib net show` and `ib net next-ip` resolve both networks and containers; when the same CIDR exists as both, the container is preferred. `ib net next-ip` performs the object lookup with read-only routing, then sends the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
 

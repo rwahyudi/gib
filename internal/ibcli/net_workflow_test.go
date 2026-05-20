@@ -146,6 +146,7 @@ func TestNetSearchIncludesParentContainerForMatchingNetworkCIDR(t *testing.T) {
 		case networkContainerObject:
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
+					{"network": "10.0.0.0/8", "network_view": "default", "comment": "Internal"},
 					{"network": "10.129.0.0/16", "network_view": "default", "comment": "Servers - Internal Only"},
 				},
 			})
@@ -163,13 +164,68 @@ func TestNetSearchIncludesParentContainerForMatchingNetworkCIDR(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
 		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
 	}
-	if len(rows) != 3 {
+	if len(rows) != 4 {
 		t.Fatalf("network rows = %#v", rows)
 	}
 	want := []struct {
 		itemType string
 		network  string
 	}{
+		{ipamTypeContainer, "10.0.0.0/8"},
+		{ipamTypeContainer, "10.129.0.0/16"},
+		{ipamTypeNetwork, "10.129.42.0/23"},
+		{ipamTypeNetwork, "10.129.46.0/23"},
+	}
+	for index, expected := range want {
+		if cleanString(rows[index]["type"]) != expected.itemType || cleanString(rows[index]["network"]) != expected.network {
+			t.Fatalf("row %d = %#v, want %s %s", index, rows[index], expected.itemType, expected.network)
+		}
+	}
+}
+
+func TestNetSearchIncludesChildObjectsForMatchingParentCIDR(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "10.129.42.0/23", "network_view": "default", "comment": "SAP HANA DR"},
+					{"network": "10.129.46.0/23", "network_view": "default", "comment": "SAP HANA Prod"},
+					{"network": "10.130.42.0/23", "network_view": "default", "comment": "Other"},
+				},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "10.0.0.0/8", "network_view": "default", "comment": "Internal"},
+					{"network": "10.129.0.0/16", "network_view": "default", "comment": "Servers - Internal Only"},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "search", "10.129.0.0/16"}); err != nil {
+		t.Fatalf("net search: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 4 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	want := []struct {
+		itemType string
+		network  string
+	}{
+		{ipamTypeContainer, "10.0.0.0/8"},
 		{ipamTypeContainer, "10.129.0.0/16"},
 		{ipamTypeNetwork, "10.129.42.0/23"},
 		{ipamTypeNetwork, "10.129.46.0/23"},

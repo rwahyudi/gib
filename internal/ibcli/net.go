@@ -473,10 +473,8 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 		}
 		if searchValuesMatch(values, search, false, false) {
 			appendNetworkSearchRow(&filtered, seen, network)
-			if shouldIncludeParentContainerForSearch(network, search) {
-				if parent, ok := nearestContainerForNetwork(network, networks); ok {
-					appendNetworkSearchRow(&filtered, seen, parent)
-				}
+			if shouldExpandNetworkHierarchyForSearch(network, search) {
+				appendRelatedNetworkSearchRows(&filtered, seen, network, networks)
 			}
 		}
 	}
@@ -497,32 +495,39 @@ func appendNetworkSearchRow(rows *[]map[string]any, seen map[string]bool, row ma
 	*rows = append(*rows, row)
 }
 
-func shouldIncludeParentContainerForSearch(network map[string]any, search string) bool {
-	return cleanString(network["type"]) == ipamTypeNetwork && textMatches(cleanString(network["network"]), search, false, false)
+func shouldExpandNetworkHierarchyForSearch(network map[string]any, search string) bool {
+	return textMatches(cleanString(network["network"]), search, false, false)
 }
 
-func nearestContainerForNetwork(network map[string]any, objects []map[string]any) (map[string]any, bool) {
-	networkPrefix, ok := parseIPv4Prefix(cleanString(network["network"]))
+func appendRelatedNetworkSearchRows(rows *[]map[string]any, seen map[string]bool, network map[string]any, objects []map[string]any) {
+	targetPrefix, ok := parseIPv4Prefix(cleanString(network["network"]))
 	if !ok {
-		return nil, false
+		return
 	}
 	networkView := cleanString(network["network_view"])
-	var best map[string]any
-	var bestPrefix netip.Prefix
 	for _, object := range objects {
-		if cleanString(object["type"]) != ipamTypeContainer || cleanString(object["network_view"]) != networkView {
+		if cleanString(object["network_view"]) != networkView {
 			continue
 		}
-		containerPrefix, ok := parseIPv4Prefix(cleanString(object["network"]))
-		if !ok || containerPrefix.Bits() > networkPrefix.Bits() || !containerPrefix.Contains(networkPrefix.Addr()) {
+		objectPrefix, ok := parseIPv4Prefix(cleanString(object["network"]))
+		if !ok || objectPrefix == targetPrefix {
 			continue
 		}
-		if best == nil || containerPrefix.Bits() > bestPrefix.Bits() {
-			best = object
-			bestPrefix = containerPrefix
+		if networkPrefixesRelated(targetPrefix, objectPrefix) {
+			appendNetworkSearchRow(rows, seen, object)
 		}
 	}
-	return best, best != nil
+}
+
+func networkPrefixesRelated(target netip.Prefix, candidate netip.Prefix) bool {
+	switch {
+	case candidate.Bits() < target.Bits():
+		return candidate.Contains(target.Addr())
+	case candidate.Bits() > target.Bits():
+		return target.Contains(candidate.Addr())
+	default:
+		return false
+	}
 }
 
 func networkObjectRows(networks []map[string]any, containers []map[string]any) []map[string]any {
