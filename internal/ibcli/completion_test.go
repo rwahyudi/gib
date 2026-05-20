@@ -302,6 +302,8 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 	profile := writeCompletionProfile(t, app, server.URL)
 	if err := app.writeCachedNetworks(profile, "default", []map[string]any{
 		{"network": "192.0.2.0/24", "network_view": "default"},
+		{"network": "10.128.48.0/24", "network_view": "default"},
+		{"network": "10.128.49.0/24", "network_view": "default"},
 		{"network": "10.0.0.0/24", "network_view": "default"},
 	}, time.Now()); err != nil {
 		t.Fatalf("write network cache: %v", err)
@@ -309,6 +311,7 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 	if err := app.writeCachedNetworkContainers(profile, "default", []map[string]any{
 		{"network": "192.0.0.0/8", "network_view": "default"},
 		{"network": "192.0.0.0/16", "network_view": "default"},
+		{"network": "10.128.48.0/23", "network_view": "default"},
 	}, time.Now()); err != nil {
 		t.Fatalf("write container cache: %v", err)
 	}
@@ -318,27 +321,37 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 
 	for _, test := range []struct {
-		args          []string
-		wantContainer bool
+		args              []string
+		wantNetwork       string
+		wantContainerCIDR string
 	}{
-		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "192"}, wantContainer: true},
-		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "192.0.0.0/16"}, wantContainer: true},
-		{args: []string{"__complete", "net", "next-ip", "--network-view", "default", "192"}, wantContainer: true},
-		{args: []string{"__complete", "net", "show", "--network-view", "default", "192"}, wantContainer: true},
+		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "192"}, wantNetwork: "192.0.2.0/24\tnetwork default", wantContainerCIDR: "192.0.0.0/16\tcontainer default"},
+		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "192.0.0.0/16"}, wantNetwork: "192.0.2.0/24\tnetwork default", wantContainerCIDR: "192.0.0.0/16\tcontainer default"},
+		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "10.128.48"}, wantNetwork: "10.128.48.0/24\tnetwork default", wantContainerCIDR: "10.128.48.0/23\tcontainer default"},
+		{args: []string{"__complete", "net", "next-ip", "--network-view", "default", "192"}, wantNetwork: "192.0.2.0/24\tnetwork default", wantContainerCIDR: "192.0.0.0/16\tcontainer default"},
+		{args: []string{"__complete", "net", "show", "--network-view", "default", "192"}, wantNetwork: "192.0.2.0/24\tnetwork default", wantContainerCIDR: "192.0.0.0/16\tcontainer default"},
 	} {
 		stdout.Reset()
 		if err := app.Execute(test.args); err != nil {
 			t.Fatalf("completion %v: %v", test.args, err)
 		}
 		output := stdout.String()
-		if !strings.Contains(output, "192.0.2.0/24\tnetwork default") {
+		if !strings.Contains(output, test.wantNetwork) {
 			t.Fatalf("completion %v missing network CIDR:\n%s", test.args, output)
 		}
-		if test.wantContainer && !strings.Contains(output, "192.0.0.0/16\tcontainer default") {
+		if test.wantContainerCIDR != "" && !strings.Contains(output, test.wantContainerCIDR) {
 			t.Fatalf("completion %v missing container CIDR:\n%s", test.args, output)
 		}
-		if !test.wantContainer && strings.Contains(output, "192.0.0.0/16") {
-			t.Fatalf("completion %v included container CIDR:\n%s", test.args, output)
+		if strings.Contains(strings.Join(test.args, " "), "10.128.48") {
+			for _, want := range []string{
+				"10.128.48.0/23\tcontainer default",
+				"10.128.48.0/24\tnetwork default",
+				"10.128.49.0/24\tnetwork default",
+			} {
+				if !strings.Contains(output, want) {
+					t.Fatalf("completion %v missing related CIDR %q:\n%s", test.args, want, output)
+				}
+			}
 		}
 		if strings.Contains(output, "10.0.0.0/24") {
 			t.Fatalf("completion %v did not filter prefix:\n%s", test.args, output)
@@ -349,6 +362,48 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 		if !strings.Contains(output, ":4") {
 			t.Fatalf("completion %v did not disable file completion:\n%s", test.args, output)
 		}
+	}
+}
+
+func TestNetworkCompletionWithoutNetworkViewMergesCachedScopes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("network completion made live WAPI request: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	profile := writeCompletionProfile(t, app, server.URL)
+	now := time.Now()
+	if err := app.writeCachedNetworkViews(profile, []map[string]any{{"name": "default"}}, now); err != nil {
+		t.Fatalf("write network view cache: %v", err)
+	}
+	if err := app.writeCachedNetworkContainers(profile, "", []map[string]any{
+		{"network": "10.128.48.0/23", "network_view": "default"},
+	}, now); err != nil {
+		t.Fatalf("write unscoped container cache: %v", err)
+	}
+	if err := app.writeCachedNetworks(profile, "default", []map[string]any{
+		{"network": "10.128.48.0/24", "network_view": "default"},
+		{"network": "10.128.49.0/24", "network_view": "default"},
+	}, now); err != nil {
+		t.Fatalf("write per-view network cache: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	if err := app.Execute([]string{"__completeNoDesc", "dns", "next-ip", "10.128.48"}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{"10.128.48.0/23", "10.128.48.0/24", "10.128.49.0/24"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion missing %s:\n%s", want, output)
+		}
+	}
+	if !strings.Contains(output, ":4") {
+		t.Fatalf("completion did not disable file completion:\n%s", output)
 	}
 }
 
@@ -1370,6 +1425,10 @@ if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "next-ip" ] && 
   printf '%s\n' 10.128.48.0/23 10.128.48.0/24 10.128.49.0/24 :4
   exit 0
 fi
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "next-ip" ] && [ "$4" = "10.128.48" ]; then
+  printf '%s\n' 10.128.48.0/23 10.128.48.0/24 10.128.49.0/24 :4
+  exit 0
+fi
 printf ':4\n'
 `), 0o755); err != nil {
 		t.Fatalf("write fake ib: %v", err)
@@ -1393,6 +1452,23 @@ printf 'cidrs:%s\n' "${COMPREPLY[*]}"
 	output := string(raw)
 	if !strings.Contains(output, "cidrs:10.128.48.0/23 10.128.48.0/24 10.128.49.0/24") {
 		t.Fatalf("generated bash completion filtered hierarchy candidates:\n%s", output)
+	}
+
+	cmd = exec.Command("bash", "-lc", `source "$1"
+COMP_WORDS=("$2" "dns" "next-ip" "10.128.48")
+COMP_CWORD=3
+COMP_LINE="$2 dns next-ip 10.128.48"
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'prefix-cidrs:%s\n' "${COMPREPLY[*]}"
+`, "bash", scriptPath, fakeIB)
+	raw, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run bash prefix completion simulation: %v\n%s", err, raw)
+	}
+	output = string(raw)
+	if !strings.Contains(output, "prefix-cidrs:10.128.48.0/23 10.128.48.0/24 10.128.49.0/24") {
+		t.Fatalf("generated bash completion filtered prefix hierarchy candidates:\n%s", output)
 	}
 }
 

@@ -246,7 +246,7 @@ Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe') -ScriptBlock {
     $requestArgs += $wordToComplete
   }
   $allowNonPrefix = $false
-  if ($wordToComplete -like '*/*' -and $commandWords.Count -ge 3) {
+  if (($wordToComplete -like '*/*' -or $wordToComplete -like '*.*') -and $commandWords.Count -ge 3) {
     $commandPath = "$($commandWords[1]) $($commandWords[2])"
     if ($commandPath -in @('dns next-ip', 'net next-ip', 'net show')) {
       $allowNonPrefix = $true
@@ -255,9 +255,11 @@ Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe') -ScriptBlock {
 
   $oldActiveHelp = $env:IB_ACTIVE_HELP
   $oldShellPid = $env:IB_SHELL_PID
+  $oldCompletionCurrent = $env:IB_COMPLETION_CURRENT
   try {
     $env:IB_ACTIVE_HELP = '0'
     $env:IB_SHELL_PID = [string]$PID
+    $env:IB_COMPLETION_CURRENT = $wordToComplete
     $output = & $commandName @requestArgs 2>$null
   } finally {
     if ($null -eq $oldActiveHelp) {
@@ -269,6 +271,11 @@ Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe') -ScriptBlock {
       Remove-Item Env:\IB_SHELL_PID -ErrorAction SilentlyContinue
     } else {
       $env:IB_SHELL_PID = $oldShellPid
+    }
+    if ($null -eq $oldCompletionCurrent) {
+      Remove-Item Env:\IB_COMPLETION_CURRENT -ErrorAction SilentlyContinue
+    } else {
+      $env:IB_COMPLETION_CURRENT = $oldCompletionCurrent
     }
   }
 

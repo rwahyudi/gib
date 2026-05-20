@@ -141,10 +141,26 @@ func (a *App) editArgCompletion(cmd *cobra.Command, args []string, toComplete st
 
 func (a *App) networkArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	args = completionArgsBeforeCurrent(args, toComplete)
+	if strings.TrimSpace(toComplete) == "" && len(args) > 0 {
+		current := strings.TrimSpace(os.Getenv("IB_COMPLETION_CURRENT"))
+		if current != "" && args[len(args)-1] == current {
+			toComplete = current
+			args = args[:len(args)-1]
+		}
+	}
+	if strings.TrimSpace(toComplete) == "" && len(args) == 1 && partialIPv4CompletionArg(args[0]) {
+		toComplete = args[0]
+		args = nil
+	}
 	if len(args) > 0 || strings.HasPrefix(strings.TrimSpace(toComplete), "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
 	return a.completeNetworkCIDRs(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func partialIPv4CompletionArg(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && strings.Contains(value, ".") && !strings.Contains(value, "/") && !strings.HasPrefix(value, "-")
 }
 
 func completionArgsBeforeCurrent(args []string, toComplete string) []string {
@@ -845,15 +861,71 @@ func networkCompletionIncludesContainers(cmd *cobra.Command) bool {
 
 func (a *App) cachedNetworkCIDRsForCompletion(profile Profile, networkView string, includeContainers bool) ([]map[string]any, error) {
 	networkView = strings.TrimSpace(networkView)
-	networkEntry, err := a.readCachedNetworks(profile, networkView)
+	if networkView == "" {
+		return a.cachedNetworkCIDRsForCompletionAllViews(profile, includeContainers)
+	}
+	return a.cachedNetworkCIDRsForCompletionScope(profile, networkView, includeContainers)
+}
+
+func (a *App) cachedNetworkCIDRsForCompletionAllViews(profile Profile, includeContainers bool) ([]map[string]any, error) {
+	rows, found, err := a.cachedNetworkCIDRsForCompletionScopeFound(profile, "", includeContainers)
 	if err != nil {
 		return nil, err
+	}
+
+	viewEntry, err := a.readCachedNetworkViews(profile)
+	if err != nil {
+		if found {
+			return dedupeNetworkObjectRows(rows), nil
+		}
+		return nil, err
+	}
+	prefetchEnabled := a.completionCachePrefetchEnabled()
+	if prefetchEnabled && (!viewEntry.CacheFound || !a.cacheEntryFresh(viewEntry, time.Now())) {
+		a.startNetCacheRefreshAsync(profile, netCacheKindViews, "", "")
+	}
+	if !viewEntry.CacheFound {
+		if found {
+			return dedupeNetworkObjectRows(rows), nil
+		}
+		return nil, nil
+	}
+
+	for _, viewName := range networkViewNames(viewEntry.Rows) {
+		viewRows, viewFound, err := a.cachedNetworkCIDRsForCompletionScopeFound(profile, viewName, includeContainers)
+		if err != nil {
+			if !found {
+				return nil, err
+			}
+			continue
+		}
+		if viewFound {
+			found = true
+			rows = append(rows, viewRows...)
+		}
+	}
+	if !found {
+		return nil, nil
+	}
+	return dedupeNetworkObjectRows(rows), nil
+}
+
+func (a *App) cachedNetworkCIDRsForCompletionScope(profile Profile, networkView string, includeContainers bool) ([]map[string]any, error) {
+	rows, _, err := a.cachedNetworkCIDRsForCompletionScopeFound(profile, networkView, includeContainers)
+	return rows, err
+}
+
+func (a *App) cachedNetworkCIDRsForCompletionScopeFound(profile Profile, networkView string, includeContainers bool) ([]map[string]any, bool, error) {
+	networkView = strings.TrimSpace(networkView)
+	networkEntry, err := a.readCachedNetworks(profile, networkView)
+	if err != nil {
+		return nil, false, err
 	}
 	containerEntry := cachedPayload{}
 	if includeContainers {
 		containerEntry, err = a.readCachedNetworkContainers(profile, networkView)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	prefetchEnabled := a.completionCachePrefetchEnabled()
@@ -866,7 +938,7 @@ func (a *App) cachedNetworkCIDRsForCompletion(profile Profile, networkView strin
 		}
 	}
 	if !networkEntry.CacheFound && (!includeContainers || !containerEntry.CacheFound) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if !networkEntry.CacheFound {
 		networkEntry.Rows = nil
@@ -874,7 +946,7 @@ func (a *App) cachedNetworkCIDRsForCompletion(profile Profile, networkView strin
 	if !containerEntry.CacheFound {
 		containerEntry.Rows = nil
 	}
-	return networkObjectRows(networkEntry.Rows, containerEntry.Rows), nil
+	return networkObjectRows(networkEntry.Rows, containerEntry.Rows), true, nil
 }
 
 func (a *App) prefetchNetworkCacheForCompletion(profile Profile, networkView string) {
@@ -1075,6 +1147,7 @@ func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string
 			}
 		}
 	}
+	prefixRoots := networkCIDRPrefixCompletionRoots(networks, prefix)
 	seen := map[string]bool{}
 	rows := make([]string, 0, len(networks))
 	for _, network := range networks {
@@ -1082,7 +1155,10 @@ func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string
 		if cidr == "" || seen[cidr] {
 			continue
 		}
-		if prefix != "" && !strings.HasPrefix(strings.ToLower(cidr), prefix) && !networkCIDRHierarchyCompletionMatch(targetPrefix, targetOK, targetViews, network) {
+		if prefix != "" &&
+			!strings.HasPrefix(strings.ToLower(cidr), prefix) &&
+			!networkCIDRHierarchyCompletionMatch(targetPrefix, targetOK, targetViews, network) &&
+			!networkCIDRPrefixHierarchyCompletionMatch(prefixRoots, network) {
 			continue
 		}
 		seen[cidr] = true
@@ -1104,6 +1180,48 @@ func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string
 		return strings.ToLower(recordCompletionName(rows[i])) < strings.ToLower(recordCompletionName(rows[j]))
 	})
 	return rows
+}
+
+func networkCIDRPrefixCompletionRoots(networks []map[string]any, prefix string) map[string][]netip.Prefix {
+	roots := map[string][]netip.Prefix{}
+	if !networkCIDRPrefixHierarchyExpansionEnabled(prefix) {
+		return roots
+	}
+	for _, network := range networks {
+		cidr := cleanString(network["network"])
+		if cidr == "" || !strings.HasPrefix(strings.ToLower(cidr), prefix) {
+			continue
+		}
+		objectPrefix, ok := parseIPv4Prefix(cidr)
+		if !ok {
+			continue
+		}
+		view := cleanString(network["network_view"])
+		roots[view] = append(roots[view], objectPrefix)
+	}
+	return roots
+}
+
+func networkCIDRPrefixHierarchyExpansionEnabled(prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	return prefix != "" && (strings.Contains(prefix, "/") || strings.Count(prefix, ".") >= 2)
+}
+
+func networkCIDRPrefixHierarchyCompletionMatch(roots map[string][]netip.Prefix, network map[string]any) bool {
+	viewRoots := roots[cleanString(network["network_view"])]
+	if len(viewRoots) == 0 {
+		return false
+	}
+	objectPrefix, ok := parseIPv4Prefix(cleanString(network["network"]))
+	if !ok {
+		return false
+	}
+	for _, root := range viewRoots {
+		if objectPrefix != root && objectPrefix.Bits() > root.Bits() && root.Contains(objectPrefix.Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 func networkCIDRHierarchyCompletionMatch(targetPrefix netip.Prefix, targetOK bool, targetViews map[string]bool, network map[string]any) bool {
@@ -1176,7 +1294,7 @@ __ib_dynamic_completion()
         return 0
     fi
 
-    out=$(IB_ACTIVE_HELP=0 IB_SHELL_PID=$$ "${cmd}" __completeNoDesc "${args[@]}" 2>/dev/null) || return 0
+    out=$(IB_ACTIVE_HELP=0 IB_SHELL_PID=$$ IB_COMPLETION_CURRENT="${cur}" "${cmd}" __completeNoDesc "${args[@]}" 2>/dev/null) || return 0
 
     local lines=()
     while IFS='' read -r line; do
@@ -1214,7 +1332,7 @@ __ib_dynamic_completion()
         value="${cur#*=}"
     fi
     allow_non_prefix=0
-    if [[ "${value}" == */* ]]; then
+    if [[ "${value}" == */* || "${value}" == *.* ]]; then
         case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in
             "dns next-ip"|"net next-ip"|"net show")
                 allow_non_prefix=1
