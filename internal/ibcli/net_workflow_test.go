@@ -130,6 +130,57 @@ func TestNetListIncludesNetworksAndContainers(t *testing.T) {
 	}
 }
 
+func TestNetSearchIncludesParentContainerForMatchingNetworkCIDR(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "10.129.42.0/23", "network_view": "default", "comment": "SAP HANA DR"},
+					{"network": "10.129.46.0/23", "network_view": "default", "comment": "SAP HANA Prod"},
+				},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "10.129.0.0/16", "network_view": "default", "comment": "Servers - Internal Only"},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "search", "129.4"}); err != nil {
+		t.Fatalf("net search: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 3 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	want := []struct {
+		itemType string
+		network  string
+	}{
+		{ipamTypeContainer, "10.129.0.0/16"},
+		{ipamTypeNetwork, "10.129.42.0/23"},
+		{ipamTypeNetwork, "10.129.46.0/23"},
+	}
+	for index, expected := range want {
+		if cleanString(rows[index]["type"]) != expected.itemType || cleanString(rows[index]["network"]) != expected.network {
+			t.Fatalf("row %d = %#v, want %s %s", index, rows[index], expected.itemType, expected.network)
+		}
+	}
+}
+
 func TestNetListUsesFreshCache(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("net list should use fresh cache, got %s %s", r.Method, r.URL.Path)

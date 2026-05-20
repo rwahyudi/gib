@@ -463,6 +463,7 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 		return networks
 	}
 	filtered := make([]map[string]any, 0, len(networks))
+	seen := map[string]bool{}
 	for _, network := range networks {
 		values := []string{
 			cleanString(network["type"]),
@@ -471,10 +472,57 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 			cleanString(network["comment"]),
 		}
 		if searchValuesMatch(values, search, false, false) {
-			filtered = append(filtered, network)
+			appendNetworkSearchRow(&filtered, seen, network)
+			if shouldIncludeParentContainerForSearch(network, search) {
+				if parent, ok := nearestContainerForNetwork(network, networks); ok {
+					appendNetworkSearchRow(&filtered, seen, parent)
+				}
+			}
 		}
 	}
 	return filtered
+}
+
+func appendNetworkSearchRow(rows *[]map[string]any, seen map[string]bool, row map[string]any) {
+	key := strings.Join([]string{
+		cleanString(row["type"]),
+		cleanString(row["network_view"]),
+		cleanString(row["network"]),
+		cleanString(row["_ref"]),
+	}, "\x00")
+	if seen[key] {
+		return
+	}
+	seen[key] = true
+	*rows = append(*rows, row)
+}
+
+func shouldIncludeParentContainerForSearch(network map[string]any, search string) bool {
+	return cleanString(network["type"]) == ipamTypeNetwork && textMatches(cleanString(network["network"]), search, false, false)
+}
+
+func nearestContainerForNetwork(network map[string]any, objects []map[string]any) (map[string]any, bool) {
+	networkPrefix, ok := parseIPv4Prefix(cleanString(network["network"]))
+	if !ok {
+		return nil, false
+	}
+	networkView := cleanString(network["network_view"])
+	var best map[string]any
+	var bestPrefix netip.Prefix
+	for _, object := range objects {
+		if cleanString(object["type"]) != ipamTypeContainer || cleanString(object["network_view"]) != networkView {
+			continue
+		}
+		containerPrefix, ok := parseIPv4Prefix(cleanString(object["network"]))
+		if !ok || containerPrefix.Bits() > networkPrefix.Bits() || !containerPrefix.Contains(networkPrefix.Addr()) {
+			continue
+		}
+		if best == nil || containerPrefix.Bits() > bestPrefix.Bits() {
+			best = object
+			bestPrefix = containerPrefix
+		}
+	}
+	return best, best != nil
 }
 
 func networkObjectRows(networks []map[string]any, containers []map[string]any) []map[string]any {
