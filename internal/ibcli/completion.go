@@ -98,7 +98,7 @@ func createArgCompletion(cmd *cobra.Command, args []string, toComplete string) (
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
 	switch {
-	case len(args) == 0 && strings.TrimSpace(toComplete) == "":
+	case len(args) == 0:
 		return recordTypeCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
 	case len(args) == 1:
 		return recordTypeCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp

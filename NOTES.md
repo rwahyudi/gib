@@ -118,7 +118,7 @@ When WAPI returns HTML or another non-JSON payload with a successful HTTP status
 
 For Bash, `ib <tab><tab>` should complete root commands such as `config`, `dns`, and `help`. If it does not, regenerate and reload the shell integration with `ib config completion bash > ~/.ib-complete.bash` and start a new shell or run `. ~/.ib-complete.bash`.
 
-For Bash, `ib dns create <tab><tab>` completes supported record types (`a`, `aaaa`, `cname`, `host`, `mx`, `ptr`, `srv`, and `txt`) from the empty first argument. This behavior lives in the generated Bash completion wrapper and Cobra completion path, so regenerate and reload `~/.ib-complete.bash` after changing either side.
+For Bash, `ib dns create <tab><tab>` completes supported record types (`a`, `aaaa`, `cname`, `host`, `mx`, `ptr`, `srv`, and `txt`) from the first argument, including prefix forms such as `ib dns create p<tab>` to complete `ptr`. This behavior lives in the generated Bash completion wrapper and Cobra completion path, so regenerate and reload `~/.ib-complete.bash` after changing either side.
 
 Global options still complete while using `ib dns create`: `ib dns create -<tab>` offers options such as `--output`, `-o`, and `--help`, and output format values complete after `--output` or `-o`.
 

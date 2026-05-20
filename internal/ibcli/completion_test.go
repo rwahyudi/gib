@@ -652,19 +652,22 @@ func TestDNSCreateCompletesRecordTypesAtEmptyStart(t *testing.T) {
 	}
 }
 
-func TestDNSCreateDoesNotCompleteRecordTypesForName(t *testing.T) {
+func TestDNSCreateCompletesRecordTypesByPrefixAtStart(t *testing.T) {
 	app := testApp(t)
 	var stdout bytes.Buffer
 	app.Stdout = &stdout
 	app.Stderr = &bytes.Buffer{}
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 
-	if err := app.Execute([]string{"__complete", "dns", "create", "h"}); err != nil {
+	if err := app.Execute([]string{"__complete", "dns", "create", "p"}); err != nil {
 		t.Fatalf("completion: %v", err)
 	}
 	output := stdout.String()
+	if !strings.Contains(output, "ptr\treverse pointer record") {
+		t.Fatalf("completion output missing ptr record type:\n%s", output)
+	}
 	if strings.Contains(output, "host\thost record") {
-		t.Fatalf("name completion unexpectedly included record types:\n%s", output)
+		t.Fatalf("completion output did not filter by prefix:\n%s", output)
 	}
 	if !strings.Contains(output, ":4") {
 		t.Fatalf("completion did not disable file completion:\n%s", output)
@@ -1485,6 +1488,14 @@ if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [
   printf '%s\n' a aaaa cname host mx ptr srv txt :4
   exit 0
 fi
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [ "$4" = "p" ]; then
+  printf '%s\n' ptr :4
+  exit 0
+fi
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [ "$4" = "c" ]; then
+  printf '%s\n' cname :4
+  exit 0
+fi
 printf ':4\n'
 `), 0o755); err != nil {
 		t.Fatalf("write fake ib: %v", err)
@@ -1511,6 +1522,30 @@ printf 'types:%s\n' "${COMPREPLY[*]}"
 	}
 	if !strings.Contains(output, "types:a aaaa cname host mx ptr srv txt") {
 		t.Fatalf("create name slot missing record type completions:\n%s", output)
+	}
+
+	cmd = exec.Command("bash", "-lc", `source "$1"
+COMP_WORDS=("$2" "dns" "create" "p")
+COMP_CWORD=3
+COMP_LINE="$2 dns create p"
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'p-types:%s\n' "${COMPREPLY[*]}"
+COMPREPLY=()
+COMP_WORDS=("$2" "dns" "create" "c")
+COMP_CWORD=3
+COMP_LINE="$2 dns create c"
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'c-types:%s\n' "${COMPREPLY[*]}"
+`, "bash", scriptPath, fakeIB)
+	raw, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run bash prefix completion simulation: %v\n%s", err, raw)
+	}
+	output = string(raw)
+	if !strings.Contains(output, "p-types:ptr") || !strings.Contains(output, "c-types:cname") {
+		t.Fatalf("create prefix completion missing record types:\n%s", output)
 	}
 }
 
