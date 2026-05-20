@@ -299,7 +299,7 @@ func (a *App) netSearchCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.runNetList(args[0], networkView, netSort, columns)
+			return a.runNetSearch(args[0], networkView, netSort, columns)
 		},
 	}
 	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")

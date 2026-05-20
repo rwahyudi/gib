@@ -64,6 +64,14 @@ func (a *App) runNetViewList() error {
 }
 
 func (a *App) runNetList(search string, networkView string, option NetSort, columns []string) error {
+	return a.runNetObjectList(search, networkView, option, columns)
+}
+
+func (a *App) runNetSearch(search string, networkView string, option NetSort, columns []string) error {
+	return a.runNetObjectList(search, networkView, option, columns)
+}
+
+func (a *App) runNetObjectList(search string, networkView string, option NetSort, columns []string) error {
 	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
@@ -92,20 +100,43 @@ func (a *App) cachedNetworkObjectsForList(profile Profile, client *WapiClient, n
 		return a.cachedNetworkObjectsForView(profile, client, networkView)
 	}
 
+	var rows []map[string]any
+	var fallbackErr error
+	unscopedRows, err := a.cachedNetworkObjectsForView(profile, client, "")
+	if err == nil {
+		rows = append(rows, unscopedRows...)
+	} else {
+		fallbackErr = err
+	}
+
 	views, err := a.cachedNetworkViews(profile, client)
 	if err != nil {
-		return a.cachedNetworkObjectsForView(profile, client, "")
+		if len(rows) > 0 {
+			return dedupeNetworkObjectRows(rows), nil
+		}
+		if fallbackErr != nil {
+			return nil, fallbackErr
+		}
+		return nil, err
 	}
 	viewNames := networkViewNames(views)
 	if len(viewNames) == 0 {
-		return a.cachedNetworkObjectsForView(profile, client, "")
+		if len(rows) > 0 {
+			return dedupeNetworkObjectRows(rows), nil
+		}
+		if fallbackErr != nil {
+			return nil, fallbackErr
+		}
+		return nil, nil
 	}
 
-	rows := make([]map[string]any, 0)
 	for _, viewName := range viewNames {
 		viewRows, err := a.cachedNetworkObjectsForView(profile, client, viewName)
 		if err != nil {
-			return nil, err
+			if len(rows) == 0 {
+				return nil, err
+			}
+			continue
 		}
 		rows = append(rows, viewRows...)
 	}
@@ -516,17 +547,20 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 }
 
 func appendNetworkSearchRow(rows *[]map[string]any, seen map[string]bool, row map[string]any) {
-	key := strings.Join([]string{
-		cleanString(row["type"]),
-		cleanString(row["network_view"]),
-		cleanString(row["network"]),
-		cleanString(row["_ref"]),
-	}, "\x00")
+	key := networkObjectKey(row)
 	if seen[key] {
 		return
 	}
 	seen[key] = true
 	*rows = append(*rows, row)
+}
+
+func networkObjectKey(row map[string]any) string {
+	return strings.Join([]string{
+		cleanString(row["type"]),
+		cleanString(row["network_view"]),
+		cleanString(row["network"]),
+	}, "\x00")
 }
 
 func shouldExpandNetworkHierarchyForSearch(network map[string]any, search string) bool {
