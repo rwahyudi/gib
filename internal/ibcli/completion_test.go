@@ -1561,6 +1561,14 @@ if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "next-ip" ] && 
   printf '%s\n' 10.128.48.0/23 10.128.48.0/24 10.128.49.0/24 :4
   exit 0
 fi
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "next-ip" ] && [ "$4" = "10.128.4" ]; then
+  printf '%s\n' 10.128.48.0/23 10.128.48.0/24 10.128.49.0/24 :4
+  exit 0
+fi
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "next-ip" ] && [ "$4" = "10.128.49" ]; then
+  printf '%s\n' 10.128.48.0/23 10.128.48.0/24 10.128.49.0/24 :4
+  exit 0
+fi
 printf ':4\n'
 `), 0o755); err != nil {
 		t.Fatalf("write fake ib: %v", err)
@@ -1574,6 +1582,7 @@ COMP_WORDS=("$2" "dns" "next-ip" "10.128.48.0/23")
 COMP_CWORD=3
 COMP_LINE="$2 dns next-ip 10.128.48.0/23"
 COMP_POINT=${#COMP_LINE}
+COMP_TYPE=63
 __ib_dynamic_completion
 printf 'cidrs:%s\n' "${COMPREPLY[*]}"
 `, "bash", scriptPath, fakeIB)
@@ -1587,10 +1596,11 @@ printf 'cidrs:%s\n' "${COMPREPLY[*]}"
 	}
 
 	cmd = exec.Command("bash", "-lc", `source "$1"
-COMP_WORDS=("$2" "dns" "next-ip" "10.128.48")
+COMP_WORDS=("$2" "dns" "next-ip" "10.128.4")
 COMP_CWORD=3
-COMP_LINE="$2 dns next-ip 10.128.48"
+COMP_LINE="$2 dns next-ip 10.128.4"
 COMP_POINT=${#COMP_LINE}
+COMP_TYPE=9
 __ib_dynamic_completion
 printf 'prefix-cidrs:%s\n' "${COMPREPLY[*]}"
 `, "bash", scriptPath, fakeIB)
@@ -1601,6 +1611,24 @@ printf 'prefix-cidrs:%s\n' "${COMPREPLY[*]}"
 	output = string(raw)
 	if !strings.Contains(output, "prefix-cidrs:10.128.48.0/23 10.128.48.0/24 10.128.49.0/24") {
 		t.Fatalf("generated bash completion filtered prefix hierarchy candidates:\n%s", output)
+	}
+
+	cmd = exec.Command("bash", "-lc", `source "$1"
+COMP_WORDS=("$2" "dns" "next-ip" "10.128.49")
+COMP_CWORD=3
+COMP_LINE="$2 dns next-ip 10.128.49"
+COMP_POINT=${#COMP_LINE}
+COMP_TYPE=9
+__ib_dynamic_completion
+printf 'stable-cidrs:%s\n' "${COMPREPLY[*]}"
+`, "bash", scriptPath, fakeIB)
+	raw, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run bash stable completion simulation: %v\n%s", err, raw)
+	}
+	output = string(raw)
+	if !strings.Contains(output, "stable-cidrs:10.128.49.0/24") || strings.Contains(output, "10.128.48.0/23") || strings.Contains(output, "10.128.48.0/24") {
+		t.Fatalf("generated bash completion can backtrack typed prefix:\n%s", output)
 	}
 }
 

@@ -1503,7 +1503,7 @@ __ib_create_usage_on_second_tab()
 
 __ib_dynamic_completion()
 {
-    local cur cmd out line directive comp value flag_prefix allow_non_prefix
+    local cur cmd out line directive comp value flag_prefix allow_non_prefix list_only
     COMPREPLY=()
 
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -1564,10 +1564,18 @@ __ib_dynamic_completion()
                 ;;
         esac
     fi
+    list_only=0
+    case "${COMP_TYPE:-}" in
+        33|63|64)
+            list_only=1
+            ;;
+    esac
 
     for comp in "${lines[@]}"; do
         [[ -z "${comp}" ]] && continue
-        if [[ "${allow_non_prefix}" -eq 1 || "${comp}" == "${value}"* ]]; then
+        if [[ "${comp}" == "${value}"* ]]; then
+            COMPREPLY+=("${flag_prefix}${comp}")
+        elif [[ "${allow_non_prefix}" -eq 1 && "${list_only}" -eq 1 ]]; then
             COMPREPLY+=("${flag_prefix}${comp}")
         fi
     done
