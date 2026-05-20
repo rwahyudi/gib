@@ -245,6 +245,13 @@ Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe') -ScriptBlock {
   if ($wordToComplete -eq '' -or $requestArgs.Count -eq 1 -or $requestArgs[-1] -ne $wordToComplete) {
     $requestArgs += $wordToComplete
   }
+  $allowNonPrefix = $false
+  if ($wordToComplete -like '*/*' -and $commandWords.Count -ge 3) {
+    $commandPath = "$($commandWords[1]) $($commandWords[2])"
+    if ($commandPath -in @('dns next-ip', 'net next-ip', 'net show')) {
+      $allowNonPrefix = $true
+    }
+  }
 
   $oldActiveHelp = $env:IB_ACTIVE_HELP
   $oldShellPid = $env:IB_SHELL_PID
@@ -278,7 +285,7 @@ Register-ArgumentCompleter -Native -CommandName @('ib', 'ib.exe') -ScriptBlock {
     if ($parts.Count -gt 1 -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
       $tooltip = $parts[1]
     }
-    if ($wordToComplete -eq '' -or $value.StartsWith($wordToComplete, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($allowNonPrefix -or $wordToComplete -eq '' -or $value.StartsWith($wordToComplete, [System.StringComparison]::OrdinalIgnoreCase)) {
       [System.Management.Automation.CompletionResult]::new($value, $value, 'ParameterValue', $tooltip)
     }
   }

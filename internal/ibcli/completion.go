@@ -2,6 +2,7 @@ package ibcli
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"sort"
 	"strings"
@@ -1064,6 +1065,16 @@ func zoneNamesFromRows(zones []map[string]any) []string {
 
 func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string {
 	prefix := strings.ToLower(strings.TrimSpace(toComplete))
+	targetPrefix, targetOK := parseIPv4Prefix(prefix)
+	targetViews := map[string]bool{}
+	if targetOK {
+		for _, network := range networks {
+			objectPrefix, ok := parseIPv4Prefix(cleanString(network["network"]))
+			if ok && objectPrefix == targetPrefix {
+				targetViews[cleanString(network["network_view"])] = true
+			}
+		}
+	}
 	seen := map[string]bool{}
 	rows := make([]string, 0, len(networks))
 	for _, network := range networks {
@@ -1071,7 +1082,7 @@ func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string
 		if cidr == "" || seen[cidr] {
 			continue
 		}
-		if prefix != "" && !strings.HasPrefix(strings.ToLower(cidr), prefix) {
+		if prefix != "" && !strings.HasPrefix(strings.ToLower(cidr), prefix) && !networkCIDRHierarchyCompletionMatch(targetPrefix, targetOK, targetViews, network) {
 			continue
 		}
 		seen[cidr] = true
@@ -1093,6 +1104,17 @@ func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string
 		return strings.ToLower(recordCompletionName(rows[i])) < strings.ToLower(recordCompletionName(rows[j]))
 	})
 	return rows
+}
+
+func networkCIDRHierarchyCompletionMatch(targetPrefix netip.Prefix, targetOK bool, targetViews map[string]bool, network map[string]any) bool {
+	if !targetOK || len(targetViews) == 0 || !targetViews[cleanString(network["network_view"])] {
+		return false
+	}
+	objectPrefix, ok := parseIPv4Prefix(cleanString(network["network"]))
+	if !ok || objectPrefix == targetPrefix {
+		return false
+	}
+	return objectPrefix.Bits() > targetPrefix.Bits() && targetPrefix.Contains(objectPrefix.Addr())
 }
 
 func matchingZoneNames(zones []string, toComplete string) []string {
@@ -1138,7 +1160,7 @@ __ib_create_usage_on_second_tab()
 
 __ib_dynamic_completion()
 {
-    local cur cmd out line directive comp value flag_prefix
+    local cur cmd out line directive comp value flag_prefix allow_non_prefix
     COMPREPLY=()
 
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -1191,10 +1213,18 @@ __ib_dynamic_completion()
         flag_prefix="${cur%%=*}="
         value="${cur#*=}"
     fi
+    allow_non_prefix=0
+    if [[ "${value}" == */* ]]; then
+        case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in
+            "dns next-ip"|"net next-ip"|"net show")
+                allow_non_prefix=1
+                ;;
+        esac
+    fi
 
     for comp in "${lines[@]}"; do
         [[ -z "${comp}" ]] && continue
-        if [[ "${comp}" == "${value}"* ]]; then
+        if [[ "${allow_non_prefix}" -eq 1 || "${comp}" == "${value}"* ]]; then
             COMPREPLY+=("${flag_prefix}${comp}")
         fi
     done

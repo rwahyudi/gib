@@ -307,6 +307,7 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 		t.Fatalf("write network cache: %v", err)
 	}
 	if err := app.writeCachedNetworkContainers(profile, "default", []map[string]any{
+		{"network": "192.0.0.0/8", "network_view": "default"},
 		{"network": "192.0.0.0/16", "network_view": "default"},
 	}, time.Now()); err != nil {
 		t.Fatalf("write container cache: %v", err)
@@ -321,6 +322,7 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 		wantContainer bool
 	}{
 		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "192"}, wantContainer: true},
+		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "192.0.0.0/16"}, wantContainer: true},
 		{args: []string{"__complete", "net", "next-ip", "--network-view", "default", "192"}, wantContainer: true},
 		{args: []string{"__complete", "net", "show", "--network-view", "default", "192"}, wantContainer: true},
 	} {
@@ -340,6 +342,9 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 		}
 		if strings.Contains(output, "10.0.0.0/24") {
 			t.Fatalf("completion %v did not filter prefix:\n%s", test.args, output)
+		}
+		if strings.Contains(strings.Join(test.args, " "), "192.0.0.0/16") && strings.Contains(output, "192.0.0.0/8") {
+			t.Fatalf("completion %v included ancestor CIDR:\n%s", test.args, output)
 		}
 		if !strings.Contains(output, ":4") {
 			t.Fatalf("completion %v did not disable file completion:\n%s", test.args, output)
@@ -1351,6 +1356,43 @@ printf 'outputs:%s\n' "${COMPREPLY[*]}"
 		if !strings.Contains(output, want) {
 			t.Fatalf("generated bash completion missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestDynamicBashCompletionPreservesHierarchyCandidates(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	dir := t.TempDir()
+	fakeIB := filepath.Join(dir, "ib")
+	if err := os.WriteFile(fakeIB, []byte(`#!/bin/sh
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "next-ip" ] && [ "$4" = "10.128.48.0/23" ]; then
+  printf '%s\n' 10.128.48.0/23 10.128.48.0/24 10.128.49.0/24 :4
+  exit 0
+fi
+printf ':4\n'
+`), 0o755); err != nil {
+		t.Fatalf("write fake ib: %v", err)
+	}
+	scriptPath := filepath.Join(dir, "ib-complete.bash")
+	if err := os.WriteFile(scriptPath, []byte(dynamicBashCompletionScript()), 0o644); err != nil {
+		t.Fatalf("write completion script: %v", err)
+	}
+	cmd := exec.Command("bash", "-lc", `source "$1"
+COMP_WORDS=("$2" "dns" "next-ip" "10.128.48.0/23")
+COMP_CWORD=3
+COMP_LINE="$2 dns next-ip 10.128.48.0/23"
+COMP_POINT=${#COMP_LINE}
+__ib_dynamic_completion
+printf 'cidrs:%s\n' "${COMPREPLY[*]}"
+`, "bash", scriptPath, fakeIB)
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run bash completion simulation: %v\n%s", err, raw)
+	}
+	output := string(raw)
+	if !strings.Contains(output, "cidrs:10.128.48.0/23 10.128.48.0/24 10.128.49.0/24") {
+		t.Fatalf("generated bash completion filtered hierarchy candidates:\n%s", output)
 	}
 }
 
