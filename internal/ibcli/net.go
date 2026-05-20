@@ -530,19 +530,22 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 	filtered := make([]map[string]any, 0, len(networks))
 	seen := map[string]bool{}
 	for _, network := range networks {
+		cidr := cleanString(network["network"])
 		values := []string{
 			cleanString(network["type"]),
-			cleanString(network["network"]),
+			cidr,
 			cleanString(network["network_view"]),
 			cleanString(network["comment"]),
 		}
-		if searchValuesMatch(values, search, false, false) {
+		cidrMatches := networkCIDRPrefixHierarchyExpansionEnabled(search) && networkCIDRContainsSearchPrefix(cidr, search)
+		if searchValuesMatch(values, search, false, false) || cidrMatches {
 			appendNetworkSearchRow(&filtered, seen, network)
 			if shouldExpandNetworkHierarchyForSearch(network, search) {
 				appendRelatedNetworkSearchRows(&filtered, seen, network, networks)
 			}
 		}
 	}
+	appendDerivedNetworkSearchRows(&filtered, seen, networks, search)
 	return filtered
 }
 
@@ -584,6 +587,18 @@ func appendRelatedNetworkSearchRows(rows *[]map[string]any, seen map[string]bool
 		if networkPrefixesRelated(targetPrefix, objectPrefix) {
 			appendNetworkSearchRow(rows, seen, object)
 		}
+	}
+}
+
+func appendDerivedNetworkSearchRows(rows *[]map[string]any, seen map[string]bool, objects []map[string]any, search string) {
+	roots := networkCIDRPrefixCompletionRoots(objects, strings.ToLower(strings.TrimSpace(search)))
+	for _, derived := range derivedNetworkCIDRCompletionRows(roots, search) {
+		appendNetworkSearchRow(rows, seen, map[string]any{
+			"type":         ipamTypeNetwork,
+			"network":      derived.cidr,
+			"network_view": derived.view,
+			"comment":      "derived /24 from " + derived.source,
+		})
 	}
 }
 

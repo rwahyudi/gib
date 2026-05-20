@@ -422,6 +422,52 @@ func TestNetSearchIncludesChildObjectsForMatchingParentCIDR(t *testing.T) {
 	}
 }
 
+func TestNetSearchDerivesChildCIDRsFromContainingParentPrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("net search should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedNetworks(profile, "default", []map[string]any{{
+		"_ref":         "network/parent",
+		"network":      "10.128.48.0/23",
+		"network_view": "default",
+		"comment":      "Servers",
+	}}, now); err != nil {
+		t.Fatalf("write network cache: %v", err)
+	}
+	if err := app.writeCachedNetworkContainers(profile, "default", nil, now); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "net", "search", "10.128.49", "--network-view", "default"}); err != nil {
+		t.Fatalf("net search: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 3 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	want := []struct {
+		network string
+		comment string
+	}{
+		{"10.128.48.0/23", "Servers"},
+		{"10.128.48.0/24", "derived /24 from 10.128.48.0/23"},
+		{"10.128.49.0/24", "derived /24 from 10.128.48.0/23"},
+	}
+	for index, expected := range want {
+		if cleanString(rows[index]["type"]) != ipamTypeNetwork || cleanString(rows[index]["network"]) != expected.network || cleanString(rows[index]["comment"]) != expected.comment {
+			t.Fatalf("row %d = %#v, want network %s %s", index, rows[index], expected.network, expected.comment)
+		}
+	}
+}
+
 func TestNetListUsesFreshCache(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("net list should use fresh cache, got %s %s", r.Method, r.URL.Path)

@@ -41,6 +41,10 @@ missing or already outside the stale window. Before doing that foreground work,
 it waits up to `max_background_worker_wait` seconds for an active refresh of the
 same cache scope to finish.
 
+For IPAM list/search, cached parent CIDRs can also produce direct `/24` child
+rows when the child objects are not present in cache, keeping split network
+candidates visible without a foreground Infoblox lookup.
+
 Shell completion never performs a foreground Infoblox refresh for zone names,
 record names, or IPAM network CIDRs. With `completion_cache_prefetch = true`,
 DNS completion checks the current DNS view and zone, and network CIDR completion

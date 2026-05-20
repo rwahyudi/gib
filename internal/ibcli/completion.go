@@ -1156,7 +1156,7 @@ func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string
 			continue
 		}
 		if prefix != "" &&
-			!strings.HasPrefix(strings.ToLower(cidr), prefix) &&
+			!networkCIDRMatchesCompletionPrefix(cidr, prefix) &&
 			!networkCIDRHierarchyCompletionMatch(targetPrefix, targetOK, targetViews, network) &&
 			!networkCIDRPrefixHierarchyCompletionMatch(prefixRoots, network) {
 			continue
@@ -1175,6 +1175,8 @@ func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string
 type networkCIDRCompletionRow struct {
 	cidr        string
 	description string
+	view        string
+	source      string
 }
 
 func appendNetworkCIDRCompletionRow(rows *[]string, seen map[string]bool, cidr string, description string) {
@@ -1208,7 +1210,7 @@ func networkCIDRPrefixCompletionRoots(networks []map[string]any, prefix string) 
 	}
 	for _, network := range networks {
 		cidr := cleanString(network["network"])
-		if cidr == "" || !strings.HasPrefix(strings.ToLower(cidr), prefix) {
+		if cidr == "" || !networkCIDRMatchesCompletionPrefix(cidr, prefix) {
 			continue
 		}
 		objectPrefix, ok := parseIPv4Prefix(cidr)
@@ -1221,29 +1223,99 @@ func networkCIDRPrefixCompletionRoots(networks []map[string]any, prefix string) 
 	return roots
 }
 
+func networkCIDRMatchesCompletionPrefix(cidr string, prefix string) bool {
+	cidr = strings.TrimSpace(cidr)
+	prefix = strings.ToLower(strings.TrimSpace(prefix))
+	if cidr == "" || prefix == "" {
+		return false
+	}
+	if strings.HasPrefix(strings.ToLower(cidr), prefix) {
+		return true
+	}
+	return networkCIDRContainsSearchPrefixWithinDerivedLimit(cidr, prefix)
+}
+
+func networkCIDRContainsSearchPrefixWithinDerivedLimit(cidr string, prefix string) bool {
+	searchPrefix, ok := ipv4CompletionSearchPrefix(prefix)
+	if !ok {
+		return false
+	}
+	objectPrefix, ok := parseIPv4Prefix(cidr)
+	if !ok || objectPrefix.Bits() >= searchPrefix.Bits() {
+		return false
+	}
+	return objectPrefix.Contains(searchPrefix.Addr()) && canDeriveNetworkCIDRChildren(objectPrefix)
+}
+
+func networkCIDRContainsSearchPrefix(cidr string, prefix string) bool {
+	searchPrefix, ok := ipv4CompletionSearchPrefix(prefix)
+	if !ok {
+		return false
+	}
+	objectPrefix, ok := parseIPv4Prefix(cidr)
+	if !ok || objectPrefix.Bits() >= searchPrefix.Bits() {
+		return false
+	}
+	return objectPrefix.Contains(searchPrefix.Addr())
+}
+
+func ipv4CompletionSearchPrefix(raw string) (netip.Prefix, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return netip.Prefix{}, false
+	}
+	if strings.Contains(raw, "/") {
+		return parseIPv4Prefix(raw)
+	}
+	raw = strings.TrimRight(raw, ".")
+	parts := strings.Split(raw, ".")
+	if len(parts) < 2 || len(parts) > 4 {
+		return netip.Prefix{}, false
+	}
+	octets := [4]byte{}
+	for index, part := range parts {
+		value, ok := parseIPv4Octet(part)
+		if !ok {
+			return netip.Prefix{}, false
+		}
+		octets[index] = value
+	}
+	return netip.PrefixFrom(netip.AddrFrom4(octets), len(parts)*8), true
+}
+
+func parseIPv4Octet(raw string) (byte, bool) {
+	if raw == "" || len(raw) > 3 {
+		return 0, false
+	}
+	var value int
+	for _, ch := range raw {
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+		value = value*10 + int(ch-'0')
+		if value > 255 {
+			return 0, false
+		}
+	}
+	return byte(value), true
+}
+
 func derivedNetworkCIDRCompletionRows(roots map[string][]netip.Prefix, prefix string) []networkCIDRCompletionRow {
 	if len(roots) == 0 || strings.TrimSpace(prefix) == "" {
 		return nil
 	}
-	const (
-		derivedBits              = 24
-		maxDerivedCompletionRows = 64
-	)
 	rows := make([]networkCIDRCompletionRow, 0)
 	seen := map[string]bool{}
 	for view, viewRoots := range roots {
 		for _, root := range viewRoots {
-			if !root.Addr().Is4() || root.Bits() >= derivedBits {
+			if !canDeriveNetworkCIDRChildren(root) {
 				continue
 			}
-			count := 1 << (derivedBits - root.Bits())
-			if count > maxDerivedCompletionRows {
-				continue
-			}
+			count := derivedNetworkCIDRChildCount(root)
 			base := ipv4AddrToUint32(root.Addr())
-			step := uint32(1) << (32 - derivedBits)
+			step := uint32(1) << (32 - derivedNetworkCIDRBits)
 			for index := 0; index < count; index++ {
-				child := netip.PrefixFrom(uint32ToIPv4Addr(base+uint32(index)*step), derivedBits)
+				child := netip.PrefixFrom(uint32ToIPv4Addr(base+uint32(index)*step), derivedNetworkCIDRBits)
 				cidr := child.String()
 				key := view + "\x00" + cidr
 				if seen[key] {
@@ -1251,11 +1323,29 @@ func derivedNetworkCIDRCompletionRows(roots map[string][]netip.Prefix, prefix st
 				}
 				seen[key] = true
 				description := strings.TrimSpace("derived /24 " + view + " from " + root.String())
-				rows = append(rows, networkCIDRCompletionRow{cidr: cidr, description: description})
+				rows = append(rows, networkCIDRCompletionRow{cidr: cidr, description: description, view: view, source: root.String()})
 			}
 		}
 	}
 	return rows
+}
+
+const (
+	derivedNetworkCIDRBits        = 24
+	maxDerivedNetworkCIDRChildren = 64
+)
+
+func canDeriveNetworkCIDRChildren(prefix netip.Prefix) bool {
+	return prefix.Addr().Is4() &&
+		prefix.Bits() < derivedNetworkCIDRBits &&
+		derivedNetworkCIDRChildCount(prefix) <= maxDerivedNetworkCIDRChildren
+}
+
+func derivedNetworkCIDRChildCount(prefix netip.Prefix) int {
+	if !prefix.Addr().Is4() || prefix.Bits() >= derivedNetworkCIDRBits {
+		return 0
+	}
+	return 1 << (derivedNetworkCIDRBits - prefix.Bits())
 }
 
 func ipv4AddrToUint32(addr netip.Addr) uint32 {

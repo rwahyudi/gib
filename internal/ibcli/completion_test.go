@@ -309,6 +309,8 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 		t.Fatalf("write network cache: %v", err)
 	}
 	if err := app.writeCachedNetworkContainers(profile, "default", []map[string]any{
+		{"network": "10.0.0.0/8", "network_view": "default"},
+		{"network": "10.128.0.0/13", "network_view": "default"},
 		{"network": "192.0.0.0/8", "network_view": "default"},
 		{"network": "192.0.0.0/16", "network_view": "default"},
 		{"network": "10.128.48.0/23", "network_view": "default"},
@@ -355,6 +357,13 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 		}
 		if strings.Contains(output, "10.0.0.0/24") {
 			t.Fatalf("completion %v did not filter prefix:\n%s", test.args, output)
+		}
+		if strings.Contains(strings.Join(test.args, " "), "10.128.48") {
+			for _, unwanted := range []string{"10.0.0.0/8", "10.128.0.0/13"} {
+				if strings.Contains(output, unwanted) {
+					t.Fatalf("completion %v included broad ancestor CIDR %s:\n%s", test.args, unwanted, output)
+				}
+			}
 		}
 		if strings.Contains(strings.Join(test.args, " "), "192.0.0.0/16") && strings.Contains(output, "192.0.0.0/8") {
 			t.Fatalf("completion %v included ancestor CIDR:\n%s", test.args, output)
@@ -438,6 +447,21 @@ func TestNetworkCompletionDerivesChildCIDRsFromParentPrefix(t *testing.T) {
 		"10.128.48.0/24",
 		"10.128.49.0/24",
 		"derived /24 default from 10.128.48.0/23",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion missing %s:\n%s", want, output)
+		}
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"__complete", "dns", "next-ip", "--network-view", "default", "10.128.49"}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output = stdout.String()
+	for _, want := range []string{
+		"10.128.48.0/23",
+		"10.128.48.0/24",
+		"10.128.49.0/24",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("completion missing %s:\n%s", want, output)
