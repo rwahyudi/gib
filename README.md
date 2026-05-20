@@ -75,12 +75,16 @@ toolchain new enough for this module.
 ## Installation From GitHub Release
 
 Download packages from the [latest GitHub release](https://github.com/rwahyudi/gib/releases/latest).
+The examples below resolve the latest published release at install time. To pin
+a specific release instead, set `VERSION` manually, for example
+`VERSION=<version-without-v>`.
 
 Standalone binary:
 
 ```bash
-curl -LO https://github.com/rwahyudi/gib/releases/download/v0.1.0/ib_0.1.0_linux_amd64.tar.gz
-tar -xzf ib_0.1.0_linux_amd64.tar.gz ib
+VERSION="$(curl -fsSL https://api.github.com/repos/rwahyudi/gib/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
+curl -fLO "https://github.com/rwahyudi/gib/releases/download/v${VERSION}/ib_${VERSION}_linux_amd64.tar.gz"
+tar -xzf "ib_${VERSION}_linux_amd64.tar.gz" ib
 sudo install -m 0755 ib /usr/local/bin/ib
 ib --help
 
@@ -95,16 +99,18 @@ Open a new shell after installing the completion file, or source it directly wit
 RHEL derivatives:
 
 ```bash
-curl -LO https://github.com/rwahyudi/gib/releases/download/v0.1.0/ib_0.1.0_linux_amd64.rpm
-sudo dnf install ./ib_0.1.0_linux_amd64.rpm
+VERSION="$(curl -fsSL https://api.github.com/repos/rwahyudi/gib/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
+curl -fLO "https://github.com/rwahyudi/gib/releases/download/v${VERSION}/ib_${VERSION}_linux_amd64.rpm"
+sudo dnf install "./ib_${VERSION}_linux_amd64.rpm"
 ib --help
 ```
 
 Debian derivatives:
 
 ```bash
-curl -LO https://github.com/rwahyudi/gib/releases/download/v0.1.0/ib_0.1.0_linux_amd64.deb
-sudo apt install ./ib_0.1.0_linux_amd64.deb
+VERSION="$(curl -fsSL https://api.github.com/repos/rwahyudi/gib/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
+curl -fLO "https://github.com/rwahyudi/gib/releases/download/v${VERSION}/ib_${VERSION}_linux_amd64.deb"
+sudo apt install "./ib_${VERSION}_linux_amd64.deb"
 ib --help
 ```
 
@@ -112,16 +118,22 @@ RPM and DEB packages install `ib` to `/usr/local/bin/ib` and install Bash comple
 
 ## Installation on Windows
 
-Native Windows release builds are published as portable ZIP archives. Download
-the Windows ZIP from the [latest GitHub release](https://github.com/rwahyudi/gib/releases/latest),
-extract `ib.exe`, and place it on your user `PATH`:
+Native Windows release builds are published as portable ZIP archives when the
+release includes a Windows asset. The commands below resolve the
+[latest GitHub release](https://github.com/rwahyudi/gib/releases/latest),
+verify the expected ZIP exists, extract `ib.exe`, and place it on your user
+`PATH`:
 
 ```powershell
-$version = "0.3.2"
+$latest = Invoke-RestMethod -Uri "https://api.github.com/repos/rwahyudi/gib/releases/latest"
+$version = $latest.tag_name.TrimStart("v")
 $archive = "ib_${version}_windows_amd64.zip"
-$url = "https://github.com/rwahyudi/gib/releases/download/v$version/$archive"
+$asset = $latest.assets | Where-Object { $_.name -eq $archive } | Select-Object -First 1
+if (-not $asset) {
+  throw "Windows release asset $archive was not found in $($latest.tag_name)."
+}
 
-Invoke-WebRequest -Uri $url -OutFile $archive
+Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive
 Expand-Archive ".\$archive" -DestinationPath ".\ib-$version" -Force
 
 $userBin = Join-Path $HOME "bin"

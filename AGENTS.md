@@ -90,6 +90,16 @@ Good separate-agent doc tasks:
 
 For infographic changes, prefer editing the source SVG text/labels directly and keep terminology aligned with code names such as `record_cache`, `zone_cache`, SWR, refresh leases, read server, and primary server.
 
+## Release Documentation Validation
+
+Before every release, analyze and validate the README installation instructions with extra scrutiny. Confirm Copr, GitHub release tarball, RPM, DEB, Windows ZIP, completion setup, install paths, and asset filenames match `.goreleaser.yaml`, `gib.spec`, packaging files, and the release tag being published.
+
+README install commands should use the latest available release by default. Prefer commands that resolve `https://api.github.com/repos/rwahyudi/gib/releases/latest` or the `/releases/latest` redirect instead of hardcoded version strings. If a release procedure intentionally pins a version, update every README occurrence to the exact tag before publishing and check with `rg 'releases/download/v[0-9]|ib_[0-9]+\\.[0-9]+\\.[0-9]+|version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"' README.md`.
+
+Validate the live release assets when network access is available, for example with `gh release view --json tagName,assets`. Do not rely only on `.goreleaser.yaml`; confirm the latest release actually contains the assets referenced by README install commands.
+
+For release tasks, report the README install-validation result explicitly in the final response or PR notes, including any stale version strings found and fixed.
+
 ## Commit & Pull Request Guidelines
 
 After making file changes, validate the relevant behavior, stage only files changed for the current task, and commit automatically with a concise imperative message. Report the commit hash in the final response.

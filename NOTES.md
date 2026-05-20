@@ -18,6 +18,8 @@ Security scanning lives in GitHub Actions and Dependabot. Keep README security c
 
 GitHub releases are tag-driven through GoReleaser. The release workflow publishes Linux amd64 tarball, RPM, DEB, Windows amd64 ZIP, and checksum assets. RPM and DEB packages install `/usr/local/bin/ib` and `/etc/bash_completion.d/ib`. Windows release builds must keep CGO enabled and use MinGW because the SQLite cache depends on `go-sqlite3`. Keep README install commands, `.goreleaser.yaml`, and packaged completion paths in sync when changing release behavior.
 
+Before every release, scrutinize the README installation sections against the release that will be published. Confirm Copr, GitHub tarball, RPM, DEB, Windows ZIP, completion, install paths, and asset filenames match `.goreleaser.yaml`, `gib.spec`, and the release tag. README commands should either resolve the latest GitHub release dynamically or be updated to the exact release version being tagged; do not ship stale hardcoded release URLs. When network access is available, validate the live asset list with `gh release view --json tagName,assets` rather than relying only on local release config.
+
 ## Performance and Caching Docs
 
 `docs/performance-caching.md` explains cache freshness, stale-while-revalidate, read/write routing, search workers, and SQLite cache tables. Keep that page plus `docs/assets/cache-decision-flow.svg`, `docs/assets/cache-workers.svg`, and `docs/assets/sqlite-cache-tables.svg` in sync when cache behavior, read-server routing, worker behavior, or cache schema changes. The diagrams use a dark Nord, angular, gradient style with compact boxes, small arrowheads, and small animated traffic markers only on the read/write worker flow.
