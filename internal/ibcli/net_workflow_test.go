@@ -468,6 +468,53 @@ func TestNetSearchDerivesChildCIDRsFromContainingParentPrefix(t *testing.T) {
 	}
 }
 
+func TestNetListDerivesChildCIDRsFromParentWithoutSearch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("net list should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedNetworks(profile, "default", nil, now); err != nil {
+		t.Fatalf("write network cache: %v", err)
+	}
+	if err := app.writeCachedNetworkContainers(profile, "default", []map[string]any{{
+		"_ref":         "networkcontainer/parent",
+		"network":      "10.128.48.0/23",
+		"network_view": "default",
+		"comment":      "Servers",
+	}}, now); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default"}); err != nil {
+		t.Fatalf("net list: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 3 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	want := []struct {
+		itemType string
+		network  string
+		comment  string
+	}{
+		{ipamTypeContainer, "10.128.48.0/23", "Servers"},
+		{ipamTypeNetwork, "10.128.48.0/24", "derived /24 from 10.128.48.0/23"},
+		{ipamTypeNetwork, "10.128.49.0/24", "derived /24 from 10.128.48.0/23"},
+	}
+	for index, expected := range want {
+		if cleanString(rows[index]["type"]) != expected.itemType || cleanString(rows[index]["network"]) != expected.network || cleanString(rows[index]["comment"]) != expected.comment {
+			t.Fatalf("row %d = %#v, want %s %s %s", index, rows[index], expected.itemType, expected.network, expected.comment)
+		}
+	}
+}
+
 func TestNetListUsesFreshCache(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("net list should use fresh cache, got %s %s", r.Method, r.URL.Path)

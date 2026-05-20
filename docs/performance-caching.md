@@ -43,7 +43,9 @@ same cache scope to finish.
 
 For IPAM list/search, cached parent CIDRs can also produce direct `/24` child
 rows when the child objects are not present in cache, keeping split network
-candidates visible without a foreground Infoblox lookup.
+candidates visible without a foreground Infoblox lookup. Unfiltered IPAM lists
+append those derived rows after real cached rows, so real WAPI objects still
+take precedence.
 
 Shell completion never performs a foreground Infoblox refresh for zone names,
 record names, or IPAM network CIDRs. With `completion_cache_prefetch = true`,

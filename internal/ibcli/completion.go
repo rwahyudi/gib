@@ -1362,6 +1362,13 @@ func derivedNetworkCIDRCompletionRows(roots map[string][]netip.Prefix, prefix st
 	if len(roots) == 0 || strings.TrimSpace(prefix) == "" {
 		return nil
 	}
+	return derivedNetworkCIDRRows(roots)
+}
+
+func derivedNetworkCIDRRows(roots map[string][]netip.Prefix) []networkCIDRCompletionRow {
+	if len(roots) == 0 {
+		return nil
+	}
 	rows := make([]networkCIDRCompletionRow, 0)
 	seen := map[string]bool{}
 	for view, viewRoots := range roots {
