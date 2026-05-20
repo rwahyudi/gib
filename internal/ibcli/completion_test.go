@@ -622,6 +622,36 @@ func TestDNSCreateCompletesRecordTypesAfterName(t *testing.T) {
 	}
 }
 
+func TestDNSCreateCompletesRecordTypesAtEmptyStart(t *testing.T) {
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"__complete", "dns", "create", ""}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"a\tIPv4 address record",
+		"aaaa\tIPv6 address record",
+		"cname\tcanonical name alias",
+		"host\thost record",
+		"mx\tmail exchanger record",
+		"ptr\treverse pointer record",
+		"srv\tservice locator record",
+		"txt\ttext record",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion output missing %q:\n%s", want, output)
+		}
+	}
+	if !strings.Contains(output, ":4") {
+		t.Fatalf("completion did not disable file completion:\n%s", output)
+	}
+}
+
 func TestDNSCreateDoesNotCompleteRecordTypesForName(t *testing.T) {
 	app := testApp(t)
 	var stdout bytes.Buffer
@@ -1419,7 +1449,6 @@ func TestGeneratedBashCompletionScript(t *testing.T) {
 	output := script.String()
 	for _, want := range []string{
 		"__ib_dynamic_completion",
-		"__ib_create_usage_on_second_tab",
 		"__completeNoDesc",
 		"IB_SHELL_PID=$$",
 		`${COMP_WORDS[0]}`,
@@ -1445,16 +1474,15 @@ func TestGeneratedBashCompletionScript(t *testing.T) {
 	}
 }
 
-func TestDynamicBashCompletionCreateNameSlotPrintsUsageOnSecondTab(t *testing.T) {
+func TestDynamicBashCompletionCreateNameSlotCompletesRecordTypes(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
 	dir := t.TempDir()
 	fakeIB := filepath.Join(dir, "ib")
 	if err := os.WriteFile(fakeIB, []byte(`#!/bin/sh
-if [ "$1" = "dns" ] && [ "$2" = "create" ] && [ "$3" = "--help" ]; then
-  printf 'Usage\n'
-  printf '  ib dns create NAME TYPE VALUE [flags]\n'
+if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [ "$4" = "" ]; then
+  printf '%s\n' a aaaa cname host mx ptr srv txt :4
   exit 0
 fi
 printf ':4\n'
@@ -1471,25 +1499,18 @@ COMP_CWORD=3
 COMP_LINE="$2 dns create "
 COMP_POINT=${#COMP_LINE}
 __ib_dynamic_completion
-__ib_dynamic_completion
-printf '\nreply-count=%d\n' "${#COMPREPLY[@]}"
+printf 'types:%s\n' "${COMPREPLY[*]}"
 `, "bash", scriptPath, fakeIB)
 	raw, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run bash completion simulation: %v\n%s", err, raw)
 	}
 	output := string(raw)
-	if strings.Count(output, "\nUsage\n") != 1 {
-		t.Fatalf("create usage should print once on the second tab:\n%s", output)
+	if strings.Contains(output, "Usage") {
+		t.Fatalf("create name slot should complete record types instead of printing usage:\n%s", output)
 	}
-	if !strings.Contains(output, "ib dns create NAME TYPE VALUE [flags]") {
-		t.Fatalf("create usage missing command shape:\n%s", output)
-	}
-	if !strings.Contains(output, "\nib dns create \nreply-count=0") {
-		t.Fatalf("create usage did not reprint the typed command:\n%s", output)
-	}
-	if !strings.Contains(output, "reply-count=0") {
-		t.Fatalf("create name slot should not insert a completion candidate:\n%s", output)
+	if !strings.Contains(output, "types:a aaaa cname host mx ptr srv txt") {
+		t.Fatalf("create name slot missing record type completions:\n%s", output)
 	}
 }
 

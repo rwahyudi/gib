@@ -655,10 +655,14 @@ func (a *App) startZoneCacheRefresh(profile Profile) error {
 		}
 		return nil
 	}
-	executable, err := os.Executable()
+	executable, ok, err := backgroundRefreshExecutable()
 	if err != nil {
 		_ = a.releaseZoneRefreshLease(profile)
 		return err
+	}
+	if !ok {
+		_ = a.releaseZoneRefreshLease(profile)
+		return nil
 	}
 	args := []string{
 		"config", "cache", "refresh-zones",
@@ -1980,10 +1984,14 @@ func (a *App) startRecordCacheRevalidation(profile Profile, zoneName string) err
 		}
 		return nil
 	}
-	executable, err := os.Executable()
+	executable, ok, err := backgroundRefreshExecutable()
 	if err != nil {
 		_ = a.releaseRecordRefreshLease(profile, zoneName)
 		return err
+	}
+	if !ok {
+		_ = a.releaseRecordRefreshLease(profile, zoneName)
+		return nil
 	}
 
 	// Start the helper synchronously so the parent knows the refresh was handed

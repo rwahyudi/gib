@@ -461,10 +461,14 @@ func (a *App) startNetCacheRefresh(profile Profile, kind string, networkView str
 		}
 		return nil
 	}
-	executable, err := os.Executable()
+	executable, ok, err := backgroundRefreshExecutable()
 	if err != nil {
 		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
 		return err
+	}
+	if !ok {
+		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+		return nil
 	}
 	args := []string{
 		"config", "cache", "refresh-net",

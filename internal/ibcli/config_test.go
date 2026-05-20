@@ -26,8 +26,25 @@ func testApp(t *testing.T) *App {
 	}
 	app.backgroundRecordRevalidator = func(Profile, string) error { return nil }
 	app.backgroundZoneRefresher = func(Profile) error { return nil }
+	app.backgroundNetRefresher = func(Profile, string, string, string) error { return nil }
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 	return app
+}
+
+func TestExecutableIsGoTestBinary(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		want bool
+	}{
+		{path: "/tmp/go-build123/internal/ibcli.test", want: true},
+		{path: "/tmp/go-build123/ib.test.exe", want: true},
+		{path: "/home/rwahyudi/bin/ib", want: false},
+		{path: "", want: false},
+	} {
+		if got := executableIsGoTestBinary(test.path); got != test.want {
+			t.Fatalf("executableIsGoTestBinary(%q) = %v, want %v", test.path, got, test.want)
+		}
+	}
 }
 
 func TestReadSessionZoneUsesShellPIDEnv(t *testing.T) {

@@ -96,6 +96,24 @@ func NewDefaultApp() (*App, error) {
 	return app, nil
 }
 
+func backgroundRefreshExecutable() (string, bool, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", false, err
+	}
+	// Go test binaries re-run test code when executed; never use them as
+	// detached cache refresh helpers.
+	if executableIsGoTestBinary(executable) {
+		return "", false, nil
+	}
+	return executable, true, nil
+}
+
+func executableIsGoTestBinary(executable string) bool {
+	base := filepath.Base(executable)
+	return strings.HasSuffix(base, ".test") || strings.HasSuffix(base, ".test.exe")
+}
+
 func (a *App) Execute(args []string) error {
 	a.startCompletionCachePrefetch(args)
 	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeNetSortValue(args) || a.completeZoneListFlagNames(args) {
