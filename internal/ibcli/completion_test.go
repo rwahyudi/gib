@@ -407,6 +407,44 @@ func TestNetworkCompletionWithoutNetworkViewMergesCachedScopes(t *testing.T) {
 	}
 }
 
+func TestNetworkCompletionDerivesChildCIDRsFromParentPrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("network completion made live WAPI request: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	profile := writeCompletionProfile(t, app, server.URL)
+	now := time.Now()
+	if err := app.writeCachedNetworks(profile, "default", []map[string]any{
+		{"network": "10.128.48.0/23", "network_view": "default"},
+	}, now); err != nil {
+		t.Fatalf("write network cache: %v", err)
+	}
+	if err := app.writeCachedNetworkContainers(profile, "default", nil, now); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	if err := app.Execute([]string{"__complete", "dns", "next-ip", "--network-view", "default", "10.128.48"}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"10.128.48.0/23",
+		"10.128.48.0/24",
+		"10.128.49.0/24",
+		"derived /24 default from 10.128.48.0/23",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("completion missing %s:\n%s", want, output)
+		}
+	}
+}
+
 func TestNetworkCompletionReturnsStaleCacheAndQueuesRefresh(t *testing.T) {
 	app := testApp(t)
 	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")

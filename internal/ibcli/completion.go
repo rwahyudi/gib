@@ -1161,25 +1161,44 @@ func matchingNetworkCIDRs(networks []map[string]any, toComplete string) []string
 			!networkCIDRPrefixHierarchyCompletionMatch(prefixRoots, network) {
 			continue
 		}
-		seen[cidr] = true
-		var descriptionParts []string
-		if itemType := cleanString(network["type"]); itemType != "" {
-			descriptionParts = append(descriptionParts, itemType)
-		}
-		if view := cleanString(network["network_view"]); view != "" {
-			descriptionParts = append(descriptionParts, view)
-		}
-		description := strings.Join(descriptionParts, " ")
-		if description != "" {
-			rows = append(rows, cidr+"\t"+description)
-			continue
-		}
-		rows = append(rows, cidr)
+		appendNetworkCIDRCompletionRow(&rows, seen, cidr, networkCIDRCompletionDescription(network))
+	}
+	for _, row := range derivedNetworkCIDRCompletionRows(prefixRoots, prefix) {
+		appendNetworkCIDRCompletionRow(&rows, seen, row.cidr, row.description)
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		return strings.ToLower(recordCompletionName(rows[i])) < strings.ToLower(recordCompletionName(rows[j]))
 	})
 	return rows
+}
+
+type networkCIDRCompletionRow struct {
+	cidr        string
+	description string
+}
+
+func appendNetworkCIDRCompletionRow(rows *[]string, seen map[string]bool, cidr string, description string) {
+	cidr = strings.TrimSpace(cidr)
+	if cidr == "" || seen[cidr] {
+		return
+	}
+	seen[cidr] = true
+	if description != "" {
+		*rows = append(*rows, cidr+"\t"+description)
+		return
+	}
+	*rows = append(*rows, cidr)
+}
+
+func networkCIDRCompletionDescription(network map[string]any) string {
+	var descriptionParts []string
+	if itemType := cleanString(network["type"]); itemType != "" {
+		descriptionParts = append(descriptionParts, itemType)
+	}
+	if view := cleanString(network["network_view"]); view != "" {
+		descriptionParts = append(descriptionParts, view)
+	}
+	return strings.Join(descriptionParts, " ")
 }
 
 func networkCIDRPrefixCompletionRoots(networks []map[string]any, prefix string) map[string][]netip.Prefix {
@@ -1200,6 +1219,57 @@ func networkCIDRPrefixCompletionRoots(networks []map[string]any, prefix string) 
 		roots[view] = append(roots[view], objectPrefix)
 	}
 	return roots
+}
+
+func derivedNetworkCIDRCompletionRows(roots map[string][]netip.Prefix, prefix string) []networkCIDRCompletionRow {
+	if len(roots) == 0 || strings.TrimSpace(prefix) == "" {
+		return nil
+	}
+	const (
+		derivedBits              = 24
+		maxDerivedCompletionRows = 64
+	)
+	rows := make([]networkCIDRCompletionRow, 0)
+	seen := map[string]bool{}
+	for view, viewRoots := range roots {
+		for _, root := range viewRoots {
+			if !root.Addr().Is4() || root.Bits() >= derivedBits {
+				continue
+			}
+			count := 1 << (derivedBits - root.Bits())
+			if count > maxDerivedCompletionRows {
+				continue
+			}
+			base := ipv4AddrToUint32(root.Addr())
+			step := uint32(1) << (32 - derivedBits)
+			for index := 0; index < count; index++ {
+				child := netip.PrefixFrom(uint32ToIPv4Addr(base+uint32(index)*step), derivedBits)
+				cidr := child.String()
+				key := view + "\x00" + cidr
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				description := strings.TrimSpace("derived /24 " + view + " from " + root.String())
+				rows = append(rows, networkCIDRCompletionRow{cidr: cidr, description: description})
+			}
+		}
+	}
+	return rows
+}
+
+func ipv4AddrToUint32(addr netip.Addr) uint32 {
+	raw := addr.As4()
+	return uint32(raw[0])<<24 | uint32(raw[1])<<16 | uint32(raw[2])<<8 | uint32(raw[3])
+}
+
+func uint32ToIPv4Addr(value uint32) netip.Addr {
+	return netip.AddrFrom4([4]byte{
+		byte(value >> 24),
+		byte(value >> 16),
+		byte(value >> 8),
+		byte(value),
+	})
 }
 
 func networkCIDRPrefixHierarchyExpansionEnabled(prefix string) bool {
