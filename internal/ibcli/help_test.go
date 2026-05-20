@@ -198,8 +198,9 @@ func TestDNSNextIPHelpShowsOptions(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"Next IP Usage",
-		"IPv4 CIDR such as 192.0.2.0/24",
+		"IPv4 network or container CIDR such as 192.0.2.0/24",
 		"--network-view chooses the IPAM network view",
+		"networks and containers can both request next_available_ip",
 		"-n 3 or --num 3 requests multiple addresses",
 		"-e 192.0.2.10 excludes an address",
 		"--network-view STRING",

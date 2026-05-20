@@ -523,26 +523,24 @@ func queryNetworks(client *WapiClient, networkView string) ([]map[string]any, er
 	return pagedQuery(client, networkObject, params)
 }
 
-func findNetwork(client *WapiClient, network string, networkView string) (map[string]any, error) {
+func findNetworkObject(client *WapiClient, network string, networkView string) (map[string]any, error) {
 	cidr, err := normalizeNextIPNetwork(network)
 	if err != nil {
 		return nil, err
 	}
-	matches, err := pagedQuery(client, networkObject, networkQueryParams(cidr, networkView))
+	networks, err := pagedQuery(client, networkObject, networkQueryParams(cidr, networkView))
 	if err != nil {
 		return nil, err
 	}
-	if len(matches) == 0 {
-		return nil, cliError("no network found for %s", cidr)
+	containers, err := pagedQuery(client, networkContainerObject, networkQueryParams(cidr, networkView))
+	if err != nil {
+		return nil, err
 	}
-	if len(matches) > 1 {
-		return nil, cliError("multiple networks found for %s; use --network-view to choose one", cidr)
-	}
-	return matches[0], nil
+	return findNetworkObjectInRows(networkObjectRows(networks, containers), cidr)
 }
 
 func nextAvailableIPRows(client *WapiClient, network string, networkView string, num int, exclude []string) ([]map[string]any, error) {
-	matchedNetwork, err := findNetwork(client, network, networkView)
+	matchedNetwork, err := findNetworkObject(client, network, networkView)
 	if err != nil {
 		return nil, err
 	}

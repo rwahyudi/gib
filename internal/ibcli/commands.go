@@ -573,7 +573,7 @@ func (a *App) nextIPCommand(run func(string, string, int, []string) error) *cobr
 	var exclude []string
 	cmd := &cobra.Command{
 		Use:               "next-ip NETWORK",
-		Short:             "Find the next available IP in a network",
+		Short:             "Find the next available IP in a network or container",
 		Annotations:       map[string]string{disableDNSContextAnnotation: "true"},
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.networkArgCompletion,

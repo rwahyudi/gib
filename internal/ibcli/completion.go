@@ -830,11 +830,16 @@ func (a *App) completeNetworkCIDRs(cmd *cobra.Command, toComplete string) []stri
 		return nil
 	}
 	networkView := commandCompletionFlagValue(cmd, "network-view")
-	networks, err := a.cachedNetworkCIDRsForCompletion(profile, networkView, strings.HasPrefix(cmd.CommandPath(), "ib net"))
+	networks, err := a.cachedNetworkCIDRsForCompletion(profile, networkView, networkCompletionIncludesContainers(cmd))
 	if err != nil {
 		return nil
 	}
 	return matchingNetworkCIDRs(networks, toComplete)
+}
+
+func networkCompletionIncludesContainers(cmd *cobra.Command) bool {
+	commandPath := cmd.CommandPath()
+	return strings.HasPrefix(commandPath, "ib net") || commandPath == "ib dns next-ip"
 }
 
 func (a *App) cachedNetworkCIDRsForCompletion(profile Profile, networkView string, includeContainers bool) ([]map[string]any, error) {

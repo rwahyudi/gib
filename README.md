@@ -285,7 +285,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib dns` | Show DNS help and the current profile/view/zone context. |
 | `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones, `-t/--type` to filter record types, `-e/--exclude` to hide matching records, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns search KEYWORD` | Search records by name, value, or comment. Use `--global` for all searchable zones, `-r` for child zones under the current/root zone, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
-| `ib dns next-ip NETWORK` | Compatibility path for next available IPv4 address lookup. Prefer `ib net next-ip NETWORK` for IPAM work. |
+| `ib dns next-ip NETWORK` | Compatibility path for next available IPv4 address lookup against a network or container. Prefer `ib net next-ip NETWORK` for IPAM work. |
 | `ib dns create NAME TYPE VALUE` | Create a DNS record, for example `ib dns create app host 192.0.2.10 -c "Application host"`. |
 | `ib dns edit NAME [TYPE] [VALUE]` | Edit an existing DNS record. |
 | `ib dns delete NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
@@ -333,7 +333,7 @@ ib dns delete app
 
 `ib net list` and `ib net search` are read-only IPAM workflows. They query the WAPI `network` and `networkcontainer` objects, optionally filter by `--network-view`, and match search text against type, CIDR, network view, and comment. A CIDR-field match also includes related parent and child networks or containers in the same network view. Add `-s` or `--sort` to sort by `type`, `network`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `type`, `network`, `network_view`, and `comment`.
 
-`ib net show` and `ib net next-ip` resolve both networks and containers; when the same CIDR exists as both, the container is preferred. `ib net next-ip` performs the object lookup with read-only routing, then sends the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
+`ib net show`, `ib net next-ip`, and the compatibility `ib dns next-ip` path resolve both networks and containers; when the same CIDR exists as both, the container is preferred. `ib net next-ip` can use cached rows for the object lookup, while `ib dns next-ip` performs a live read-only object lookup. Both send the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
 
 `ib dns delete` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records match, interactive table mode shows a Huh select list so one record can be chosen.
 
@@ -379,7 +379,7 @@ When cache is missing or already outside the stale window, list/search waits up 
 
 `ib net next-ip` can use cached network or container rows to find the target `_ref`, but the `next_available_ip` function call is always sent live to the primary server so returned addresses are current.
 
-Shell completion prefetches cache freshness in the background by default. With `completion_cache_prefetch = true`, DNS completion checks the current DNS view and zone, and network CIDR completion checks the selected IPAM network view, then starts lease-protected zone-list, current-zone record, network-list, or container-list refresh helpers when cache rows are missing or stale. Completion returns local cached rows when available, including stale rows, and does not perform foreground Infoblox refresh work. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
+Shell completion prefetches cache freshness in the background by default. With `completion_cache_prefetch = true`, DNS completion checks the current DNS view and zone, and network CIDR completion checks the selected IPAM network view, then starts lease-protected zone-list, current-zone record, network-list, or container-list refresh helpers when cache rows are missing or stale. `ib dns next-ip`, `ib net next-ip`, and `ib net show` complete both network and container CIDRs from local cache when available, including stale rows, and completion does not perform foreground Infoblox refresh work. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
 
 `ib config cache status` keeps the detailed cache row table and adds a colored
 summary footer for table output: cache entries, cached records, fresh entries,

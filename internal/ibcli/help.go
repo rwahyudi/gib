@@ -195,8 +195,9 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		})
 	case "ib dns next-ip":
 		return sectionWithRows("Next IP Usage", [][]string{
-			{"network", "IPv4 CIDR such as 192.0.2.0/24"},
+			{"network", "IPv4 network or container CIDR such as 192.0.2.0/24"},
 			{"view", "--network-view chooses the IPAM network view when a CIDR is ambiguous"},
+			{"type", "networks and containers can both request next_available_ip"},
 			{"num", "-n 3 or --num 3 requests multiple addresses"},
 			{"exclude", "-e 192.0.2.10 excludes an address from allocation; repeatable"},
 			{"formats", "-o table, -o json, or -o csv"},

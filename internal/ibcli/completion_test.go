@@ -320,7 +320,7 @@ func TestNetworkCompletionCompletesNextIPNetwork(t *testing.T) {
 		args          []string
 		wantContainer bool
 	}{
-		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "192"}},
+		{args: []string{"__complete", "dns", "next-ip", "--network-view", "default", "192"}, wantContainer: true},
 		{args: []string{"__complete", "net", "next-ip", "--network-view", "default", "192"}, wantContainer: true},
 		{args: []string{"__complete", "net", "show", "--network-view", "default", "192"}, wantContainer: true},
 	} {

@@ -958,14 +958,22 @@ func TestDNSNextIPRoutesLookupToReadAndFunctionToPrimary(t *testing.T) {
 
 	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		readRequests = append(readRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
-		if r.Method != http.MethodGet || trimWAPIPath(r.URL.Path) != networkObject {
+		if r.Method != http.MethodGet {
 			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
+		objectType := trimWAPIPath(r.URL.Path)
+		if objectType != networkObject && objectType != networkContainerObject {
+			t.Fatalf("read request path = %s, want network or networkcontainer", r.URL.Path)
 		}
 		if got := r.URL.Query().Get("network"); got != "192.0.2.0/24" {
 			t.Fatalf("network query = %q, want normalized CIDR", got)
 		}
 		if got := r.URL.Query().Get("network_view"); got != "default" {
 			t.Fatalf("network_view query = %q, want default", got)
+		}
+		if objectType == networkContainerObject {
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"result": []map[string]any{{
@@ -981,7 +989,7 @@ func TestDNSNextIPRoutesLookupToReadAndFunctionToPrimary(t *testing.T) {
 	if err := app.Execute([]string{"-o", "json", "dns", "next-ip", "192.0.2.99/24", "--network-view", "default", "--num", "2", "--exclude", "192.0.2.10"}); err != nil {
 		t.Fatalf("dns next-ip: %v\nstdout:\n%s", err, stdout.String())
 	}
-	if strings.Join(readRequests, ",") != "GET network" {
+	if strings.Join(readRequests, ",") != "GET network,GET networkcontainer" {
 		t.Fatalf("read requests = %#v", readRequests)
 	}
 	if strings.Join(primaryRequests, ",") != "POST network/ref" {
@@ -995,6 +1003,40 @@ func TestDNSNextIPRoutesLookupToReadAndFunctionToPrimary(t *testing.T) {
 		t.Fatalf("payload exclude = %#v, want [192.0.2.10]; payload = %#v", functionPayload["exclude"], functionPayload)
 	}
 	assertJSONNextIPRows(t, stdout.String(), []string{"192.0.2.20", "192.0.2.21"}, "192.0.2.0/24", "default")
+}
+
+func TestDNSNextIPCanUseNetworkContainer(t *testing.T) {
+	var postPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+networkObject):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+networkContainerObject):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"_ref":         "networkcontainer/ref",
+				"network":      "192.0.0.0/16",
+				"network_view": "default",
+			}}})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/networkcontainer/ref"):
+			postPath = trimWAPIPath(r.URL.Path)
+			if got := r.URL.Query().Get("_function"); got != "next_available_ip" {
+				t.Fatalf("_function = %q, want next_available_ip", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ips": []string{"192.0.2.20"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "dns", "next-ip", "192.0.0.0/16", "--network-view", "default"}); err != nil {
+		t.Fatalf("dns next-ip container: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if postPath != "networkcontainer/ref" {
+		t.Fatalf("post path = %q, want networkcontainer/ref", postPath)
+	}
+	assertJSONNextIPRows(t, stdout.String(), []string{"192.0.2.20"}, "192.0.0.0/16", "default")
 }
 
 func TestDNSNextIPTablePrintsContextAndRows(t *testing.T) {
@@ -1047,7 +1089,7 @@ func TestDNSNextIPRequiresNetworkViewWhenNetworkIsAmbiguous(t *testing.T) {
 	if err == nil {
 		t.Fatal("ambiguous network succeeded, want error")
 	}
-	if !strings.Contains(err.Error(), "multiple networks found for 192.0.2.0/24; use --network-view to choose one") {
+	if !strings.Contains(err.Error(), "multiple networks or containers found for 192.0.2.0/24; use --network-view to choose one") {
 		t.Fatalf("error = %v\nstdout:\n%s", err, stdout.String())
 	}
 }
@@ -1061,7 +1103,7 @@ func TestDNSNextIPReturnsClearErrorWhenNetworkIsMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("missing network succeeded, want error")
 	}
-	if !strings.Contains(err.Error(), "no network found for 192.0.2.0/24") {
+	if !strings.Contains(err.Error(), "no network or container found for 192.0.2.0/24") {
 		t.Fatalf("error = %v\nstdout:\n%s", err, stdout.String())
 	}
 }
