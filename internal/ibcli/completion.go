@@ -39,7 +39,7 @@ func (a *App) dnsListArgCompletion(cmd *cobra.Command, args []string, toComplete
 	if len(args) > 0 || strings.HasPrefix(trimmed, "-") {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
-	zones := a.completeZoneNames(cmd, toComplete)
+	zones := a.completeDNSListZoneNames(cmd, toComplete)
 	if trimmed != "" {
 		return zones, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -819,6 +819,7 @@ func (a *App) completeZoneNames(cmd *cobra.Command, toComplete string) []string 
 	if err != nil {
 		return nil
 	}
+	profile.DNSView = a.resolveDNSView(profile)
 	if view := commandCompletionFlagValue(cmd, "view"); view != "" {
 		profile.DNSView = view
 	}
@@ -827,6 +828,63 @@ func (a *App) completeZoneNames(cmd *cobra.Command, toComplete string) []string 
 		return nil
 	}
 	return matchingZoneNames(zones, toComplete)
+}
+
+func (a *App) completeDNSListZoneNames(cmd *cobra.Command, toComplete string) []string {
+	profile, err := a.loadConfig(true)
+	if err != nil {
+		return nil
+	}
+	profile.DNSView = a.resolveDNSView(profile)
+	if view := commandCompletionFlagValue(cmd, "view"); view != "" {
+		profile.DNSView = view
+	}
+	zones, err := a.cachedZoneNames(profile)
+	if err != nil {
+		return nil
+	}
+	rows := matchingZoneNames(zones, toComplete)
+	rows = appendDNSListNetworkScopeCompletions(rows, a.dnsListNetworkScopeCompletions(profile, toComplete)...)
+	sort.Slice(rows, func(i, j int) bool {
+		return compareNetworkCIDR(recordCompletionName(rows[i]), recordCompletionName(rows[j])) < 0
+	})
+	return rows
+}
+
+func appendDNSListNetworkScopeCompletions(rows []string, candidates ...string) []string {
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[recordCompletionName(row)] = true
+	}
+	for _, row := range candidates {
+		name := recordCompletionName(row)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func (a *App) dnsListNetworkScopeCompletions(profile Profile, toComplete string) []string {
+	if !networkCIDRPrefixHierarchyExpansionEnabled(toComplete) {
+		return nil
+	}
+	networks, err := a.cachedNetworkCIDRsForCompletion(profile, "", true)
+	if err != nil {
+		return nil
+	}
+	matches := matchingNetworkCIDRs(networks, toComplete)
+	rows := make([]string, 0, len(matches))
+	for _, match := range matches {
+		name := recordCompletionName(match)
+		if _, ok := parseIPv4Prefix(name); !ok {
+			continue
+		}
+		rows = append(rows, match)
+	}
+	return rows
 }
 
 func commandCompletionFlagValue(cmd *cobra.Command, name string) string {

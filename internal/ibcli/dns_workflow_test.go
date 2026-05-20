@@ -854,6 +854,47 @@ func TestDNSListSortsReverseRecordsNumericallyByDefault(t *testing.T) {
 	assertJSONRecordNames(t, stdout.String(), []string{"192.0.2.2", "192.0.2.10", "192.0.2.100"})
 }
 
+func TestDNSListCIDRParentScopeIncludesChildReverseZones(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns list should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	now := time.Now()
+	if err := app.writeCachedZones(profile, []map[string]any{
+		{"fqdn": "10.128.48.0/24", "view": "default", "zone_format": "IPV4"},
+		{"fqdn": "10.128.49.0/24", "view": "default", "zone_format": "IPV4"},
+	}, now); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "10.128.48.0/24", "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "10", "ptrdname": "host48.example.com", "zone": "10.128.48.0/24"},
+	}, now); err != nil {
+		t.Fatalf("write 48 record cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "10.128.49.0/24", "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "10", "ptrdname": "host49.example.com", "zone": "10.128.49.0/24"},
+	}, now); err != nil {
+		t.Fatalf("write 49 record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "10.128.48.0/23", "--columns", "zone,name,value"}); err != nil {
+		t.Fatalf("dns list parent CIDR scope: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode records: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 2 {
+		t.Fatalf("record rows = %#v", rows)
+	}
+	if cleanString(rows[0]["zone"]) != "10.128.48.0/24" || cleanString(rows[1]["zone"]) != "10.128.49.0/24" {
+		t.Fatalf("record zones = %#v", rows)
+	}
+}
+
 func TestDNSListColumnsLimitJSONOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("dns list should use fresh cache, got %s %s", r.Method, r.URL.Path)

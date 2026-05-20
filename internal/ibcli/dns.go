@@ -2281,6 +2281,9 @@ func recordKey(recordType string, item map[string]any) string {
 func isZoneOrChild(zoneName, parentZone string) bool {
 	zone := strings.ToLower(strings.TrimRight(zoneName, "."))
 	parent := strings.ToLower(strings.TrimRight(parentZone, "."))
+	if reverseCIDRZoneInScope(zone, parent, true) {
+		return true
+	}
 	return zone == parent || strings.HasSuffix(zone, "."+parent)
 }
 
@@ -2288,6 +2291,18 @@ func isSameZone(zoneName, targetZone string) bool {
 	zone := strings.ToLower(strings.TrimRight(strings.TrimSpace(zoneName), "."))
 	target := strings.ToLower(strings.TrimRight(strings.TrimSpace(targetZone), "."))
 	return zone != "" && zone == target
+}
+
+func reverseCIDRZoneInScope(zoneName string, parentZone string, includeChildren bool) bool {
+	zonePrefix, zoneOK := parseIPv4Prefix(zoneName)
+	parentPrefix, parentOK := parseIPv4Prefix(parentZone)
+	if !zoneOK || !parentOK {
+		return false
+	}
+	if zonePrefix == parentPrefix {
+		return true
+	}
+	return includeChildren && zonePrefix.Bits() > parentPrefix.Bits() && parentPrefix.Contains(zonePrefix.Addr())
 }
 
 func isForwardZone(zone map[string]any) bool {
@@ -2471,6 +2486,9 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 
 func (a *App) listRecordsForZone(profile Profile, client *WapiClient, zoneName string, recursive bool, enrich bool) ([]TypedRecord, error) {
 	if !recursive {
+		if records, handled, err := a.listRecordsForReverseCIDRScope(profile, client, zoneName, enrich); handled || err != nil {
+			return records, err
+		}
 		return a.cachedRecordsForZoneWithDetails(profile, client, zoneName, enrich)
 	}
 	zones, err := a.searchZones(profile, client, zoneName, true)
@@ -2496,6 +2514,61 @@ func (a *App) listRecordsForZone(profile Profile, client *WapiClient, zoneName s
 	}
 	sortRecords(records)
 	return records, nil
+}
+
+func (a *App) listRecordsForReverseCIDRScope(profile Profile, client *WapiClient, zoneName string, enrich bool) ([]TypedRecord, bool, error) {
+	scopeZones, err := a.reverseCIDRScopeZones(profile, client, zoneName)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(scopeZones) == 0 {
+		return nil, false, nil
+	}
+	batches, err := a.searchZoneRecordBatches(profile, client, scopeZones, enrich, nil)
+	if err != nil {
+		return nil, true, err
+	}
+	return recordsFromZoneRecordBatches(batches), true, nil
+}
+
+func (a *App) reverseCIDRScopeZones(profile Profile, client *WapiClient, zoneName string) ([]map[string]any, error) {
+	scope, ok := parseIPv4Prefix(zoneName)
+	if !ok || scope.Bits() >= derivedNetworkCIDRBits {
+		return nil, nil
+	}
+	zones, err := a.searchZones(profile, client, "", false)
+	if err != nil {
+		return nil, err
+	}
+	scoped := make([]map[string]any, 0)
+	for _, zone := range zones {
+		zoneName := cleanString(zone["fqdn"])
+		if reverseCIDRZoneInScope(zoneName, scope.String(), true) {
+			scoped = append(scoped, zone)
+		}
+	}
+	sort.SliceStable(scoped, func(i, j int) bool {
+		return compareNetworkCIDR(cleanString(scoped[i]["fqdn"]), cleanString(scoped[j]["fqdn"])) < 0
+	})
+	return scoped, nil
+}
+
+func recordsFromZoneRecordBatches(batches []zoneRecordBatch) []TypedRecord {
+	seen := map[string]bool{}
+	records := make([]TypedRecord, 0)
+	for _, batch := range batches {
+		for _, record := range batch.Records {
+			record.Item["zone"] = firstNonEmpty(cleanString(record.Item["zone"]), batch.ZoneName)
+			key := recordKey(record.Type, record.Item)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			records = append(records, record)
+		}
+	}
+	sortRecords(records)
+	return records
 }
 
 func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones []map[string]any, enrich bool, progress SearchProgressFunc) ([]zoneRecordBatch, error) {

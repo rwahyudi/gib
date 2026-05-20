@@ -32,6 +32,76 @@ func TestCompleteZoneNamesUsesCacheAndFilters(t *testing.T) {
 	}
 }
 
+func TestDNSListCompletionUsesResolvedDNSView(t *testing.T) {
+	app := testApp(t)
+	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")
+	defaultView := profile
+	if err := app.writeCachedZones(defaultView, []map[string]any{
+		{"fqdn": "10.128.48.0/24", "zone_format": "IPV4"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write default-view cache: %v", err)
+	}
+	activeView := profile
+	activeView.DNSView = "DNS Zone View"
+	if err := app.writeCachedZones(activeView, []map[string]any{
+		{"fqdn": "10.128.49.0/24", "zone_format": "IPV4"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write active-view cache: %v", err)
+	}
+	t.Setenv(defaultViewEnv, "DNS Zone View")
+
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	if err := app.Execute([]string{"__complete", "dns", "list", "10.128.49"}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "10.128.49.0/24") || strings.Contains(output, "10.128.48.0/24") {
+		t.Fatalf("dns list completion used wrong DNS view:\n%s", output)
+	}
+}
+
+func TestDNSListCompletionIncludesIPAMParentAndDerivedChildCIDRs(t *testing.T) {
+	app := testApp(t)
+	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")
+	if err := app.writeCachedZones(profile, []map[string]any{
+		{"fqdn": "10.128.48.0/24", "zone_format": "IPV4"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedNetworkViews(profile, []map[string]any{{"name": "default"}}, time.Now()); err != nil {
+		t.Fatalf("write network view cache: %v", err)
+	}
+	if err := app.writeCachedNetworks(profile, "default", []map[string]any{
+		{"network": "10.128.48.0/23", "network_view": "default"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write network cache: %v", err)
+	}
+	if err := app.writeCachedNetworkContainers(profile, "default", nil, time.Now()); err != nil {
+		t.Fatalf("write container cache: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	if err := app.Execute([]string{"__complete", "dns", "list", "10.128.48"}); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"10.128.48.0/23",
+		"10.128.48.0/24",
+		"10.128.49.0/24",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dns list completion missing %s:\n%s", want, output)
+		}
+	}
+}
+
 func TestCachedZoneNamesReturnsStaleCacheAndQueuesRefresh(t *testing.T) {
 	app := testApp(t)
 	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")

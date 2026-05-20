@@ -76,7 +76,7 @@ For non-interactive stderr, `-o json`, or `-o csv`, the progress view is disable
 
 ## DNS List and Search Scope
 
-`ib dns list [ZONE]` lists only the resolved current zone by default. Use `-r` or `--recursive` to include child authoritative zones under that zone. Use `-t`/`--type` to filter comma-separated record types, `-e`/`--exclude` to hide records whose name, value, or comment matches the excluded keyword, `-s`/`--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`, and `-C`/`--columns` to print selected output columns.
+`ib dns list [ZONE]` lists only the resolved current zone by default. Use `-r` or `--recursive` to include child authoritative zones under that zone. For IPv4 reverse DNS, a larger CIDR such as `10.128.48.0/23` is treated as a scope and lists records from matching child reverse zones such as `10.128.48.0/24` and `10.128.49.0/24`. Use `-t`/`--type` to filter comma-separated record types, `-e`/`--exclude` to hide records whose name, value, or comment matches the excluded keyword, `-s`/`--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`, and `-C`/`--columns` to print selected output columns.
 
 `ib dns search KEY` searches only the resolved current zone by default. Use `-z ZONE` to choose a different root zone, and add `-r` or `--recursive` to include child authoritative zones under that root. `--global` still searches every searchable zone in the selected DNS view and cannot be combined with `--recursive`. Search supports the same `-t`/`--type`, `-e`/`--exclude`, `-s`/`--sort`, and `-C`/`--columns` record filters as list.
 
@@ -112,7 +112,7 @@ When WAPI returns HTML or another non-JSON payload with a successful HTTP status
 
 `ib dns search KEY -C <tab><tab>` and `ib dns list --columns <tab><tab>` complete record output columns. Comma-separated completion skips already selected columns, so `--columns name,` offers `name,type`, `name,value`, and the remaining columns.
 
-`ib dns list <tab><tab>` offers command and inherited flags such as `-C`, `-e`, `-s`, and `-o` even before a zone argument is typed. Non-flag text after `ib dns list` still completes zone names.
+`ib dns list <tab><tab>` offers command and inherited flags such as `-C`, `-e`, `-s`, and `-o` even before a zone argument is typed. Non-flag text after `ib dns list` completes zone names from the resolved active DNS view. For IPv4 reverse DNS, it also includes matching IPAM CIDR scopes and derived `/24` child candidates when only a larger cached parent is present.
 
 `ib dns zone list -t <tab><tab>`, `ib dns zone list -s <tab><tab>`, and `ib dns zone list -C <tab><tab>` complete zone formats, sort fields, and output columns. `ib dns zone list -<tab><tab>` completes `--view`/`-v` and zone-list filters, but not `--zone`/`-z`.
 
