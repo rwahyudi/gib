@@ -9,7 +9,7 @@
 %global forgeurl https://github.com/rwahyudi/gib
 %global gomodulesmode GO111MODULE=on
 
-Version: 0.3.0
+Version: 0.3.3
 %global tag v%{version}
 %gometa
 
@@ -80,5 +80,8 @@ export CGO_ENABLED=1
 %{_mandir}/man1/ib.1*
 
 %changelog
+* Fri May 22 2026 rwahyudi <rwahyudi@users.noreply.github.com> - 0.3.3-1
+- Release 0.3.3
+
 * Fri May 15 2026 rwahyudi <rwahyudi@users.noreply.github.com> - 0.3.0-1
 - Initial package for Copr and EPEL review

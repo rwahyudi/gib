@@ -1,19 +1,17 @@
 # gib
 
-`ib` a fast, lightweight , operator-focused single binary CLI for managing
-Infoblox DNS records without living in the web UI. It keeps Ad-Hoc & day-to-day
-DNS work close to the shell, super fast and extremely easy.
+[![Latest release](https://img.shields.io/github/v/release/rwahyudi/gib?color=0ea5e9)](https://github.com/rwahyudi/gib/releases/latest)
+![Go 1.24](https://img.shields.io/badge/go-1.24-00ADD8)
+[![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-
-
+`ib` is a fast, lightweight, operator-focused CLI for managing Infoblox DNS and
+IPAM work from the shell.
 
 ![ib cli preview](docs/assets/go-record1.gif)
 
-The CLI is designed with performance in mind.  Read-heavy workflows use a
-validated Grid Master Candidate when available.  Record listing and search use
-various caching techniques and multi threading to ensure snappy experience.
-
-
+Read-heavy workflows can use a validated Grid Master Candidate, and large
+record/IPAM searches use local SQLite caching plus bounded workers to stay
+responsive.
 
 ## Features
 
@@ -35,152 +33,68 @@ various caching techniques and multi threading to ensure snappy experience.
 - Compact operator output with colorful tables, current-context footers,
   JSON/CSV output, and progress display for larger searches.
 
-## Security Scanning
+## Install
 
-GitHub Actions runs tests,
-[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck),
-[gosec](https://github.com/securego/gosec), and
-[Trivy](https://github.com/aquasecurity/trivy) filesystem scans on pushes,
-pull requests, and a weekly schedule.
-[Dependabot](https://docs.github.com/en/code-security/dependabot) monitors Go
-modules and GitHub Actions updates weekly.
-
-Run the same checks locally when the tools are installed:
-
-```bash
-env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go test ./...
-scripts/check-licenses.sh
-env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod govulncheck ./...
-gosec ./...
-trivy fs --scanners vuln,secret,license .
-```
-
-## Installation From Copr
-
-The Fedora/EPEL package name is `gib`; it installs the CLI as `/usr/bin/ib`.
+For Fedora or EPEL, Copr is the shortest path. The package is named `gib` and
+installs the command as `/usr/bin/ib`.
 
 ```bash
 sudo dnf install dnf-plugins-core
 sudo dnf copr enable rwahyudi/gib
 sudo dnf install gib
-ib --help
 ```
 
-RPM packaging sources are in [`gib.spec`](gib.spec),
-[`go-vendor-tools.toml`](go-vendor-tools.toml), and
-[`packaging/rpm/README.md`](packaging/rpm/README.md). Start with the EPEL 10
-Copr chroot; add EPEL 9 only after confirming that its buildroot has a Go
-toolchain new enough for this module.
-
-## Installation From GitHub Release
-
-Download packages from the [latest GitHub release](https://github.com/rwahyudi/gib/releases/latest).
-The examples below resolve the latest published release at install time. To pin
-a specific release instead, set `VERSION` manually, for example
-`VERSION=<version-without-v>`.
-
-Standalone binary:
+For GitHub releases, the package assets are named `ib_<version>_<os>_<arch>`.
+These commands resolve the latest release at install time.
 
 ```bash
 VERSION="$(curl -fsSL https://api.github.com/repos/rwahyudi/gib/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
-curl -fLO "https://github.com/rwahyudi/gib/releases/download/v${VERSION}/ib_${VERSION}_linux_amd64.tar.gz"
-tar -xzf "ib_${VERSION}_linux_amd64.tar.gz" ib
+BASE="https://github.com/rwahyudi/gib/releases/download/v${VERSION}"
+```
+
+Linux tarball:
+
+```bash
+curl -fL "$BASE/ib_${VERSION}_linux_amd64.tar.gz" | tar -xz ib
 sudo install -m 0755 ib /usr/local/bin/ib
 ib --help
+```
 
-# Optional: install Bash autocomplete for all users.
+RPM or DEB package:
+
+```bash
+curl -fLO "$BASE/ib_${VERSION}_linux_amd64.rpm"
+sudo dnf install "./ib_${VERSION}_linux_amd64.rpm"
+
+curl -fLO "$BASE/ib_${VERSION}_linux_amd64.deb"
+sudo apt install "./ib_${VERSION}_linux_amd64.deb"
+```
+
+RPM and DEB packages install `ib` to `/usr/local/bin/ib` and Bash completion to
+`/etc/bash_completion.d/ib`. For the tarball, install completion manually:
+
+```bash
 sudo mkdir -p /etc/bash_completion.d
 ib config completion bash | sudo tee /etc/bash_completion.d/ib >/dev/null
 ```
 
-Open a new shell after installing the completion file, or source it directly with
-`. /etc/bash_completion.d/ib`.
+Open a new shell after installing completion.
 
-RHEL derivatives:
-
-```bash
-VERSION="$(curl -fsSL https://api.github.com/repos/rwahyudi/gib/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
-curl -fLO "https://github.com/rwahyudi/gib/releases/download/v${VERSION}/ib_${VERSION}_linux_amd64.rpm"
-sudo dnf install "./ib_${VERSION}_linux_amd64.rpm"
-ib --help
-```
-
-Debian derivatives:
-
-```bash
-VERSION="$(curl -fsSL https://api.github.com/repos/rwahyudi/gib/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
-curl -fLO "https://github.com/rwahyudi/gib/releases/download/v${VERSION}/ib_${VERSION}_linux_amd64.deb"
-sudo apt install "./ib_${VERSION}_linux_amd64.deb"
-ib --help
-```
-
-RPM and DEB packages install `ib` to `/usr/local/bin/ib` and install Bash completion to `/etc/bash_completion.d/ib`. Open a new shell after package installation to load completion.
-
-## Installation on Windows
-
-Native Windows release builds are published as portable ZIP archives when the
-release includes a Windows asset. The commands below resolve the
-[latest GitHub release](https://github.com/rwahyudi/gib/releases/latest),
-verify the expected ZIP exists, extract `ib.exe`, and place it on your user
-`PATH`:
+Windows ZIP:
 
 ```powershell
-$latest = Invoke-RestMethod -Uri "https://api.github.com/repos/rwahyudi/gib/releases/latest"
+$latest = Invoke-RestMethod "https://api.github.com/repos/rwahyudi/gib/releases/latest"
 $version = $latest.tag_name.TrimStart("v")
-$archive = "ib_${version}_windows_amd64.zip"
-$asset = $latest.assets | Where-Object { $_.name -eq $archive } | Select-Object -First 1
-if (-not $asset) {
-  throw "Windows release asset $archive was not found in $($latest.tag_name)."
-}
-
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive
-Expand-Archive ".\$archive" -DestinationPath ".\ib-$version" -Force
-
-$userBin = Join-Path $HOME "bin"
-New-Item -ItemType Directory -Force $userBin | Out-Null
-Copy-Item ".\ib-$version\ib.exe" (Join-Path $userBin "ib.exe") -Force
-
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if (($userPath -split ";") -notcontains $userBin) {
-  $newPath = ($userPath.TrimEnd(";") + ";$userBin").TrimStart(";")
-  [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-}
+$asset = $latest.assets | Where-Object Name -eq "ib_${version}_windows_amd64.zip" | Select-Object -First 1
+Invoke-WebRequest $asset.browser_download_url -OutFile "ib_${version}_windows_amd64.zip"
+New-Item -ItemType Directory -Force "$HOME\bin" | Out-Null
+Expand-Archive "ib_${version}_windows_amd64.zip" "$HOME\bin\ib-$version" -Force
+Copy-Item "$HOME\bin\ib-$version\ib.exe" "$HOME\bin\ib.exe" -Force
 ```
 
-Open a new PowerShell window after updating `PATH`, then verify the install:
-
-```powershell
-ib --help
-ib config new --default
-```
-
-If you prefer to build from source, install Go 1.24 or newer and build
-`ib.exe` locally:
-
-```powershell
-winget install GoLang.Go
-git clone https://github.com/rwahyudi/gib.git
-cd gib
-
-$env:GOCACHE = "$env:TEMP\go-build"
-$env:GOMODCACHE = "$env:TEMP\go-mod"
-go build -buildvcs=false -o ib.exe .\cmd\ib
-
-$userBin = Join-Path $HOME "bin"
-New-Item -ItemType Directory -Force $userBin | Out-Null
-Copy-Item .\ib.exe (Join-Path $userBin "ib.exe") -Force
-
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if (($userPath -split ";") -notcontains $userBin) {
-  $newPath = ($userPath.TrimEnd(";") + ";$userBin").TrimStart(";")
-  [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-}
-```
-
-Native Windows profile passwords are encrypted with user-scope Windows DPAPI.
-Run `ib config completion windows` in PowerShell to install native completion
-for the current user, then open a new PowerShell window. Bash, Zsh, and Fish
-completion can still be generated for WSL, Git Bash, or MSYS2.
+Add `$HOME\bin` to the user `PATH` if needed, open a new PowerShell window, and
+run `ib config completion windows`. For source builds, see
+[Build From Source](docs/build-from-source.md).
 
 ## Setup
 
@@ -238,29 +152,9 @@ ib dns --view "DNS Zone View" search app
 
 DNS listing/search and IPAM read workflows prefer local SQLite cache rows. Freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` are returned immediately while one detached refresh process updates the cache. DNS records revalidate with the zone serial before refreshing `/allrecords`; IPAM cache refreshes skip serial checks and re-download the relevant WAPI object.
 
-Code comments are intentionally concentrated around routing, config validation, cache/SWR, leases, completion, and background refresh handoff. Update those comments in the same change whenever the related behavior changes.
-
-For a deeper explanation with diagrams, see [Performance & Caching](docs/performance-caching.md), which includes Nord-styled cache decision, read/write worker-flow, and SQLite table diagrams.
-
-## Libraries Used
-
-- [Cobra](https://github.com/spf13/cobra) provides the command tree, flags, and
-  shell completion protocol.
-- [pflag](https://github.com/spf13/pflag) handles POSIX-style long and short
-  flags underneath Cobra.
-- [Lipgloss](https://github.com/charmbracelet/lipgloss) styles tables, context
-  footers, and operator-facing messages.
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) and
-  [Bubbles](https://github.com/charmbracelet/bubbles) power interactive progress
-  and list-style terminal UI.
-- [Huh](https://github.com/charmbracelet/huh) provides confirmation and select
-  prompts for destructive or ambiguous actions.
-- [go-sqlite3](https://github.com/mattn/go-sqlite3) stores local zone and record
-  cache data in SQLite.
-- [go-isatty](https://github.com/mattn/go-isatty) detects interactive terminals
-  so scripts keep clean output.
-- [GoReleaser](https://goreleaser.com/) builds release binaries, the Windows
-  ZIP archive, and Linux RPM/DEB packages.
+For source builds, development checks, and packaging notes, see
+[Build From Source](docs/build-from-source.md). For cache diagrams and worker
+behavior, see [Performance & Caching](docs/performance-caching.md).
 
 ## Command Reference
 
