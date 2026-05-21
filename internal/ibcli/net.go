@@ -55,6 +55,18 @@ type NetSort struct {
 	Desc    bool
 }
 
+type netCacheOptions struct {
+	ForceRefresh  bool
+	ServeExpired  bool
+	OnStaleServed func()
+}
+
+func (options netCacheOptions) notifyStaleServed() {
+	if options.OnStaleServed != nil {
+		options.OnStaleServed()
+	}
+}
+
 func (a *App) runNetViewList() error {
 	profile, client, err := a.configuredClient()
 	if err != nil {
@@ -80,20 +92,28 @@ func (a *App) runNetViewList() error {
 	return a.emitNetRows(fmt.Sprintf("IPAM Network Views (%d)", len(rows)), networkViewOutputColumns, rows)
 }
 
-func (a *App) runNetList(search string, networkView string, option NetSort, columns []string) error {
-	return a.runNetObjectList(search, networkView, option, columns)
+func (a *App) runNetList(search string, networkView string, option NetSort, columns []string, refresh bool) error {
+	return a.runNetObjectList(search, networkView, option, columns, refresh)
 }
 
-func (a *App) runNetSearch(search string, networkView string, option NetSort, columns []string) error {
-	return a.runNetObjectList(search, networkView, option, columns)
+func (a *App) runNetSearch(search string, networkView string, option NetSort, columns []string, refresh bool) error {
+	return a.runNetObjectList(search, networkView, option, columns, refresh)
 }
 
-func (a *App) runNetObjectList(search string, networkView string, option NetSort, columns []string) error {
+func (a *App) runNetObjectList(search string, networkView string, option NetSort, columns []string, refresh bool) error {
 	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
-	objects, err := a.cachedNetworkObjectsForList(profile, client, networkView)
+	staleCacheServed := false
+	cacheOptions := netCacheOptions{
+		ForceRefresh: refresh,
+		ServeExpired: !refresh,
+		OnStaleServed: func() {
+			staleCacheServed = true
+		},
+	}
+	objects, err := a.cachedNetworkObjectsForList(profile, client, networkView, cacheOptions)
 	if err != nil {
 		return err
 	}
@@ -109,27 +129,33 @@ func (a *App) runNetObjectList(search string, networkView string, option NetSort
 		a.PrintWarning("No IPAM networks or containers found.")
 	}
 	if a.isTableOutput() {
-		return a.emitNetworkRows(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), columns, rows)
+		if err := a.emitNetworkRows(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), columns, rows); err != nil {
+			return err
+		}
+		if staleCacheServed {
+			a.PrintInfo("INFO: showing cached IPAM data; refresh queued in background")
+		}
+		return nil
 	}
 	return a.emitRows(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), columns, rows)
 }
 
-func (a *App) cachedNetworkObjectsForList(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+func (a *App) cachedNetworkObjectsForList(profile Profile, client *WapiClient, networkView string, options netCacheOptions) ([]map[string]any, error) {
 	networkView = strings.TrimSpace(networkView)
 	if networkView != "" {
-		return a.cachedNetworkObjectsForView(profile, client, networkView)
+		return a.cachedNetworkObjectsForView(profile, client, networkView, options)
 	}
 
 	var rows []map[string]any
 	var fallbackErr error
-	unscopedRows, err := a.cachedNetworkObjectsForView(profile, client, "")
+	unscopedRows, err := a.cachedNetworkObjectsForView(profile, client, "", options)
 	if err == nil {
 		rows = append(rows, unscopedRows...)
 	} else {
 		fallbackErr = err
 	}
 
-	views, err := a.cachedNetworkViews(profile, client)
+	views, err := a.cachedNetworkViewsWithOptions(profile, client, options)
 	if err != nil {
 		if len(rows) > 0 {
 			return dedupeNetworkObjectRows(rows), nil
@@ -151,7 +177,7 @@ func (a *App) cachedNetworkObjectsForList(profile Profile, client *WapiClient, n
 	}
 
 	for _, viewName := range viewNames {
-		viewRows, err := a.cachedNetworkObjectsForView(profile, client, viewName)
+		viewRows, err := a.cachedNetworkObjectsForView(profile, client, viewName, options)
 		if err != nil {
 			if len(rows) == 0 {
 				return nil, err
@@ -163,12 +189,12 @@ func (a *App) cachedNetworkObjectsForList(profile Profile, client *WapiClient, n
 	return dedupeNetworkObjectRows(rows), nil
 }
 
-func (a *App) cachedNetworkObjectsForView(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
-	networks, err := a.cachedNetworks(profile, client, networkView)
+func (a *App) cachedNetworkObjectsForView(profile Profile, client *WapiClient, networkView string, options netCacheOptions) ([]map[string]any, error) {
+	networks, err := a.cachedNetworksWithOptions(profile, client, networkView, options)
 	if err != nil {
 		return nil, err
 	}
-	containers, err := a.cachedNetworkContainers(profile, client, networkView)
+	containers, err := a.cachedNetworkContainersWithOptions(profile, client, networkView, options)
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +309,10 @@ func queryNetworkContainers(client *WapiClient, networkView string) ([]map[strin
 }
 
 func (a *App) cachedNetworkViews(profile Profile, client *WapiClient) ([]map[string]any, error) {
+	return a.cachedNetworkViewsWithOptions(profile, client, netCacheOptions{})
+}
+
+func (a *App) cachedNetworkViewsWithOptions(profile Profile, client *WapiClient, options netCacheOptions) ([]map[string]any, error) {
 	return a.cachedNetRows(
 		profile,
 		netCacheKindViews,
@@ -290,10 +320,15 @@ func (a *App) cachedNetworkViews(profile Profile, client *WapiClient) ([]map[str
 		"",
 		func() (cachedPayload, error) { return a.readCachedNetworkViews(profile) },
 		func() ([]map[string]any, error) { return a.refreshNetworkViewCache(profile, client) },
+		options,
 	)
 }
 
 func (a *App) cachedNetworks(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	return a.cachedNetworksWithOptions(profile, client, networkView, netCacheOptions{})
+}
+
+func (a *App) cachedNetworksWithOptions(profile Profile, client *WapiClient, networkView string, options netCacheOptions) ([]map[string]any, error) {
 	networkView = strings.TrimSpace(networkView)
 	return a.cachedNetRows(
 		profile,
@@ -302,10 +337,15 @@ func (a *App) cachedNetworks(profile Profile, client *WapiClient, networkView st
 		"",
 		func() (cachedPayload, error) { return a.readCachedNetworks(profile, networkView) },
 		func() ([]map[string]any, error) { return a.refreshNetworkCache(profile, client, networkView) },
+		options,
 	)
 }
 
 func (a *App) cachedNetworkContainers(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	return a.cachedNetworkContainersWithOptions(profile, client, networkView, netCacheOptions{})
+}
+
+func (a *App) cachedNetworkContainersWithOptions(profile Profile, client *WapiClient, networkView string, options netCacheOptions) ([]map[string]any, error) {
 	networkView = strings.TrimSpace(networkView)
 	return a.cachedNetRows(
 		profile,
@@ -314,6 +354,7 @@ func (a *App) cachedNetworkContainers(profile Profile, client *WapiClient, netwo
 		"",
 		func() (cachedPayload, error) { return a.readCachedNetworkContainers(profile, networkView) },
 		func() ([]map[string]any, error) { return a.refreshNetworkContainerCache(profile, client, networkView) },
+		options,
 	)
 }
 
@@ -326,34 +367,40 @@ func (a *App) cachedIPv4Addresses(profile Profile, client *WapiClient, ip string
 		ip,
 		func() (cachedPayload, error) { return a.readCachedIPv4Addresses(profile, ip, networkView) },
 		func() ([]map[string]any, error) { return a.refreshIPv4AddressCache(profile, client, ip, networkView) },
+		netCacheOptions{},
 	)
 }
 
-func (a *App) cachedNetRows(profile Profile, kind string, networkView string, ip string, read func() (cachedPayload, error), refresh func() ([]map[string]any, error)) ([]map[string]any, error) {
+func (a *App) cachedNetRows(profile Profile, kind string, networkView string, ip string, read func() (cachedPayload, error), refresh func() ([]map[string]any, error), options netCacheOptions) ([]map[string]any, error) {
 	now := time.Now()
 	entry, err := read()
 	if err == nil && entry.CacheFound {
-		if a.cacheEntryFresh(entry, now) {
+		if !options.ForceRefresh && a.cacheEntryFresh(entry, now) {
 			return entry.Rows, nil
 		}
-		// IPAM has no cheap serial equivalent. Inside SWR, return cached data and
-		// let one lease-protected background worker re-download the same WAPI data.
-		if now.Unix() < entry.StaleExpiresAt {
+		// IPAM has no cheap serial equivalent. List/search may choose latency over
+		// freshness and serve expired rows while one lease-protected worker
+		// re-downloads the same WAPI data in the background.
+		if !options.ForceRefresh && (now.Unix() < entry.StaleExpiresAt || options.ServeExpired) {
 			a.startNetCacheRefreshAsync(profile, kind, networkView, ip)
+			options.notifyStaleServed()
 			return entry.Rows, nil
 		}
 	}
 
-	if waited, waitErr := a.waitForActiveNetRefresh(profile, kind, networkView, ip, a.maxBackgroundWorkerWait(), 2*time.Millisecond); waitErr == nil && waited {
-		now = time.Now()
-		entry, err = read()
-		if err == nil && entry.CacheFound {
-			if a.cacheEntryFresh(entry, now) {
-				return entry.Rows, nil
-			}
-			if now.Unix() < entry.StaleExpiresAt {
-				a.startNetCacheRefreshAsync(profile, kind, networkView, ip)
-				return entry.Rows, nil
+	if !options.ForceRefresh {
+		if waited, waitErr := a.waitForActiveNetRefresh(profile, kind, networkView, ip, a.maxBackgroundWorkerWait(), 2*time.Millisecond); waitErr == nil && waited {
+			now = time.Now()
+			entry, err = read()
+			if err == nil && entry.CacheFound {
+				if a.cacheEntryFresh(entry, now) {
+					return entry.Rows, nil
+				}
+				if now.Unix() < entry.StaleExpiresAt || options.ServeExpired {
+					a.startNetCacheRefreshAsync(profile, kind, networkView, ip)
+					options.notifyStaleServed()
+					return entry.Rows, nil
+				}
 			}
 		}
 	}

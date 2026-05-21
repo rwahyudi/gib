@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="500" viewBox="0 0 980 500" role="img" aria-labelledby="title desc">
   <title id="title">Nord cache decision flow</title>
-  <desc id="desc">Compact flow showing how ib returns fresh cache, serves stale rows inside SWR, or refreshes DNS/IPAM data from Infoblox.</desc>
+  <desc id="desc">Compact flow showing how ib returns fresh cache, serves stale rows, or refreshes DNS/IPAM data from Infoblox.</desc>
   <defs>
     <linearGradient id="page-bg" x1="0" y1="0" x2="980" y2="500" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#2E3440" />
@@ -56,7 +56,7 @@
   <rect class="bg" width="980" height="500" />
   <rect class="panel" x="32" y="36" width="916" height="426" rx="5" />
   <text class="title" x="60" y="72">Cache Decision Flow</text>
-  <text class="subtitle" x="60" y="95">Fresh rows return immediately. Stale rows inside SWR return immediately and refresh in the background.</text>
+  <text class="subtitle" x="60" y="95">Fresh rows return immediately. Stale rows return on the fast path; IPAM list/search may serve older cache.</text>
 
   <rect class="entry node" x="60" y="133" width="150" height="56" rx="4" />
   <text class="label" x="83" y="157">Read request</text>
@@ -85,8 +85,8 @@
   <text class="small" x="739" y="282">and start refresh</text>
 
   <rect class="fetch node" x="470" y="344" width="185" height="70" rx="4" />
-  <text class="label" x="493" y="369">Missing or too stale</text>
-  <text class="small" x="493" y="387">foreground refresh</text>
+  <text class="label" x="493" y="369">Missing or refresh</text>
+  <text class="small" x="493" y="387">foreground WAPI read</text>
 
   <rect class="fetch node" x="715" y="330" width="175" height="98" rx="4" />
   <text class="label" x="739" y="354">Refresh cache</text>
@@ -103,6 +103,6 @@
   <path class="line fetch-line" d="M655 379 L715 379" />
 
   <text class="small" x="470" y="114">cache hit path</text>
-  <text class="small" x="470" y="220">stale-while-revalidate path</text>
-  <text class="small" x="470" y="332">blocking refresh path</text>
+  <text class="small" x="470" y="220">stale or cached IPAM list/search path</text>
+  <text class="small" x="470" y="332">missing cache or --refresh path</text>
 </svg>

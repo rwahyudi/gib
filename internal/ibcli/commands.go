@@ -254,6 +254,7 @@ func (a *App) netListCommand() *cobra.Command {
 	var networkView string
 	var sortRaw string
 	var columnsRaw string
+	var refresh bool
 	cmd := &cobra.Command{
 		Use:               "list [SEARCH]",
 		Short:             "List IPAM networks and containers",
@@ -272,10 +273,11 @@ func (a *App) netListCommand() *cobra.Command {
 			if len(args) > 0 {
 				search = args[0]
 			}
-			return a.runNetList(search, networkView, netSort, columns)
+			return a.runNetList(search, networkView, netSort, columns, refresh)
 		},
 	}
 	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh IPAM cache before listing")
 	addNetSortFlag(cmd, &sortRaw)
 	addNetworkColumnsFlag(cmd, &columnsRaw)
 	return cmd
@@ -285,6 +287,7 @@ func (a *App) netSearchCommand() *cobra.Command {
 	var networkView string
 	var sortRaw string
 	var columnsRaw string
+	var refresh bool
 	cmd := &cobra.Command{
 		Use:               "search KEYWORD",
 		Short:             "Search IPAM networks and containers by type, CIDR, view, or comment",
@@ -299,10 +302,11 @@ func (a *App) netSearchCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.runNetSearch(args[0], networkView, netSort, columns)
+			return a.runNetSearch(args[0], networkView, netSort, columns, refresh)
 		},
 	}
 	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh IPAM cache before searching")
 	addNetSortFlag(cmd, &sortRaw)
 	addNetworkColumnsFlag(cmd, &columnsRaw)
 	return cmd

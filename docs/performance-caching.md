@@ -11,8 +11,8 @@ worker pool.
 | --- | --- |
 | Cache scope | DNS rows are keyed by profile, DNS view, and zone. IPAM rows are keyed by profile plus network view or IP. |
 | Freshness | Fresh until `cached_at + cache_ttl`; `fresh_until` is not stored. |
-| Stale window | Record and IPAM rows can be served stale until `stale_expires_at`. |
-| Revalidation | Stale rows inside SWR return immediately and start one background refresh. |
+| Stale window | Record and targeted IPAM rows can be served stale until `stale_expires_at`; IPAM list/search can serve older cached rows by default. |
+| Revalidation | Stale rows return immediately on the fast path and start one background refresh. |
 | IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. |
 | Read endpoint | GET requests use `read_server` when configured. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
@@ -36,16 +36,18 @@ Default tuning in the profile config `[meta]` section:
 
 The important performance point is the stale-while-revalidate path: if a record
 or IPAM cache row is expired but still inside `records_cache_swr_ttl`, the user
-gets cached data immediately. `ib` only blocks on Infoblox when the row is
-missing or already outside the stale window. Before doing that foreground work,
-it waits up to `max_background_worker_wait` seconds for an active refresh of the
-same cache scope to finish.
+gets cached data immediately. `ib net list` and `ib net search` prefer latency
+even more aggressively: when network-view, network, or container cache rows
+exist, they return those rows even after SWR expiry and queue a background
+refresh. Use `--refresh` on those commands when the command must block for fresh
+WAPI data. DNS record reads and targeted IPAM reads only block on Infoblox when
+the row is missing or already outside the stale window. Before doing that
+foreground work, they wait up to `max_background_worker_wait` seconds for an
+active refresh of the same cache scope to finish.
 
-For IPAM list/search, cached parent CIDRs can also produce direct `/24` child
-rows when the child objects are not present in cache, keeping split network
-candidates visible without a foreground Infoblox lookup. Unfiltered IPAM lists
-append those derived rows after real cached rows, so real WAPI objects still
-take precedence.
+For IPAM list/search, cached parent CIDRs are not expanded into synthetic child
+rows. Results only include network and container objects returned by Infoblox or
+already present in local cache.
 
 Shell completion never performs a foreground Infoblox refresh for zone names,
 record names, or IPAM network CIDRs. With `completion_cache_prefetch = true`,

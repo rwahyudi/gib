@@ -719,7 +719,137 @@ func TestNetListReturnsSWRCacheAndStartsRefresh(t *testing.T) {
 	}
 }
 
-func TestNetListRefreshesExpiredCacheWithoutSerialCheck(t *testing.T) {
+func TestNetListReturnsExpiredCacheAndStartsRefresh(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("net list should return expired cache without foreground WAPI, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedNetworksEntry(profile, "default", []map[string]any{{
+		"_ref":         "network/old",
+		"network":      "192.0.2.0/24",
+		"network_view": "default",
+		"comment":      "Expired production",
+	}}, now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix()); err != nil {
+		t.Fatalf("write expired network cache: %v", err)
+	}
+	if err := app.writeCachedNetworkContainersEntry(profile, "default", []map[string]any{{
+		"_ref":         "networkcontainer/old",
+		"network":      "198.51.100.0/24",
+		"network_view": "default",
+		"comment":      "Expired container",
+	}}, now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix()); err != nil {
+		t.Fatalf("write expired container cache: %v", err)
+	}
+	var refreshes []string
+	app.backgroundNetRefresher = func(profile Profile, kind string, networkView string, ip string) error {
+		refreshes = append(refreshes, kind+"|"+networkView)
+		return nil
+	}
+
+	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default"}); err != nil {
+		t.Fatalf("net list expired: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if strings.Join(refreshes, ",") != netCacheKindNetworks+"|default,"+netCacheKindContainers+"|default" {
+		t.Fatalf("background refreshes = %#v", refreshes)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 2 || cleanString(rows[0]["comment"]) != "Expired production" || cleanString(rows[1]["comment"]) != "Expired container" {
+		t.Fatalf("expired cached network rows = %#v", rows)
+	}
+	if strings.Contains(stdout.String(), "INFO:") {
+		t.Fatalf("json output should not include stale cache notice:\n%s", stdout.String())
+	}
+}
+
+func TestNetListTableOutputShowsExpiredCacheNotice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("net list should return expired cache without foreground WAPI, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedNetworksEntry(profile, "default", []map[string]any{{
+		"_ref":         "network/old",
+		"network":      "192.0.2.0/24",
+		"network_view": "default",
+		"comment":      "Expired production",
+	}}, now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix()); err != nil {
+		t.Fatalf("write expired network cache: %v", err)
+	}
+	if err := app.writeCachedNetworkContainersEntry(profile, "default", nil, now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix()); err != nil {
+		t.Fatalf("write expired container cache: %v", err)
+	}
+	app.backgroundNetRefresher = func(profile Profile, kind string, networkView string, ip string) error {
+		return nil
+	}
+
+	if err := app.Execute([]string{"net", "list", "--network-view", "default"}); err != nil {
+		t.Fatalf("net list expired table: %v\nstdout:\n%s", err, stdout.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"IPAM Networks and Containers", "192.0.2.0/24", "INFO: showing cached IPAM data; refresh queued in background"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expired cache table output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestNetSearchReturnsExpiredCacheAndStartsRefresh(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("net search should return expired cache without foreground WAPI, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedNetworksEntry(profile, "default", []map[string]any{{
+		"_ref":         "network/old",
+		"network":      "192.0.2.0/24",
+		"network_view": "default",
+		"comment":      "Expired production",
+	}}, now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix()); err != nil {
+		t.Fatalf("write expired network cache: %v", err)
+	}
+	if err := app.writeCachedNetworkContainersEntry(profile, "default", []map[string]any{{
+		"_ref":         "networkcontainer/old",
+		"network":      "198.51.100.0/24",
+		"network_view": "default",
+		"comment":      "Expired container",
+	}}, now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix()); err != nil {
+		t.Fatalf("write expired container cache: %v", err)
+	}
+	var refreshes []string
+	app.backgroundNetRefresher = func(profile Profile, kind string, networkView string, ip string) error {
+		refreshes = append(refreshes, kind+"|"+networkView)
+		return nil
+	}
+
+	if err := app.Execute([]string{"-o", "json", "net", "search", "prod", "--network-view", "default"}); err != nil {
+		t.Fatalf("net search expired: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if strings.Join(refreshes, ",") != netCacheKindNetworks+"|default,"+netCacheKindContainers+"|default" {
+		t.Fatalf("background refreshes = %#v", refreshes)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 1 || cleanString(rows[0]["comment"]) != "Expired production" {
+		t.Fatalf("expired cached search rows = %#v", rows)
+	}
+}
+
+func TestNetListRefreshFlagRefreshesExpiredCacheWithoutSerialCheck(t *testing.T) {
 	var networkRequests int
 	var containerRequests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -773,8 +903,8 @@ func TestNetListRefreshesExpiredCacheWithoutSerialCheck(t *testing.T) {
 		t.Fatalf("write expired container cache: %v", err)
 	}
 
-	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default"}); err != nil {
-		t.Fatalf("net list expired: %v\nstdout:\n%s", err, stdout.String())
+	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default", "--refresh"}); err != nil {
+		t.Fatalf("net list refresh expired: %v\nstdout:\n%s", err, stdout.String())
 	}
 	if networkRequests != 1 {
 		t.Fatalf("network requests = %d, want 1", networkRequests)
