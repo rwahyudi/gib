@@ -1171,7 +1171,7 @@ func TestSearchExplicitZoneSkipsFQDNInference(t *testing.T) {
 	}
 }
 
-func TestGlobalSearchDoesNotInferZoneFromFQDNKeyword(t *testing.T) {
+func TestGlobalSearchKeepsGlobalScopeForFQDNKeyword(t *testing.T) {
 	zones := []map[string]any{
 		{"fqdn": "latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
 		{"fqdn": "net.latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
@@ -1194,6 +1194,73 @@ func TestGlobalSearchDoesNotInferZoneFromFQDNKeyword(t *testing.T) {
 	defer mu.Unlock()
 	if requestedZones["latrobe.edu.au"] != 1 || requestedZones["net.latrobe.edu.au"] != 1 {
 		t.Fatalf("global search did not query all zones: %#v", requestedZones)
+	}
+}
+
+func TestGlobalSearchFQDNMatchesRelativeNameInInferredZone(t *testing.T) {
+	const target = "wod-0003-sr02-v990.net.latrobe.edu.au"
+	zones := []map[string]any{
+		{"fqdn": "latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "net.latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "2.0.192.in-addr.arpa", "view": "default", "zone_format": "IPV4", "primary_type": "Grid"},
+		{"fqdn": "other.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}
+	var mu sync.Mutex
+	requestedZones := map[string]int{}
+	server := searchScopeServerWithRecords(t, zones, requestedZones, &mu, func(zone string) []map[string]any {
+		switch zone {
+		case "net.latrobe.edu.au":
+			return []map[string]any{
+				{"type": "HOST_IPV4ADDR", "name": "wod-0003-sr02-v990", "address": "192.0.2.10", "zone": zone},
+			}
+		case "2.0.192.in-addr.arpa":
+			return []map[string]any{
+				{"type": "PTR", "name": "10", "ipv4addr": "192.0.2.10", "ptrdname": target, "zone": zone},
+			}
+		case "other.edu.au":
+			return []map[string]any{
+				{"type": "HOST_IPV4ADDR", "name": "wod-0003-sr02-v990", "address": "192.0.2.20", "zone": zone},
+			}
+		default:
+			return nil
+		}
+	})
+	defer server.Close()
+
+	app := testApp(t)
+	records, err := app.collectSearchResults(
+		Profile{DNSView: "default", DefaultZone: "latrobe.edu.au"},
+		testWapiClient(server),
+		SearchOptions{Keyword: target, Global: true},
+	)
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want forward and PTR matches: %#v", len(records), records)
+	}
+	foundForward := false
+	foundPTR := false
+	for _, record := range records {
+		if record.Type == "host" && cleanString(record.Item["zone"]) == "net.latrobe.edu.au" && recordName(record.Item, record.Type) == "wod-0003-sr02-v990" {
+			foundForward = true
+		}
+		if record.Type == "ptr" && cleanString(record.Item["zone"]) == "2.0.192.in-addr.arpa" && recordValue(record.Type, record.Item) == target {
+			foundPTR = true
+		}
+		if cleanString(record.Item["zone"]) == "other.edu.au" {
+			t.Fatalf("global fqdn alias matched unrelated zone: %#v", records)
+		}
+	}
+	if !foundForward || !foundPTR {
+		t.Fatalf("records missing forward=%t ptr=%t: %#v", foundForward, foundPTR, records)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, zone := range []string{"latrobe.edu.au", "net.latrobe.edu.au", "2.0.192.in-addr.arpa", "other.edu.au"} {
+		if requestedZones[zone] != 1 {
+			t.Fatalf("%s requests = %d, all requests = %#v", zone, requestedZones[zone], requestedZones)
+		}
 	}
 }
 

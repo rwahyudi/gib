@@ -2423,18 +2423,19 @@ func isSecondaryZone(zone map[string]any) bool {
 }
 
 type SearchOptions struct {
-	Keyword        string
-	KeywordAliases []string
-	CaseSensitive  bool
-	Global         bool
-	Fuzzy          bool
-	Recursive      bool
-	Zone           string
-	View           string
-	Types          []string
-	Exclude        []string
-	Sort           RecordSort
-	Progress       SearchProgressFunc
+	Keyword          string
+	KeywordAliases   []string
+	KeywordAliasZone string
+	CaseSensitive    bool
+	Global           bool
+	Fuzzy            bool
+	Recursive        bool
+	Zone             string
+	View             string
+	Types            []string
+	Exclude          []string
+	Sort             RecordSort
+	Progress         SearchProgressFunc
 }
 
 type SearchProgressFunc func(SearchProgressEvent)
@@ -2504,6 +2505,16 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 	if err != nil {
 		return nil, err
 	}
+	inferredZone := ""
+	inferred := false
+	if options.Zone == "" {
+		var relativeName string
+		inferredZone, relativeName, inferred = inferSearchFQDNZone(options.Keyword, zones)
+		if inferred {
+			options.KeywordAliases = appendSearchKeywordAlias(options.KeywordAliases, relativeName)
+			options.KeywordAliasZone = inferredZone
+		}
+	}
 	if !options.Global {
 		rootZone := ""
 		if options.Zone != "" {
@@ -2511,9 +2522,8 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 			if err != nil {
 				return nil, err
 			}
-		} else if inferredZone, relativeName, ok := inferSearchFQDNZone(options.Keyword, zones); ok {
+		} else if inferred {
 			rootZone = inferredZone
-			options.KeywordAliases = appendSearchKeywordAlias(options.KeywordAliases, relativeName)
 		} else {
 			rootZone, err = a.resolveDNSZone(profile, "")
 			if err != nil {
@@ -2800,12 +2810,16 @@ func recordMatches(record TypedRecord, options SearchOptions) bool {
 			return false
 		}
 	}
-	return searchValuesMatchAny(values, searchKeywords(options), options.CaseSensitive, options.Fuzzy)
+	return searchValuesMatchAny(values, searchKeywords(record, options), options.CaseSensitive, options.Fuzzy)
 }
 
-func searchKeywords(options SearchOptions) []string {
+func searchKeywords(record TypedRecord, options SearchOptions) []string {
 	keywords := make([]string, 0, 1+len(options.KeywordAliases))
-	for _, keyword := range append([]string{options.Keyword}, options.KeywordAliases...) {
+	candidates := []string{options.Keyword}
+	if options.KeywordAliasZone == "" || isSameZone(cleanString(record.Item["zone"]), options.KeywordAliasZone) {
+		candidates = append(candidates, options.KeywordAliases...)
+	}
+	for _, keyword := range candidates {
 		keyword = strings.TrimSpace(keyword)
 		if keyword == "" {
 			continue

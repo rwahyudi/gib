@@ -41,8 +41,8 @@ include matching child reverse zones.
 Search records by name, value, or comment.
 .TP
 .B ib dns search ben-dr-vss.net.latrobe.edu.au
-Infer the matching forward zone from a complete FQDN keyword when no explicit
-zone or global scope is supplied.
+Infer the matching forward zone from a complete FQDN keyword; global search
+still scans all zones but also matches the relative owner in that forward zone.
 .TP
 .B ib net list prod --network-view default
 List IPv4 networks and containers matching prod in the default IPAM network view.
