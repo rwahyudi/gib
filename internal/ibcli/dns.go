@@ -3087,7 +3087,7 @@ func bestReverseZone(rows []map[string]any, pointer, expectedFormat string) (str
 			continue
 		}
 		zoneName := cleanString(zone["fqdn"])
-		if zoneName != "" && isZoneOrChild(pointer, zoneName) {
+		if zoneName != "" && reverseZoneMatchesPointer(pointer, zoneName) {
 			matches = append(matches, zoneName)
 		}
 	}
@@ -3095,12 +3095,52 @@ func bestReverseZone(rows []map[string]any, pointer, expectedFormat string) (str
 		return "", false
 	}
 	sort.Slice(matches, func(i, j int) bool {
+		leftSpecificity := reverseZoneSpecificity(matches[i])
+		rightSpecificity := reverseZoneSpecificity(matches[j])
+		if leftSpecificity != rightSpecificity {
+			return leftSpecificity > rightSpecificity
+		}
 		if len(matches[i]) == len(matches[j]) {
 			return matches[i] < matches[j]
 		}
 		return len(matches[i]) > len(matches[j])
 	})
 	return matches[0], true
+}
+
+func reverseZoneMatchesPointer(pointer, zoneName string) bool {
+	if isZoneOrChild(pointer, zoneName) {
+		return true
+	}
+	prefix, ok := parseIPv4Prefix(zoneName)
+	if !ok {
+		return false
+	}
+	addrText := addressFromArpaReverseOwner(pointer, "")
+	addr, err := netip.ParseAddr(addrText)
+	return err == nil && addr.Is4() && prefix.Contains(addr)
+}
+
+func reverseZoneSpecificity(zoneName string) int {
+	if prefix, ok := parseIPv4Prefix(zoneName); ok {
+		return prefix.Bits()
+	}
+	zone := strings.ToLower(strings.TrimRight(strings.TrimSpace(zoneName), "."))
+	if strings.HasSuffix(zone, ".in-addr.arpa") {
+		name := strings.TrimSuffix(zone, ".in-addr.arpa")
+		if name == "" {
+			return 0
+		}
+		return len(strings.Split(name, ".")) * 8
+	}
+	if strings.HasSuffix(zone, ".ip6.arpa") {
+		name := strings.TrimSuffix(zone, ".ip6.arpa")
+		if name == "" {
+			return 0
+		}
+		return len(strings.Split(name, ".")) * 4
+	}
+	return len(zone)
 }
 
 func reverseZoneForIPByCandidates(client *WapiClient, address netip.Addr) (string, error) {
