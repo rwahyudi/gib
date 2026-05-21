@@ -1100,6 +1100,103 @@ func TestSearchDefaultsToCurrentZoneOnly(t *testing.T) {
 	}
 }
 
+func TestSearchInfersZoneFromFQDNKeyword(t *testing.T) {
+	zones := []map[string]any{
+		{"fqdn": "latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "net.latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "other.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}
+	var mu sync.Mutex
+	requestedZones := map[string]int{}
+	server := searchScopeServerWithRecords(t, zones, requestedZones, &mu, func(zone string) []map[string]any {
+		if zone == "net.latrobe.edu.au" {
+			return []map[string]any{
+				{"type": "HOST_IPV4ADDR", "name": "ben-dr-vss", "address": "192.0.2.10", "zone": zone},
+			}
+		}
+		return []map[string]any{
+			{"type": "HOST_IPV4ADDR", "name": "other." + zone, "address": "192.0.2.20", "zone": zone},
+		}
+	})
+	defer server.Close()
+
+	app := testApp(t)
+	records, err := app.collectSearchResults(
+		Profile{DNSView: "default", DefaultZone: "latrobe.edu.au"},
+		testWapiClient(server),
+		SearchOptions{Keyword: "ben-dr-vss.net.latrobe.edu.au"},
+	)
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	if len(records) != 1 || recordName(records[0].Item, records[0].Type) != "ben-dr-vss" {
+		t.Fatalf("records = %#v", records)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if requestedZones["net.latrobe.edu.au"] != 1 {
+		t.Fatalf("net.latrobe.edu.au requests = %d, all requests = %#v", requestedZones["net.latrobe.edu.au"], requestedZones)
+	}
+	if requestedZones["latrobe.edu.au"] != 0 || requestedZones["other.edu.au"] != 0 {
+		t.Fatalf("fqdn search queried wrong zones: %#v", requestedZones)
+	}
+}
+
+func TestSearchExplicitZoneSkipsFQDNInference(t *testing.T) {
+	zones := []map[string]any{
+		{"fqdn": "latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "net.latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}
+	var mu sync.Mutex
+	requestedZones := map[string]int{}
+	server := searchScopeServer(t, zones, requestedZones, &mu)
+	defer server.Close()
+
+	app := testApp(t)
+	_, err := app.collectSearchResults(
+		Profile{DNSView: "default", DefaultZone: "example.com"},
+		testWapiClient(server),
+		SearchOptions{Keyword: "test.net.latrobe.edu.au", Zone: "latrobe.edu.au"},
+	)
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if requestedZones["latrobe.edu.au"] != 1 {
+		t.Fatalf("latrobe.edu.au requests = %d, all requests = %#v", requestedZones["latrobe.edu.au"], requestedZones)
+	}
+	if requestedZones["net.latrobe.edu.au"] != 0 {
+		t.Fatalf("explicit zone search inferred fqdn zone: %#v", requestedZones)
+	}
+}
+
+func TestGlobalSearchDoesNotInferZoneFromFQDNKeyword(t *testing.T) {
+	zones := []map[string]any{
+		{"fqdn": "latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "net.latrobe.edu.au", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}
+	var mu sync.Mutex
+	requestedZones := map[string]int{}
+	server := searchScopeServer(t, zones, requestedZones, &mu)
+	defer server.Close()
+
+	app := testApp(t)
+	_, err := app.collectSearchResults(
+		Profile{DNSView: "default", DefaultZone: "latrobe.edu.au"},
+		testWapiClient(server),
+		SearchOptions{Keyword: "test.net.latrobe.edu.au", Global: true},
+	)
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if requestedZones["latrobe.edu.au"] != 1 || requestedZones["net.latrobe.edu.au"] != 1 {
+		t.Fatalf("global search did not query all zones: %#v", requestedZones)
+	}
+}
+
 func TestSearchRecursiveIncludesChildZones(t *testing.T) {
 	zones := []map[string]any{
 		{"fqdn": "example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
@@ -1645,6 +1742,20 @@ func testZones(count int) []map[string]any {
 
 func searchScopeServer(t *testing.T, zones []map[string]any, requestedZones map[string]int, mu *sync.Mutex) *httptest.Server {
 	t.Helper()
+	return searchScopeServerWithRecords(t, zones, requestedZones, mu, func(zone string) []map[string]any {
+		return []map[string]any{
+			{
+				"type":    "HOST_IPV4ADDR",
+				"name":    "test." + zone,
+				"address": "192.0.2.10",
+				"zone":    zone,
+			},
+		}
+	})
+}
+
+func searchScopeServerWithRecords(t *testing.T, zones []map[string]any, requestedZones map[string]int, mu *sync.Mutex, recordsForZone func(string) []map[string]any) *httptest.Server {
+	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/zone_auth"):
@@ -1663,14 +1774,7 @@ func searchScopeServer(t *testing.T, zones []map[string]any, requestedZones map[
 			requestedZones[zone]++
 			mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"result": []map[string]any{
-					{
-						"type":    "HOST_IPV4ADDR",
-						"name":    "test." + zone,
-						"address": "192.0.2.10",
-						"zone":    zone,
-					},
-				},
+				"result": recordsForZone(zone),
 			})
 		default:
 			http.NotFound(w, r)

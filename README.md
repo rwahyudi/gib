@@ -284,7 +284,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | --- | --- |
 | `ib dns` | Show DNS help and the current profile/view/zone context. |
 | `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones, `-t/--type` to filter record types, `-e/--exclude` to hide matching records, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
-| `ib dns search KEYWORD` | Search records by name, value, or comment. Use `--global` for all searchable zones, `-r` for child zones under the current/root zone, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
+| `ib dns search KEYWORD` | Search records by name, value, or comment. Complete FQDN keywords can infer the matching forward zone. Use `--global` for all searchable zones, `-r` for child zones under the current/root zone, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns next-ip NETWORK` | Compatibility path for next available IPv4 address lookup against a network or container. Prefer `ib net next-ip NETWORK` for IPAM work. |
 | `ib dns create TYPE NAME VALUE` | Create a DNS record, for example `ib dns create host app 192.0.2.10 -c "Application host"`. |
 | `ib dns edit TYPE NAME [VALUE]` | Edit an existing DNS record. |
@@ -318,6 +318,7 @@ ib dns zone list
 ib dns zone use example.com
 ib dns list
 ib dns search app
+ib dns search ben-dr-vss.net.latrobe.edu.au
 ib net view list
 ib net list prod --network-view default
 ib net address 192.0.2.10 --network-view default
@@ -327,7 +328,7 @@ ib dns edit host app 192.0.2.20 -t 300 -c "Application host"
 ib dns delete a app
 ```
 
-`ib dns list` and `ib dns search` operate on the current zone by default. Add `-r` or `--recursive` to include child zones. For IPv4 reverse DNS, `ib dns list` also accepts a larger CIDR scope such as `10.128.48.0/23` and lists records from matching child reverse zones such as `10.128.48.0/24` and `10.128.49.0/24`. `ib dns list` also supports `-t/--type` and `-e/--exclude` filters like search. Add `-s` or `--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`; a blank `--sort` sorts by name, and a leading minus sorts descending, for example `--sort=-name`. Add `-C` or `--columns` to print selected columns from `type`, `name`, `value`, `zone`, `ttl`, and `comment`, for example `--columns name,value`. `ib dns search --global` searches every searchable zone in the selected view.
+`ib dns list` and `ib dns search` operate on the current zone by default. For search, a complete forward FQDN such as `ben-dr-vss.net.latrobe.edu.au` can infer the longest matching authoritative zone, search that zone, and match the relative owner name such as `ben-dr-vss`. Add `-r` or `--recursive` to include child zones. For IPv4 reverse DNS, `ib dns list` also accepts a larger CIDR scope such as `10.128.48.0/23` and lists records from matching child reverse zones such as `10.128.48.0/24` and `10.128.49.0/24`. `ib dns list` also supports `-t/--type` and `-e/--exclude` filters like search. Add `-s` or `--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`; a blank `--sort` sorts by name, and a leading minus sorts descending, for example `--sort=-name`. Add `-C` or `--columns` to print selected columns from `type`, `name`, `value`, `zone`, `ttl`, and `comment`, for example `--columns name,value`. `ib dns search --global` searches every searchable zone in the selected view.
 
 `ib dns zone list` supports the same output control pattern for zones. `--type` filters zone formats `FORWARD`, `IPV4`, or `IPV6`; `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment`; and `--columns` selects from the same zone fields. Use `--view` to list zones from another DNS view; `--zone` and `-z` are not accepted by this command.
 

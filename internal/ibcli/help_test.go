@@ -176,6 +176,7 @@ func TestDNSSearchHelpShowsSort(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"Search Records Usage",
+		"FQDN can infer zone",
 		"-s name or --sort=-name sorts by field",
 		"-C name,value prints selected output columns",
 		"-C, --columns STRING",
@@ -547,6 +548,7 @@ func TestDNSSearchArgumentErrorsPrintUsage(t *testing.T) {
 			"ib dns search <keyword> [flags]",
 			"Example",
 			"ib dns search app",
+			"ib dns search ben-dr-vss.net.latrobe.edu.au",
 			`Use "ib dns search -h" for more info.`,
 		} {
 			if !strings.Contains(output, want) {

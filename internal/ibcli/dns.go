@@ -2325,8 +2325,12 @@ func (a *App) searchZones(profile Profile, client *WapiClient, rootZone string, 
 		return nil, err
 	}
 	zones = searchableRecordZones(zones)
+	return filterSearchZones(zones, rootZone, recursive), nil
+}
+
+func filterSearchZones(zones []map[string]any, rootZone string, recursive bool) []map[string]any {
 	if rootZone == "" {
-		return zones, nil
+		return zones
 	}
 	var scoped []map[string]any
 	for _, zone := range zones {
@@ -2339,7 +2343,63 @@ func (a *App) searchZones(profile Profile, client *WapiClient, rootZone string, 
 			scoped = append(scoped, zone)
 		}
 	}
-	return scoped, nil
+	return scoped
+}
+
+func inferSearchFQDNZone(keyword string, zones []map[string]any) (string, string, bool) {
+	name := strings.TrimRight(strings.TrimSpace(keyword), ".")
+	if name == "" || !strings.Contains(name, ".") {
+		return "", "", false
+	}
+	nameLower := strings.ToLower(name)
+	bestZone := ""
+	bestZoneLower := ""
+	for _, zone := range zones {
+		if !isForwardSearchZone(zone) {
+			continue
+		}
+		zoneName := strings.TrimRight(strings.TrimSpace(cleanString(zone["fqdn"])), ".")
+		if zoneName == "" {
+			continue
+		}
+		zoneLower := strings.ToLower(zoneName)
+		if nameLower != zoneLower && !strings.HasSuffix(nameLower, "."+zoneLower) {
+			continue
+		}
+		if len(zoneLower) > len(bestZoneLower) {
+			bestZone = zoneName
+			bestZoneLower = zoneLower
+		}
+	}
+	if bestZone == "" {
+		return "", "", false
+	}
+	if nameLower == bestZoneLower {
+		return bestZone, "@", true
+	}
+	relativeName := strings.TrimRight(name[:len(name)-len(bestZone)], ".")
+	if relativeName == "" {
+		relativeName = "@"
+	}
+	return bestZone, relativeName, true
+}
+
+func isForwardSearchZone(zone map[string]any) bool {
+	format := strings.ToUpper(strings.TrimSpace(cleanString(zone["zone_format"])))
+	return format == "" || format == "FORWARD"
+}
+
+func appendSearchKeywordAlias(aliases []string, alias string) []string {
+	alias = strings.TrimRight(strings.TrimSpace(alias), ".")
+	if alias == "" {
+		return aliases
+	}
+	for _, existing := range aliases {
+		if existing == alias {
+			return aliases
+		}
+	}
+	return append(aliases, alias)
 }
 
 func searchableRecordZones(zones []map[string]any) []map[string]any {
@@ -2363,17 +2423,18 @@ func isSecondaryZone(zone map[string]any) bool {
 }
 
 type SearchOptions struct {
-	Keyword       string
-	CaseSensitive bool
-	Global        bool
-	Fuzzy         bool
-	Recursive     bool
-	Zone          string
-	View          string
-	Types         []string
-	Exclude       []string
-	Sort          RecordSort
-	Progress      SearchProgressFunc
+	Keyword        string
+	KeywordAliases []string
+	CaseSensitive  bool
+	Global         bool
+	Fuzzy          bool
+	Recursive      bool
+	Zone           string
+	View           string
+	Types          []string
+	Exclude        []string
+	Sort           RecordSort
+	Progress       SearchProgressFunc
 }
 
 type SearchProgressFunc func(SearchProgressEvent)
@@ -2438,18 +2499,28 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 		return nil, cliError("--recursive cannot be used with -g/--global search")
 	}
 	reportSearchProgress(options.Progress, SearchProgressEvent{Kind: searchProgressStage, Stage: "Resolving search scope"})
-	rootZone := ""
-	var err error
-	if !options.Global {
-		rootZone, err = a.resolveDNSZone(profile, options.Zone)
-		if err != nil {
-			return nil, err
-		}
-	}
 	reportSearchProgress(options.Progress, SearchProgressEvent{Kind: searchProgressStage, Stage: "Loading searchable zones"})
-	zones, err := a.searchZones(profile, client, rootZone, options.Recursive)
+	zones, err := a.searchZones(profile, client, "", false)
 	if err != nil {
 		return nil, err
+	}
+	if !options.Global {
+		rootZone := ""
+		if options.Zone != "" {
+			rootZone, err = a.resolveDNSZone(profile, options.Zone)
+			if err != nil {
+				return nil, err
+			}
+		} else if inferredZone, relativeName, ok := inferSearchFQDNZone(options.Keyword, zones); ok {
+			rootZone = inferredZone
+			options.KeywordAliases = appendSearchKeywordAlias(options.KeywordAliases, relativeName)
+		} else {
+			rootZone, err = a.resolveDNSZone(profile, "")
+			if err != nil {
+				return nil, err
+			}
+		}
+		zones = filterSearchZones(zones, rootZone, options.Recursive)
 	}
 	reportSearchProgress(options.Progress, SearchProgressEvent{Kind: searchProgressStage, Stage: "Loading zone records", TotalZones: len(zones)})
 	typeFilter := map[string]bool{}
@@ -2729,7 +2800,40 @@ func recordMatches(record TypedRecord, options SearchOptions) bool {
 			return false
 		}
 	}
-	return searchValuesMatch(values, options.Keyword, options.CaseSensitive, options.Fuzzy)
+	return searchValuesMatchAny(values, searchKeywords(options), options.CaseSensitive, options.Fuzzy)
+}
+
+func searchKeywords(options SearchOptions) []string {
+	keywords := make([]string, 0, 1+len(options.KeywordAliases))
+	for _, keyword := range append([]string{options.Keyword}, options.KeywordAliases...) {
+		keyword = strings.TrimSpace(keyword)
+		if keyword == "" {
+			continue
+		}
+		duplicate := false
+		for _, existing := range keywords {
+			if existing == keyword {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			keywords = append(keywords, keyword)
+		}
+	}
+	return keywords
+}
+
+func searchValuesMatchAny(values []string, keywords []string, caseSensitive bool, fuzzy bool) bool {
+	if len(keywords) == 0 {
+		return true
+	}
+	for _, keyword := range keywords {
+		if searchValuesMatch(values, keyword, caseSensitive, fuzzy) {
+			return true
+		}
+	}
+	return false
 }
 
 func filterListedRecords(records []TypedRecord, options SearchOptions) []TypedRecord {

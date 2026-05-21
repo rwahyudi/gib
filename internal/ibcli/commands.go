@@ -695,6 +695,7 @@ func (a *App) dnsSearchCommand() *cobra.Command {
 		Use:   "search <keyword>",
 		Short: "Search DNS records by name, value, or comment",
 		Example: strings.TrimSpace(`ib dns search app
+ib dns search ben-dr-vss.net.latrobe.edu.au
 ib dns search app -t host
 ib dns search app -z example.com
 ib dns search app -z example.com -r
