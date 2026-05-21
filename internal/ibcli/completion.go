@@ -116,6 +116,9 @@ func (a *App) existingRecordArgCompletion(cmd *cobra.Command, args []string, toC
 	case 0:
 		return recordTypeCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
 	case 1:
+		if strings.EqualFold(strings.TrimSpace(args[0]), "ptr") {
+			return a.completePTRRecordNames(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+		}
 		return a.completeRecordNames(cmd, commandZoneFlag(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
 	case 2:
 		return a.completeZoneNames(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
@@ -726,6 +729,23 @@ func (a *App) completeRecordNames(cmd *cobra.Command, explicitZone, toComplete s
 	return matchingRecordNames(records, toComplete)
 }
 
+func (a *App) completePTRRecordNames(cmd *cobra.Command, toComplete string) []string {
+	profile, err := a.loadConfig(true)
+	if err != nil {
+		return nil
+	}
+	profile.DNSView = a.resolveDNSView(profile)
+	if view := commandCompletionFlagValue(cmd, "view"); view != "" {
+		profile.DNSView = view
+	}
+
+	records, err := a.cachedPTRRecordNamesForCompletion(profile)
+	if err != nil {
+		return nil
+	}
+	return matchingPTRRecordNames(records, toComplete)
+}
+
 func (a *App) cachedRecordNamesForCompletion(profile Profile, zone string) ([]TypedRecord, error) {
 	entry, err := a.readCachedRecords(profile, zone)
 	if err != nil {
@@ -742,6 +762,48 @@ func (a *App) cachedRecordNamesForCompletion(profile Profile, zone string) ([]Ty
 		a.startRecordCacheRevalidationAsync(profile, zone)
 	}
 	return recordsFromAllRecordRows(entry.Rows), nil
+}
+
+func (a *App) cachedPTRRecordNamesForCompletion(profile Profile) ([]TypedRecord, error) {
+	entry, err := a.readCachedZones(profile)
+	if err != nil {
+		return nil, err
+	}
+	prefetchEnabled := a.completionCachePrefetchEnabled()
+	if !entry.CacheFound {
+		if prefetchEnabled {
+			a.startZoneCacheRefreshAsync(profile)
+		}
+		return nil, nil
+	}
+	if prefetchEnabled && !a.cacheEntryFresh(entry, time.Now()) {
+		a.startZoneCacheRefreshAsync(profile)
+	}
+
+	reverseZones := reverseZoneNamesFromRows(entry.Rows)
+	recordEntries := a.readCachedRecordsForZones(profile, reverseZones)
+	records := make([]TypedRecord, 0)
+	for _, zone := range reverseZones {
+		recordEntry, ok := recordEntries[normalizeCacheZone(zone)]
+		if !ok || !recordEntry.CacheFound {
+			continue
+		}
+		for _, row := range recordEntry.Rows {
+			if cleanString(row["zone"]) == "" {
+				row["zone"] = zone
+			}
+		}
+		for _, record := range recordsFromAllRecordRows(recordEntry.Rows) {
+			if !strings.EqualFold(record.Type, "ptr") {
+				continue
+			}
+			if cleanString(record.Item["zone"]) == "" {
+				record.Item["zone"] = zone
+			}
+			records = append(records, record)
+		}
+	}
+	return records, nil
 }
 
 func matchingRecordNames(records []TypedRecord, toComplete string) []string {
@@ -765,6 +827,19 @@ func matchingRecordNames(records []TypedRecord, toComplete string) []string {
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		return strings.ToLower(recordCompletionName(rows[i])) < strings.ToLower(recordCompletionName(rows[j]))
+	})
+	return rows
+}
+
+func matchingPTRRecordNames(records []TypedRecord, toComplete string) []string {
+	rows := matchingRecordNames(records, toComplete)
+	sort.Slice(rows, func(i, j int) bool {
+		left := recordCompletionName(rows[i])
+		right := recordCompletionName(rows[j])
+		if result := compareRecordIPAwareText(left, right, false); result != 0 {
+			return result < 0
+		}
+		return strings.ToLower(left) < strings.ToLower(right)
 	})
 	return rows
 }
@@ -1068,6 +1143,11 @@ func (a *App) startCompletionCachePrefetch(args []string) {
 	}
 
 	a.prefetchZoneCacheForCompletion(profile)
+	if completionRequestsDNSDeletePTR(args) {
+		// PTR delete completion spans cached reverse zones. Avoid refreshing the
+		// active forward zone or fanning out reverse record refreshes from a tab.
+		return
+	}
 
 	zone, err := a.resolveCompletionDNSZone(profile, completionFlagValue(args, "zone", "z"))
 	if err != nil {
@@ -1084,6 +1164,25 @@ func (a *App) completionProfile() (Profile, error) {
 	profile, err := a.loadConfig(true)
 	a.dnsZoneOverride, a.dnsViewOverride = previousZone, previousView
 	return profile, err
+}
+
+func completionRequestsDNSDeletePTR(args []string) bool {
+	if len(args) < 5 {
+		return false
+	}
+	sawDNS := false
+	sawDelete := false
+	for _, arg := range args[1 : len(args)-1] {
+		switch {
+		case arg == "dns":
+			sawDNS = true
+		case sawDNS && arg == "delete":
+			sawDelete = true
+		case sawDelete && strings.EqualFold(arg, "ptr"):
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) prefetchZoneCacheForCompletion(profile Profile) {
@@ -1191,6 +1290,27 @@ func zoneNamesFromRows(zones []map[string]any) []string {
 	}
 	sort.Slice(names, func(i, j int) bool {
 		return strings.ToLower(names[i]) < strings.ToLower(names[j])
+	})
+	return names
+}
+
+func reverseZoneNamesFromRows(zones []map[string]any) []string {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(zones))
+	for _, zone := range zones {
+		name := cleanString(zone["fqdn"])
+		if name == "" || seen[name] {
+			continue
+		}
+		zoneFormat := strings.ToUpper(cleanString(zone["zone_format"]))
+		if zoneFormat != "IPV4" && zoneFormat != "IPV6" && !reverseZoneName(name) {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return compareNetworkCIDR(names[i], names[j]) < 0
 	})
 	return names
 }

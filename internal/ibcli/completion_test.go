@@ -327,6 +327,34 @@ func TestCompletionPrefetchSkipsFreshCaches(t *testing.T) {
 	}
 }
 
+func TestCompletionPrefetchSkipsForwardRecordCacheForPTRDelete(t *testing.T) {
+	app := testApp(t)
+	writeCompletionProfile(t, app, "https://infoblox.invalid")
+	zoneRefreshes := make(chan Profile, 1)
+	recordRefreshes := make(chan string, 1)
+	app.backgroundZoneRefresher = func(profile Profile) error {
+		zoneRefreshes <- profile
+		return nil
+	}
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		recordRefreshes <- zone
+		return nil
+	}
+
+	app.startCompletionCachePrefetch([]string{"__complete", "dns", "delete", "ptr", ""})
+
+	select {
+	case <-zoneRefreshes:
+	default:
+		t.Fatal("zone cache refresh was not queued")
+	}
+	select {
+	case zone := <-recordRefreshes:
+		t.Fatalf("forward record refresh queued for PTR delete completion: %s", zone)
+	default:
+	}
+}
+
 func TestZoneCompletionFailsQuietlyWithoutConfig(t *testing.T) {
 	app := testApp(t)
 	if matches := app.completeZoneNames(&cobra.Command{}, "ex"); len(matches) != 0 {
@@ -824,6 +852,29 @@ func TestDNSDeleteCompletesRecordTypesThenRecordNames(t *testing.T) {
 	}
 }
 
+func TestDNSDeletePTRCompletesReverseRecordIPs(t *testing.T) {
+	app, stdout := completionAppWithPTRRecords(t)
+	if err := app.Execute([]string{"__complete", "dns", "delete", "ptr", "192.0.2."}); err != nil {
+		t.Fatalf("ptr completion: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"192.0.2.2\tPTR two.example.com",
+		"192.0.2.10\tPTR app.example.com",
+		":4",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("ptr completion missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "app\tA 192.0.2.10") || strings.Contains(output, "db\tA 192.0.2.20") {
+		t.Fatalf("ptr completion included forward-zone records:\n%s", output)
+	}
+	if strings.Index(output, "192.0.2.2\tPTR two.example.com") > strings.Index(output, "192.0.2.10\tPTR app.example.com") {
+		t.Fatalf("ptr completion is not sorted numerically:\n%s", output)
+	}
+}
+
 func TestDNSDeleteCompletionTreatsCurrentTokenAsRecordName(t *testing.T) {
 	app, _ := completionAppWithRecords(t)
 	cmd, _, err := app.RootCommand().Find([]string{"dns", "delete"})
@@ -848,6 +899,25 @@ func TestDNSDeleteCompletionTreatsCurrentTokenAsRecordName(t *testing.T) {
 	}
 	if !containsCompletionRow(rows, "example.com") {
 		t.Fatalf("zone completion rows = %#v", rows)
+	}
+}
+
+func TestDNSDeletePTRCompletionTreatsCurrentTokenAsReverseIP(t *testing.T) {
+	app, _ := completionAppWithPTRRecords(t)
+	cmd, _, err := app.RootCommand().Find([]string{"dns", "delete"})
+	if err != nil {
+		t.Fatalf("find delete command: %v", err)
+	}
+
+	rows, directive := app.existingRecordArgCompletion(cmd, []string{"ptr", "192.0.2."}, "192.0.2.")
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("directive = %v", directive)
+	}
+	if !containsCompletionRow(rows, "192.0.2.10") {
+		t.Fatalf("ptr completion rows = %#v", rows)
+	}
+	if containsCompletionRow(rows, "app") {
+		t.Fatalf("ptr completion included forward record names: %#v", rows)
 	}
 }
 
@@ -1885,6 +1955,41 @@ func completionAppWithRecords(t *testing.T) (*App, *bytes.Buffer) {
 		t.Fatalf("write record cache: %v", err)
 	}
 	return app, stdout
+}
+
+func completionAppWithPTRRecords(t *testing.T) (*App, *bytes.Buffer) {
+	t.Helper()
+	app := testApp(t)
+	profile := writeCompletionProfile(t, app, "https://infoblox.invalid")
+	if err := app.writeCachedZones(profile, []map[string]any{
+		{"fqdn": "example.com", "zone_format": "FORWARD"},
+		{"fqdn": "192.0.2.0/24", "zone_format": "IPV4"},
+		{"fqdn": "100.51.198.in-addr.arpa", "zone_format": "IPV4"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "app", "address": "192.0.2.10", "zone": "example.com"},
+		{"type": "record:a", "name": "db", "address": "192.0.2.20", "zone": "example.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write forward record cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "192.0.2.0/24", "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "10", "ptrdname": "app.example.com"},
+		{"type": "record:ptr", "name": "2", "ptrdname": "two.example.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write CIDR reverse record cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "100.51.198.in-addr.arpa", "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "20", "ipv4addr": "198.51.100.20", "ptrdname": "old.example.com", "zone": "100.51.198.in-addr.arpa"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write arpa reverse record cache: %v", err)
+	}
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	return app, &stdout
 }
 
 func containsCompletionRow(rows []string, value string) bool {

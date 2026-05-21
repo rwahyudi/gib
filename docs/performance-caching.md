@@ -49,11 +49,13 @@ take precedence.
 
 Shell completion never performs a foreground Infoblox refresh for zone names,
 record names, or IPAM network CIDRs. With `completion_cache_prefetch = true`,
-DNS completion checks the current DNS view and zone, and network CIDR completion
-checks the selected IPAM network view, then starts detached zone-list,
+most DNS completion checks the current DNS view and zone, and network CIDR
+completion checks the selected IPAM network view, then starts detached zone-list,
 current-zone record, network-list, or container-list refresh helpers when those
-cache rows are missing or stale. With `completion_cache_prefetch = false`, completion only
-reads local cache rows and does not start background refresh helpers.
+cache rows are missing or stale. PTR delete completion reads cached PTR records
+from cached reverse zones and completes owner IPs instead of forward-zone names.
+With `completion_cache_prefetch = false`, completion only reads local cache rows
+and does not start background refresh helpers.
 
 ## Read, Write, And Worker Flow
 
