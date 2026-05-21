@@ -140,6 +140,40 @@ func TestNetListIncludesNetworksAndContainers(t *testing.T) {
 	}
 }
 
+func TestIPAMTypeColorMapsKnownTypes(t *testing.T) {
+	tests := map[string]string{
+		ipamTypeNetwork:   "#22c55e",
+		ipamTypeContainer: "#f59e0b",
+		"unknown":         "#94a3b8",
+	}
+	for itemType, want := range tests {
+		if got := string(ipamTypeColor(itemType)); got != want {
+			t.Fatalf("ipam type color for %q = %q, want %q", itemType, got, want)
+		}
+	}
+}
+
+func TestNetTableOutputStylesObjectTypes(t *testing.T) {
+	app := testApp(t)
+	var stdout strings.Builder
+	app.Stdout = &stdout
+	app.Output = tableOutput
+
+	rows := []map[string]any{
+		{"type": ipamTypeContainer, "network": "192.0.0.0/16", "network_view": "default", "comment": "Parent"},
+		{"type": ipamTypeNetwork, "network": "192.0.2.0/24", "network_view": "default", "comment": "Child"},
+	}
+	if err := app.emitNetworkRows(networkOutputColumns, rows); err != nil {
+		t.Fatalf("emit network rows: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{"CONTAINER", "NETWORK", "192.0.0.0/16", "192.0.2.0/24"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("network table missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestNetListWithoutNetworkViewQueriesAllViews(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 const (
@@ -30,6 +32,10 @@ var (
 	ipv4AddressOutputColumns   = []string{"ip", "network", "container", "network_view", "status", "types", "names", "mac_address", "lease_state", "comment"}
 	netNextIPOutputColumns     = []string{"type", "network", "network_view", "ip"}
 	netSortFields              = []string{"type", "network", "network_view", "comment"}
+	ipamTypeColors             = map[string]lipgloss.Color{
+		ipamTypeNetwork:   lipgloss.Color("#22c55e"),
+		ipamTypeContainer: lipgloss.Color("#f59e0b"),
+	}
 )
 
 type NetSort struct {
@@ -90,6 +96,9 @@ func (a *App) runNetObjectList(search string, networkView string, option NetSort
 	rows = selectNetworkOutputRows(rows, columns)
 	if len(rows) == 0 && a.isTableOutput() {
 		a.PrintWarning("No IPAM networks or containers found.")
+	}
+	if a.isTableOutput() {
+		return a.emitNetworkRows(columns, rows)
 	}
 	return a.emitRows(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), columns, rows)
 }
@@ -167,7 +176,7 @@ func (a *App) runNetShow(network string, networkView string) error {
 	row := networkDetailRow(matchedNetwork)
 	title := ipamObjectTitle(row)
 	if a.isTableOutput() {
-		fmt.Fprintln(a.Stdout, renderTable(title, []string{"Field", "Value"}, objectDetailRows(networkDetailOutputColumns, row)))
+		fmt.Fprintln(a.Stdout, renderTable(title, []string{"Field", "Value"}, networkDetailTableRows(networkDetailOutputColumns, row)))
 		return nil
 	}
 	return a.emitObject(title, networkDetailOutputColumns, row)
@@ -708,6 +717,50 @@ func networkDetailRow(network map[string]any) map[string]any {
 		"network_view": cleanString(network["network_view"]),
 		"comment":      cleanString(network["comment"]),
 	}
+}
+
+func (a *App) emitNetworkRows(columns []string, rows []map[string]any) error {
+	displayRows := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		display := make([]string, 0, len(columns))
+		for _, field := range columns {
+			display = append(display, networkTableValue(field, row))
+		}
+		displayRows = append(displayRows, display)
+	}
+	fmt.Fprintln(a.Stdout, renderTable(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), titleCaseFields(columns), displayRows))
+	return nil
+}
+
+func networkTableValue(field string, row map[string]any) string {
+	if field == "type" {
+		return styledIPAMType(stringify(row[field]))
+	}
+	return stringify(row[field])
+}
+
+func networkDetailTableRows(fields []string, row map[string]any) [][]string {
+	labels := titleCaseFields(fields)
+	rows := make([][]string, 0, len(fields))
+	for i, field := range fields {
+		rows = append(rows, []string{labels[i], networkTableValue(field, row)})
+	}
+	return rows
+}
+
+func ipamTypeColor(itemType string) lipgloss.Color {
+	if color, ok := ipamTypeColors[strings.ToLower(strings.TrimSpace(itemType))]; ok {
+		return color
+	}
+	return defaultRecordTypeColor
+}
+
+func styledIPAMType(itemType string) string {
+	label := strings.ToUpper(strings.TrimSpace(itemType))
+	if label == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Bold(true).Foreground(ipamTypeColor(itemType)).Render(label)
 }
 
 func ipamObjectTitle(row map[string]any) string {
