@@ -303,7 +303,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | --- | --- |
 | `ib net` | Show IPAM command help. |
 | `ib net view list` | List IPAM network views. |
-| `ib net list [SEARCH]` | List IPv4 networks and containers. Add `--network-view` to filter by IPAM network view, `-s/--sort FIELD` to sort by `type`, `network`, `network_view`, or `comment`, and `-C/--columns LIST` to print selected columns. |
+| `ib net list [SEARCH]` | List IPv4 networks and containers. Add `--network-view` to filter by IPAM network view, `-s/--sort FIELD` to sort by `network`, `type`, `network_view`, or `comment`, and `-C/--columns LIST` to print selected columns. |
 | `ib net search KEYWORD` | Search IPv4 networks and containers by type, CIDR, network view, or comment. CIDR matches also include related parent and child networks or containers in the same network view. |
 | `ib net show NETWORK` | Show details for one IPv4 network or container. Use `--network-view` when a CIDR exists in multiple network views. |
 | `ib net address IP` | Show IPAM details for an IPv4 address, including network, parent container, status, types, names, MAC address, lease state, and comment when available. |
@@ -331,7 +331,7 @@ ib dns delete app
 
 `ib dns zone list` supports the same output control pattern for zones. `--type` filters zone formats `FORWARD`, `IPV4`, or `IPV6`; `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment`; and `--columns` selects from the same zone fields. Use `--view` to list zones from another DNS view; `--zone` and `-z` are not accepted by this command.
 
-`ib net list` and `ib net search` are read-only IPAM workflows. Without `--network-view`, they build one merged dataset from unscoped WAPI `network` and `networkcontainer` results plus both object types for each discovered IPAM network view, then de-duplicate by type, CIDR, and network view so every network and container can be displayed. Add `--network-view` to limit the request to one view. Search text matches type, CIDR, network view, and comment. A CIDR-field match also includes related parent and child networks or containers in the same network view; if only a larger cached parent such as `/23` is present, list/search derive direct `/24` child rows so both sides of the split remain visible. Plain `ib net list` also appends those derived child rows after real cached objects, with real Infoblox rows taking precedence. Table output color-codes the `type` column so `NETWORK` and `CONTAINER` rows are visually distinct; JSON and CSV keep plain values. Add `-s` or `--sort` to sort by `type`, `network`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `type`, `network`, `network_view`, and `comment`.
+`ib net list` and `ib net search` are read-only IPAM workflows. Without `--network-view`, they build one merged dataset from unscoped WAPI `network` and `networkcontainer` results plus both object types for each discovered IPAM network view, then de-duplicate by type, CIDR, and network view so every network and container can be displayed. Add `--network-view` to limit the request to one view. Search text matches type, CIDR, network view, and comment. A CIDR-field match also includes related parent and child networks or containers in the same network view; if only a larger cached parent such as `/23` is present, list/search derive direct `/24` child rows so both sides of the split remain visible. Plain `ib net list` also appends those derived child rows after real cached objects, with real Infoblox rows taking precedence. Default output prints `network`, `type`, and `comment`, with the network first and the type second. Table output color-codes the `type` column so `NETWORK` and `CONTAINER` rows are visually distinct; JSON and CSV keep plain values. Add `-s` or `--sort` to sort by `network`, `type`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `network`, `type`, `network_view`, and `comment`.
 
 `ib net show`, `ib net next-ip`, and the compatibility `ib dns next-ip` path resolve both networks and containers; when the same CIDR exists as both, the container is preferred. `ib net next-ip` can use cached rows for the object lookup, while `ib dns next-ip` performs a live read-only object lookup. Both send the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
 
@@ -348,13 +348,13 @@ ib dns list --sort=-name --columns zone,name,value -o csv
 ib dns search app --global --sort zone --columns zone,name,value -o csv
 ib dns list -o json | jq -r '.[] | [.name, .value] | @tsv'
 ib dns zone list --sort zone --columns zone,format,comment -o json | jq '.[]'
-ib net list --sort network --columns type,network,comment -o json | jq '.[]'
+ib net list --sort network --columns network,type,comment -o json | jq '.[]'
 ```
 
 Use `--sort FIELD` for ascending order and `--sort=-FIELD` for descending
 order. Record fields are `name`, `type`, `value`, `zone`, `ttl`, and `comment`;
 zone fields are `zone`, `view`, `format`, `ns_group`, and `comment`; network
-fields are `type`, `network`, `network_view`, and `comment`. Use `--columns` or `-C`
+fields are `network`, `type`, `network_view`, and `comment`. Use `--columns` or `-C`
 with a comma-separated list to keep only the fields you need. Use `-o csv` for
 CSV output, or `-o json` when the next step is a `jq` pipeline.
 

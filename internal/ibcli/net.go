@@ -26,13 +26,14 @@ const (
 )
 
 var (
-	networkViewOutputColumns   = []string{"name", "comment"}
-	networkOutputColumns       = []string{"type", "network", "network_view", "comment"}
-	networkDetailOutputColumns = []string{"type", "network", "network_view", "comment"}
-	ipv4AddressOutputColumns   = []string{"ip", "network", "container", "network_view", "status", "types", "names", "mac_address", "lease_state", "comment"}
-	netNextIPOutputColumns     = []string{"type", "network", "network_view", "ip"}
-	netSortFields              = []string{"type", "network", "network_view", "comment"}
-	ipamTypeColors             = map[string]lipgloss.Color{
+	networkViewOutputColumns       = []string{"name", "comment"}
+	networkOutputColumns           = []string{"network", "type", "comment"}
+	networkSelectableOutputColumns = []string{"network", "type", "network_view", "comment"}
+	networkDetailOutputColumns     = []string{"network", "type", "network_view", "comment"}
+	ipv4AddressOutputColumns       = []string{"ip", "network", "container", "network_view", "status", "types", "names", "mac_address", "lease_state", "comment"}
+	netNextIPOutputColumns         = []string{"network", "type", "ip"}
+	netSortFields                  = []string{"network", "type", "network_view", "comment"}
+	ipamTypeColors                 = map[string]lipgloss.Color{
 		ipamTypeNetwork:   lipgloss.Color("#22c55e"),
 		ipamTypeContainer: lipgloss.Color("#f59e0b"),
 	}
@@ -98,7 +99,7 @@ func (a *App) runNetObjectList(search string, networkView string, option NetSort
 		a.PrintWarning("No IPAM networks or containers found.")
 	}
 	if a.isTableOutput() {
-		return a.emitNetworkRows(columns, rows)
+		return a.emitNetworkRows(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), columns, rows)
 	}
 	return a.emitRows(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), columns, rows)
 }
@@ -249,6 +250,9 @@ func (a *App) runNextIP(network string, networkView string, num int, exclude []s
 	fields := nextIPOutputColumns
 	if cachedLookup {
 		fields = netNextIPOutputColumns
+		if a.isTableOutput() {
+			return a.emitNetworkRows("Next Available IPs", fields, rows)
+		}
 	}
 	return a.emitRows("Next Available IPs", fields, rows)
 }
@@ -719,7 +723,7 @@ func networkDetailRow(network map[string]any) map[string]any {
 	}
 }
 
-func (a *App) emitNetworkRows(columns []string, rows []map[string]any) error {
+func (a *App) emitNetworkRows(title string, columns []string, rows []map[string]any) error {
 	displayRows := make([][]string, 0, len(rows))
 	for _, row := range rows {
 		display := make([]string, 0, len(columns))
@@ -728,7 +732,7 @@ func (a *App) emitNetworkRows(columns []string, rows []map[string]any) error {
 		}
 		displayRows = append(displayRows, display)
 	}
-	fmt.Fprintln(a.Stdout, renderTable(fmt.Sprintf("IPAM Networks and Containers (%d)", len(rows)), titleCaseFields(columns), displayRows))
+	fmt.Fprintln(a.Stdout, renderTable(title, titleCaseFields(columns), displayRows))
 	return nil
 }
 
@@ -938,10 +942,10 @@ func parseNetworkColumns(raw string) ([]string, error) {
 	for _, part := range strings.Split(raw, ",") {
 		column := strings.ToLower(strings.TrimSpace(part))
 		if column == "" {
-			return nil, cliError("network column cannot be empty. Supported: %s", strings.Join(networkOutputColumns, ", "))
+			return nil, cliError("network column cannot be empty. Supported: %s", strings.Join(networkSelectableOutputColumns, ", "))
 		}
 		if !isNetworkOutputColumn(column) {
-			return nil, cliError("unsupported network column %q. Supported: %s", column, strings.Join(networkOutputColumns, ", "))
+			return nil, cliError("unsupported network column %q. Supported: %s", column, strings.Join(networkSelectableOutputColumns, ", "))
 		}
 		if seen[column] {
 			return nil, cliError("duplicate network column %q", column)
@@ -954,7 +958,7 @@ func parseNetworkColumns(raw string) ([]string, error) {
 
 func isNetworkOutputColumn(column string) bool {
 	column = strings.ToLower(strings.TrimSpace(column))
-	for _, candidate := range networkOutputColumns {
+	for _, candidate := range networkSelectableOutputColumns {
 		if column == candidate {
 			return true
 		}

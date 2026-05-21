@@ -683,7 +683,7 @@ func networkColumnCompletions(toComplete string) []string {
 	}
 
 	var rows []string
-	for _, column := range networkOutputColumns {
+	for _, column := range networkSelectableOutputColumns {
 		if selected[column] {
 			continue
 		}

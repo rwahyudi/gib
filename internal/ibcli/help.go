@@ -228,8 +228,8 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"search", "optional positional search matches type, CIDR, network view, or comment"},
 			{"cidr", "CIDR matches include related parent and child networks or containers in the same view"},
 			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
-			{"sort", "-s type or --sort=-comment sorts by field; blank --sort uses network"},
-			{"columns", "-C type,network,comment prints selected output columns"},
+			{"sort", "-s network or --sort=-comment sorts by field; blank --sort uses network"},
+			{"columns", "-C network,type,comment prints selected output columns"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib net search":
@@ -238,7 +238,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"cidr", "CIDR matches include related parent and child networks or containers in the same view"},
 			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
 			{"sort", "-s network_view or --sort=-network sorts by field"},
-			{"columns", "-C type,network,network_view prints selected output columns"},
+			{"columns", "-C network,type,comment prints selected output columns"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib net show":

@@ -153,6 +153,32 @@ func TestIPAMTypeColorMapsKnownTypes(t *testing.T) {
 	}
 }
 
+func TestDefaultNetworkColumnsPutNetworkBeforeType(t *testing.T) {
+	columns, err := parseNetworkColumns("")
+	if err != nil {
+		t.Fatalf("parse default network columns: %v", err)
+	}
+	if got, want := strings.Join(columns, ","), "network,type,comment"; got != want {
+		t.Fatalf("default network columns = %q, want %q", got, want)
+	}
+}
+
+func TestNetworkColumnsStillAllowNetworkViewWhenSelected(t *testing.T) {
+	columns, err := parseNetworkColumns("network,type,network_view")
+	if err != nil {
+		t.Fatalf("parse selected network columns: %v", err)
+	}
+	if got, want := strings.Join(columns, ","), "network,type,network_view"; got != want {
+		t.Fatalf("selected network columns = %q, want %q", got, want)
+	}
+}
+
+func TestNetNextIPColumnsHideNetworkView(t *testing.T) {
+	if got, want := strings.Join(netNextIPOutputColumns, ","), "network,type,ip"; got != want {
+		t.Fatalf("net next-ip columns = %q, want %q", got, want)
+	}
+}
+
 func TestNetTableOutputStylesObjectTypes(t *testing.T) {
 	app := testApp(t)
 	var stdout strings.Builder
@@ -163,7 +189,7 @@ func TestNetTableOutputStylesObjectTypes(t *testing.T) {
 		{"type": ipamTypeContainer, "network": "192.0.0.0/16", "network_view": "default", "comment": "Parent"},
 		{"type": ipamTypeNetwork, "network": "192.0.2.0/24", "network_view": "default", "comment": "Child"},
 	}
-	if err := app.emitNetworkRows(networkOutputColumns, rows); err != nil {
+	if err := app.emitNetworkRows("IPAM Networks and Containers (2)", networkOutputColumns, rows); err != nil {
 		t.Fatalf("emit network rows: %v", err)
 	}
 	output := stdout.String()
@@ -171,6 +197,9 @@ func TestNetTableOutputStylesObjectTypes(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("network table missing %q:\n%s", want, output)
 		}
+	}
+	if strings.Contains(output, "Network View") {
+		t.Fatalf("network table should not include Network View by default:\n%s", output)
 	}
 }
 
