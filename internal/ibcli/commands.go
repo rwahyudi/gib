@@ -540,8 +540,10 @@ func (a *App) dnsCreateCommand() *cobra.Command {
 	var ttl int
 	var noptr bool
 	cmd := &cobra.Command{
-		Use:               "create TYPE NAME VALUE",
-		Short:             "Create a DNS record",
+		Use:   "create TYPE NAME VALUE",
+		Short: "Create a DNS record",
+		Example: strings.TrimSpace(`ib dns create host app 192.0.2.10 -c "Application host"
+ib dns create ptr 192.0.2.10 app.example.com`),
 		Args:              cobra.ExactArgs(3),
 		ValidArgsFunction: createArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1585,7 +1587,7 @@ func (a *App) runDNSCreatePTR(profile Profile, client *WapiClient, name, value, 
 			return err
 		}
 	} else {
-		reverseZone, err = reverseZoneForIP(client, address)
+		reverseZone, err = reverseZoneForIP(primaryReadClient(client), address)
 		if err != nil {
 			return err
 		}

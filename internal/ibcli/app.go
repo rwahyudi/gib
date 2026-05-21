@@ -162,6 +162,7 @@ Common usage:
 	  ib net list
 	  ib net next-ip 192.0.2.0/24 -n 3
 	  ib dns create host app 192.0.2.10 -c "Application host"
+	  ib dns create ptr 192.0.2.10 app.example.com
 	  ib dns edit host app 192.0.2.20 -t 300 -c "Application host"
 	  ib dns delete a app`),
 	}

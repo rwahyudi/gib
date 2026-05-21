@@ -120,11 +120,17 @@ func TestUpdatePayloadPreservesDottedCNAMETarget(t *testing.T) {
 	}
 }
 
-func TestRunDNSCreatePTRDoesNotRequireDefaultZone(t *testing.T) {
+func TestRunDNSCreatePTRUsesIPFirstAndPrimaryReverseZone(t *testing.T) {
 	var postedPTR map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			if r.URL.Query().Get("fqdn") != "2.0.192.in-addr.arpa" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
 					{"fqdn": "2.0.192.in-addr.arpa", "view": "default", "zone_format": "IPV4"},
@@ -139,14 +145,115 @@ func TestRunDNSCreatePTRDoesNotRequireDefaultZone(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
+	defer primary.Close()
+	read := emptyReadServer(t)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	refreshes := captureRecordRefreshes(app)
+	if err := app.runDNSCreate("ptr", "192.0.2.10", "app.example.com", "", 300, false, "Managed"); err != nil {
+		t.Fatalf("create ptr: %v", err)
+	}
+	if postedPTR["ipv4addr"] != "192.0.2.10" || postedPTR["ptrdname"] != "app.example.com" || postedPTR["view"] != "default" {
+		t.Fatalf("ptr payload = %#v", postedPTR)
+	}
+	if postedPTR["ttl"] != float64(300) && postedPTR["ttl"] != 300 || postedPTR["use_ttl"] != true || postedPTR["comment"] != "Managed" {
+		t.Fatalf("ptr ttl/comment payload = %#v", postedPTR)
+	}
+	if strings.Join(primaryRequests, ",") != "GET zone_auth,GET zone_auth,POST record:ptr" {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	assertQueuedRecordRefreshes(t, refreshes, "2.0.192.in-addr.arpa")
+}
+
+func TestRunDNSCreatePTRSupportsIPv6ReverseZone(t *testing.T) {
+	address := mustAddr(t, "2001:db8::10")
+	reverseZone := reverseZoneCandidates(address)[0]
+	var postedPTR map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			if r.URL.Query().Get("fqdn") != reverseZone {
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"fqdn": reverseZone, "view": "default", "zone_format": "IPV6"},
+				},
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/record:ptr"):
+			if err := json.NewDecoder(r.Body).Decode(&postedPTR); err != nil {
+				t.Fatalf("decode ptr payload: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode("record:ptr/ref")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
 	defer server.Close()
 
 	app := dnsCommandTestApp(t, server.URL, "")
-	if err := app.runDNSCreate("ptr", "192.0.2.10", "app.example.com", "", -1, false, ""); err != nil {
-		t.Fatalf("create ptr: %v", err)
+	refreshes := captureRecordRefreshes(app)
+	if err := app.runDNSCreate("ptr", address.String(), "ipv6.example.com", "", -1, false, ""); err != nil {
+		t.Fatalf("create ipv6 ptr: %v", err)
+	}
+	if postedPTR["ipv6addr"] != address.String() || postedPTR["ptrdname"] != "ipv6.example.com" {
+		t.Fatalf("ptr payload = %#v", postedPTR)
+	}
+	if _, ok := postedPTR["ipv4addr"]; ok {
+		t.Fatalf("ipv6 ptr payload included ipv4addr: %#v", postedPTR)
+	}
+	assertQueuedRecordRefreshes(t, refreshes, reverseZone)
+}
+
+func TestRunDNSCreatePTRExplicitZoneSkipsDiscovery(t *testing.T) {
+	const explicitZone = "manual.in-addr.arpa"
+	var postedPTR map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			t.Fatalf("unexpected reverse-zone discovery with explicit zone: %s", r.URL.RawQuery)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/record:ptr"):
+			if err := json.NewDecoder(r.Body).Decode(&postedPTR); err != nil {
+				t.Fatalf("decode ptr payload: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode("record:ptr/ref")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app := dnsCommandTestApp(t, server.URL, "")
+	refreshes := captureRecordRefreshes(app)
+	if err := app.runDNSCreate("ptr", "192.0.2.10", "app.example.com", explicitZone, -1, false, ""); err != nil {
+		t.Fatalf("create ptr with explicit zone: %v", err)
 	}
 	if postedPTR["ipv4addr"] != "192.0.2.10" || postedPTR["ptrdname"] != "app.example.com" {
 		t.Fatalf("ptr payload = %#v", postedPTR)
+	}
+	assertQueuedRecordRefreshes(t, refreshes, explicitZone)
+}
+
+func TestRunDNSCreatePTRRejectsNonIPFirstArgument(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	app := dnsCommandTestApp(t, server.URL, "")
+	err := app.runDNSCreate("ptr", "app.example.com", "192.0.2.10", "", -1, false, "")
+	if err == nil {
+		t.Fatal("create ptr succeeded with non-IP first argument")
+	}
+	if !strings.Contains(err.Error(), "Use: ib dns create ptr <ip-address> <ptr-target>") {
+		t.Fatalf("error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("unexpected network requests = %d", requests)
 	}
 }
 

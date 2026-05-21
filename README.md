@@ -286,7 +286,7 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones, `-t/--type` to filter record types, `-e/--exclude` to hide matching records, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns search KEYWORD` | Search records by name, value, or comment. Complete FQDN keywords can infer the matching forward zone. Use `--global` for all searchable zones, `-r` for child zones under the current/root zone, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns next-ip NETWORK` | Compatibility path for next available IPv4 address lookup against a network or container. Prefer `ib net next-ip NETWORK` for IPAM work. |
-| `ib dns create TYPE NAME VALUE` | Create a DNS record, for example `ib dns create host app 192.0.2.10 -c "Application host"`. |
+| `ib dns create TYPE NAME VALUE` | Create a DNS record, for example `ib dns create host app 192.0.2.10 -c "Application host"`. For PTR, use `ib dns create ptr IP_ADDRESS PTR_TARGET`; the reverse zone is auto-detected unless `--zone` is supplied. |
 | `ib dns edit TYPE NAME [VALUE]` | Edit an existing DNS record. |
 | `ib dns delete TYPE NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
 | `ib dns view list` | List DNS views. |
@@ -324,6 +324,7 @@ ib net list prod --network-view default
 ib net address 192.0.2.10 --network-view default
 ib net next-ip 192.0.2.0/24 -n 3
 ib dns create host app 192.0.2.10 -c "Application host"
+ib dns create ptr 192.0.2.10 app.example.com
 ib dns edit host app 192.0.2.20 -t 300 -c "Application host"
 ib dns delete a app
 ```

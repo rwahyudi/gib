@@ -100,6 +100,8 @@ DNS record table output always includes a `Current Context:` footer line. When t
 
 `ib dns delete TYPE NAME` prompts with a Charmbracelet Huh confirmation before deleting a selected record. Use `-y` or `--yes` to skip the confirmation. If the user cancels either the duplicate-record picker or confirmation prompt, `ib` prints `INFO: delete cancelled` and exits without issuing DELETE. If multiple forward records match the same FQDN and requested type, interactive table mode first uses a Charmbracelet Huh select picker showing type, name, value, zone, comment, and `_ref`; the selected record is then confirmed before DELETE. Non-interactive mode and `-o json`/`-o csv` fail safely unless `-y` is provided.
 
+`ib dns create ptr IP_ADDRESS PTR_TARGET` treats the first argument after `ptr` as a full IPv4 or IPv6 address. If `--zone` is omitted, `ib` finds the best matching reverse DNS zone in the selected DNS view before posting the PTR record; `--zone` remains an explicit reverse-zone override. The created PTR still uses the primary server for the write, and reverse-zone discovery uses the primary read path so write workflows do not depend on a read-only GCM endpoint.
+
 When WAPI returns HTML or another non-JSON payload with a successful HTTP status, `ib` reports a contextual WAPI error instead of the raw Go JSON parser error. This most often means the configured server, WAPI version, credentials, reverse proxy, or login/SSO page is answering the request rather than the Infoblox WAPI JSON endpoint.
 
 ## Shell Completion

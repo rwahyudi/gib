@@ -619,6 +619,8 @@ func TestCreateHelpUsesStyledUsagePanel(t *testing.T) {
 	for _, want := range []string{
 		"Create Record Usage",
 		"Current Context",
+		"ib dns create ptr <ip-address> <ptr-target>",
+		"reverse zone is auto-detected",
 		"ttl      optional; omit to use the zone default",
 		`ib dns create host app 192.0.2.10 -c "Application host"`,
 	} {
