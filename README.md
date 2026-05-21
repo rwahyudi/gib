@@ -44,18 +44,13 @@ sudo dnf copr enable rwahyudi/gib
 sudo dnf install gib
 ```
 
-For GitHub releases, the package assets are named `ib_<version>_<os>_<arch>`.
-These commands resolve the latest release at install time.
-
-```bash
-VERSION="$(curl -fsSL https://api.github.com/repos/rwahyudi/gib/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')"
-BASE="https://github.com/rwahyudi/gib/releases/download/v${VERSION}"
-```
+GitHub release assets use stable filenames, so `/releases/latest/download/...`
+always points at the newest published version.
 
 Linux tarball:
 
 ```bash
-curl -fL "$BASE/ib_${VERSION}_linux_amd64.tar.gz" | tar -xz ib
+curl -fL https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64.tar.gz | tar -xz ib
 sudo install -m 0755 ib /usr/local/bin/ib
 ib --help
 ```
@@ -63,11 +58,11 @@ ib --help
 RPM or DEB package:
 
 ```bash
-curl -fLO "$BASE/ib_${VERSION}_linux_amd64.rpm"
-sudo dnf install "./ib_${VERSION}_linux_amd64.rpm"
+curl -fLO https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64.rpm
+sudo dnf install ./ib_linux_amd64.rpm
 
-curl -fLO "$BASE/ib_${VERSION}_linux_amd64.deb"
-sudo apt install "./ib_${VERSION}_linux_amd64.deb"
+curl -fLO https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64.deb
+sudo apt install ./ib_linux_amd64.deb
 ```
 
 RPM and DEB packages install `ib` to `/usr/local/bin/ib` and Bash completion to
@@ -83,13 +78,11 @@ Open a new shell after installing completion.
 Windows ZIP:
 
 ```powershell
-$latest = Invoke-RestMethod "https://api.github.com/repos/rwahyudi/gib/releases/latest"
-$version = $latest.tag_name.TrimStart("v")
-$asset = $latest.assets | Where-Object Name -eq "ib_${version}_windows_amd64.zip" | Select-Object -First 1
-Invoke-WebRequest $asset.browser_download_url -OutFile "ib_${version}_windows_amd64.zip"
 New-Item -ItemType Directory -Force "$HOME\bin" | Out-Null
-Expand-Archive "ib_${version}_windows_amd64.zip" "$HOME\bin\ib-$version" -Force
-Copy-Item "$HOME\bin\ib-$version\ib.exe" "$HOME\bin\ib.exe" -Force
+$archive = "$env:TEMP\ib_windows_amd64.zip"
+Invoke-WebRequest "https://github.com/rwahyudi/gib/releases/latest/download/ib_windows_amd64.zip" -OutFile $archive
+Expand-Archive $archive "$HOME\bin\ib-latest" -Force
+Copy-Item "$HOME\bin\ib-latest\ib.exe" "$HOME\bin\ib.exe" -Force
 ```
 
 Add `$HOME\bin` to the user `PATH` if needed, open a new PowerShell window, and

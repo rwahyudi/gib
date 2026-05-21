@@ -38,7 +38,7 @@ archives:
       - ib-linux
     formats:
       - tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - LICENSE
@@ -48,7 +48,7 @@ archives:
       - ib-windows
     formats:
       - zip
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - LICENSE
@@ -64,7 +64,7 @@ nfpms:
     maintainer: rwahyudi
     description: Infoblox DNS command line client.
     license: MIT
-    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    file_name_template: "{{ .PackageName }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - deb
       - rpm

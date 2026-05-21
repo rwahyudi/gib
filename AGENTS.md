@@ -94,7 +94,7 @@ For infographic changes, prefer editing the source SVG text/labels directly and 
 
 Before every release, analyze and validate the README installation instructions with extra scrutiny. Confirm Copr, GitHub release tarball, RPM, DEB, Windows ZIP, completion setup, install paths, and asset filenames match `.goreleaser.yaml`, `gib.spec`, packaging files, and the release tag being published.
 
-README install commands should use the latest available release by default. Prefer commands that resolve `https://api.github.com/repos/rwahyudi/gib/releases/latest` or the `/releases/latest` redirect instead of hardcoded version strings. If a release procedure intentionally pins a version, update every README occurrence to the exact tag before publishing and check with `rg 'releases/download/v[0-9]|ib_[0-9]+\\.[0-9]+\\.[0-9]+|version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"' README.md`.
+README install commands should use the latest available release by default. Prefer direct stable asset URLs under `https://github.com/rwahyudi/gib/releases/latest/download/` instead of GitHub API parsing, asset enumeration, or hardcoded version strings. If a release procedure intentionally pins a version, update every README occurrence to the exact tag before publishing and check with `rg 'api.github.com/repos/rwahyudi/gib/releases/latest|releases/download/v[0-9]|ib_[0-9]+\\.[0-9]+\\.[0-9]+|version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"' README.md`.
 
 Validate the live release assets when network access is available, for example with `gh release view --json tagName,assets`. Do not rely only on `.goreleaser.yaml`; confirm the latest release actually contains the assets referenced by README install commands.
 
