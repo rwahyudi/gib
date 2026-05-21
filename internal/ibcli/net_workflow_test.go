@@ -153,6 +153,29 @@ func TestIPAMTypeColorMapsKnownTypes(t *testing.T) {
 	}
 }
 
+func TestNetworkSizeColorMapsPrefixBuckets(t *testing.T) {
+	tests := map[string]string{
+		"10.0.0.0/8":       "#ef4444",
+		"10.128.0.0/16":    "#f97316",
+		"10.128.48.0/23":   "#f59e0b",
+		"10.128.48.0/24":   "#22c55e",
+		"10.128.48.128/25": "#06b6d4",
+		"192.0.2.1/32":     "#06b6d4",
+	}
+	for cidr, want := range tests {
+		got, ok := networkSizeColor(cidr)
+		if !ok {
+			t.Fatalf("network size color for %q returned ok=false", cidr)
+		}
+		if string(got) != want {
+			t.Fatalf("network size color for %q = %q, want %q", cidr, got, want)
+		}
+	}
+	if _, ok := networkSizeColor("not-a-cidr"); ok {
+		t.Fatalf("network size color for invalid CIDR returned ok=true")
+	}
+}
+
 func TestDefaultNetworkColumnsPutNetworkBeforeType(t *testing.T) {
 	columns, err := parseNetworkColumns("")
 	if err != nil {

@@ -37,6 +37,16 @@ var (
 		ipamTypeNetwork:   lipgloss.Color("#22c55e"),
 		ipamTypeContainer: lipgloss.Color("#f59e0b"),
 	}
+	networkSizeColors = []struct {
+		maxPrefixBits int
+		color         lipgloss.Color
+	}{
+		{8, lipgloss.Color("#ef4444")},
+		{16, lipgloss.Color("#f97316")},
+		{23, lipgloss.Color("#f59e0b")},
+		{24, lipgloss.Color("#22c55e")},
+		{32, lipgloss.Color("#06b6d4")},
+	}
 )
 
 type NetSort struct {
@@ -737,10 +747,14 @@ func (a *App) emitNetworkRows(title string, columns []string, rows []map[string]
 }
 
 func networkTableValue(field string, row map[string]any) string {
-	if field == "type" {
+	switch field {
+	case "network":
+		return styledNetworkCIDR(stringify(row[field]))
+	case "type":
 		return styledIPAMType(stringify(row[field]))
+	default:
+		return stringify(row[field])
 	}
-	return stringify(row[field])
 }
 
 func networkDetailTableRows(fields []string, row map[string]any) [][]string {
@@ -765,6 +779,32 @@ func styledIPAMType(itemType string) string {
 		return ""
 	}
 	return lipgloss.NewStyle().Bold(true).Foreground(ipamTypeColor(itemType)).Render(label)
+}
+
+func networkSizeColor(cidr string) (lipgloss.Color, bool) {
+	prefix, ok := parseIPv4Prefix(cidr)
+	if !ok {
+		return "", false
+	}
+	bits := prefix.Bits()
+	for _, bucket := range networkSizeColors {
+		if bits <= bucket.maxPrefixBits {
+			return bucket.color, true
+		}
+	}
+	return defaultRecordTypeColor, true
+}
+
+func styledNetworkCIDR(cidr string) string {
+	label := strings.TrimSpace(cidr)
+	if label == "" {
+		return ""
+	}
+	color, ok := networkSizeColor(label)
+	if !ok {
+		return label
+	}
+	return lipgloss.NewStyle().Foreground(color).Render(label)
 }
 
 func ipamObjectTitle(row map[string]any) string {
