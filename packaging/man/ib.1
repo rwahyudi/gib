@@ -44,12 +44,12 @@ Search records by name, value, or comment.
 List IPv4 networks and containers matching prod in the default IPAM network view.
 Default output shows network, type, and comment columns.
 Table output color-codes CIDR size and network/container type values.
-Larger cached parents can also produce direct /24 child rows for visibility.
+Covered child CIDRs are not synthesized unless Infoblox returns them as objects.
 .TP
 .B ib net search 10.129.0.0/16
 Search merged unscoped and per-view IPAM CIDRs and include related parent and
-child networks or containers in the same network view. Larger cached parents can
-also produce direct /24 child rows for visibility.
+child networks or containers in the same network view. Covered child CIDRs are
+not synthesized unless Infoblox returns them as objects.
 .TP
 .B ib net address 192.0.2.10 --network-view default
 Show IPAM address details for 192.0.2.10.

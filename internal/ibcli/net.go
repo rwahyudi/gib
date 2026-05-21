@@ -557,7 +557,6 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 		for _, network := range networks {
 			appendNetworkSearchRow(&rows, seen, network)
 		}
-		appendDerivedNetworkListRows(&rows, seen, networks)
 		return rows
 	}
 	filtered := make([]map[string]any, 0, len(networks))
@@ -578,7 +577,6 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 			}
 		}
 	}
-	appendDerivedNetworkSearchRows(&filtered, seen, networks, search)
 	return filtered
 }
 
@@ -620,40 +618,6 @@ func appendRelatedNetworkSearchRows(rows *[]map[string]any, seen map[string]bool
 		if networkPrefixesRelated(targetPrefix, objectPrefix) {
 			appendNetworkSearchRow(rows, seen, object)
 		}
-	}
-}
-
-func appendDerivedNetworkSearchRows(rows *[]map[string]any, seen map[string]bool, objects []map[string]any, search string) {
-	roots := networkCIDRPrefixCompletionRoots(objects, strings.ToLower(strings.TrimSpace(search)))
-	appendDerivedNetworkRows(rows, seen, derivedNetworkCIDRCompletionRows(roots, search))
-}
-
-func appendDerivedNetworkListRows(rows *[]map[string]any, seen map[string]bool, objects []map[string]any) {
-	roots := networkCIDRListDerivationRoots(objects)
-	appendDerivedNetworkRows(rows, seen, derivedNetworkCIDRRows(roots))
-}
-
-func networkCIDRListDerivationRoots(objects []map[string]any) map[string][]netip.Prefix {
-	roots := map[string][]netip.Prefix{}
-	for _, object := range objects {
-		prefix, ok := parseIPv4Prefix(cleanString(object["network"]))
-		if !ok || !canDeriveNetworkCIDRChildren(prefix) {
-			continue
-		}
-		view := cleanString(object["network_view"])
-		roots[view] = append(roots[view], prefix)
-	}
-	return roots
-}
-
-func appendDerivedNetworkRows(rows *[]map[string]any, seen map[string]bool, derivedRows []networkCIDRCompletionRow) {
-	for _, derived := range derivedRows {
-		appendNetworkSearchRow(rows, seen, map[string]any{
-			"type":         ipamTypeNetwork,
-			"network":      derived.cidr,
-			"network_view": derived.view,
-			"comment":      "",
-		})
 	}
 }
 
