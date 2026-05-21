@@ -96,6 +96,8 @@ Profile passwords use `enc:v1:` Fernet tokens with `~/.ib/key` on Unix. Native W
 
 DNS record table output always includes a `Current Context:` footer line. When the table has more than five records, the `Total records` badge is shown on the same line.
 
+IPAM network table output from `ib net` prints a compact `Current Context:` footer after the table with only `Profile` and `Rows`. JSON and CSV output remain row-only.
+
 `ib dns zone info ZONE` normalizes SOA serial numbers to integer text so JSON numeric/scientific notation from WAPI does not leak into table, JSON, or CSV output.
 
 `ib dns delete TYPE NAME` prompts with a Charmbracelet Huh confirmation before deleting a selected record. Use `-y` or `--yes` to skip the confirmation. If the user cancels either the duplicate-record picker or confirmation prompt, `ib` prints `INFO: delete cancelled` and exits without issuing DELETE. If multiple forward records match the same FQDN and requested type, interactive table mode first uses a Charmbracelet Huh select picker showing type, name, value, zone, comment, and `_ref`; the selected record is then confirmed before DELETE. Non-interactive mode and `-o json`/`-o csv` fail safely unless `-y` is provided.

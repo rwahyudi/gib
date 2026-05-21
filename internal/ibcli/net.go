@@ -77,7 +77,7 @@ func (a *App) runNetViewList() error {
 	if len(rows) == 0 && a.isTableOutput() {
 		a.PrintWarning("No IPAM network views found.")
 	}
-	return a.emitRows(fmt.Sprintf("IPAM Network Views (%d)", len(rows)), networkViewOutputColumns, rows)
+	return a.emitNetRows(fmt.Sprintf("IPAM Network Views (%d)", len(rows)), networkViewOutputColumns, rows)
 }
 
 func (a *App) runNetList(search string, networkView string, option NetSort, columns []string) error {
@@ -188,6 +188,7 @@ func (a *App) runNetShow(network string, networkView string) error {
 	title := ipamObjectTitle(row)
 	if a.isTableOutput() {
 		fmt.Fprintln(a.Stdout, renderTable(title, []string{"Field", "Value"}, networkDetailTableRows(networkDetailOutputColumns, row)))
+		a.printNetTableFooter(1)
 		return nil
 	}
 	return a.emitObject(title, networkDetailOutputColumns, row)
@@ -225,7 +226,7 @@ func (a *App) runNetAddress(address string, networkView string) error {
 		}
 		return compareCaseInsensitiveText(cleanString(rows[i]["network"]), cleanString(rows[j]["network"])) < 0
 	})
-	return a.emitRows(fmt.Sprintf("IPAM Addresses (%d)", len(rows)), ipv4AddressOutputColumns, rows)
+	return a.emitNetRows(fmt.Sprintf("IPAM Addresses (%d)", len(rows)), ipv4AddressOutputColumns, rows)
 }
 
 func (a *App) runDNSNextIP(network string, networkView string, num int, exclude []string) error {
@@ -707,7 +708,41 @@ func (a *App) emitNetworkRows(title string, columns []string, rows []map[string]
 		displayRows = append(displayRows, display)
 	}
 	fmt.Fprintln(a.Stdout, renderTable(title, titleCaseFields(columns), displayRows))
+	a.printNetTableFooter(len(rows))
 	return nil
+}
+
+func (a *App) emitNetRows(title string, fields []string, rows []map[string]any) error {
+	if !a.isTableOutput() {
+		return a.emitRows(title, fields, rows)
+	}
+	displayRows := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		display := make([]string, 0, len(fields))
+		for _, field := range fields {
+			display = append(display, stringify(row[field]))
+		}
+		displayRows = append(displayRows, display)
+	}
+	fmt.Fprintln(a.Stdout, renderTable(title, titleCaseFields(fields), displayRows))
+	a.printNetTableFooter(len(rows))
+	return nil
+}
+
+func (a *App) printNetTableFooter(count int) {
+	fmt.Fprintln(a.Stdout, a.netContextLine(count))
+}
+
+func (a *App) netContextLine(count int) string {
+	profile := a.defaultConfigValues()
+	profileName := profile.Name
+	if profileName == "" {
+		profileName = defaultProfileName
+	}
+	return contextTitleStyle.Render("Current Context:") + " " + strings.Join([]string{
+		renderContextPair("Profile", profileName, contextProfileValueStyle),
+		renderContextPair("Rows", fmt.Sprint(count), contextViewValueStyle),
+	}, " | ")
 }
 
 func networkTableValue(field string, row map[string]any) string {

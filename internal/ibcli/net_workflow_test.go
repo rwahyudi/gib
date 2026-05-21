@@ -34,6 +34,23 @@ func TestNetViewList(t *testing.T) {
 	if len(rows) != 2 || cleanString(rows[0]["name"]) != "default" || cleanString(rows[1]["name"]) != "prod" {
 		t.Fatalf("network view rows = %#v", rows)
 	}
+
+	stdout.Reset()
+	app.Output = tableOutput
+	if err := app.Execute([]string{"net", "view", "list"}); err != nil {
+		t.Fatalf("net view table list: %v\nstdout:\n%s", err, stdout.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"IPAM Network Views", "Current Context:", "Profile:", "default", "Rows:", "2"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("network view table missing %q:\n%s", want, output)
+		}
+	}
+	for _, unwanted := range []string{"View:", "Zone:"} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("network view table should not include DNS context %q:\n%s", unwanted, output)
+		}
+	}
 }
 
 func TestNetListSearchesSortsAndSelectsColumns(t *testing.T) {
@@ -219,6 +236,16 @@ func TestNetTableOutputStylesObjectTypes(t *testing.T) {
 	for _, want := range []string{"CONTAINER", "NETWORK", "192.0.0.0/16", "192.0.2.0/24"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("network table missing %q:\n%s", want, output)
+		}
+	}
+	for _, want := range []string{"Current Context:", "Profile:", "default", "Rows:", "2"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("network table footer missing %q:\n%s", want, output)
+		}
+	}
+	for _, unwanted := range []string{"View:", "Zone:"} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("network table footer should not include DNS context %q:\n%s", unwanted, output)
 		}
 	}
 	if strings.Contains(output, "Network View") {
