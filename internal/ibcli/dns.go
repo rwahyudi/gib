@@ -3205,17 +3205,77 @@ func ptrMatchesInZone(client *WapiClient, address netip.Addr, reverseZone string
 	if address.Is4() {
 		field = "ipv4addr"
 	}
+	matches, err := ptrMatchesInZoneByParams(client, address, reverseZone, map[string]string{field: address.String()})
+	if err != nil || len(matches) > 0 {
+		return matches, err
+	}
+	// CIDR reverse zones can list PTRs from /allrecords while record:ptr lookups
+	// by ipv4addr return nothing. The reverse owner name is the stable WAPI key.
+	return ptrMatchesInZoneByParams(client, address, reverseZone, map[string]string{"name": reversePointer(address)})
+}
+
+func ptrMatchesInZoneByParams(client *WapiClient, address netip.Addr, reverseZone string, extra map[string]string) ([]TypedRecord, error) {
 	spec := recordTypes["ptr"]
-	results, err := pagedQuery(client, spec.Object, objectQueryParams(spec, client, map[string]string{field: address.String()}))
+	results, err := pagedQuery(client, spec.Object, objectQueryParams(spec, client, extra))
 	if err != nil {
 		return nil, err
 	}
 	var matches []TypedRecord
 	for _, item := range results {
-		if zone := cleanString(item["zone"]); zone != "" && zone != reverseZone {
+		if zone := cleanString(item["zone"]); zone != "" && !reverseZonesEquivalent(zone, reverseZone) {
 			continue
 		}
 		matches = append(matches, TypedRecord{Type: "ptr", Item: item})
 	}
 	return matches, nil
+}
+
+func reverseZonesEquivalent(left string, right string) bool {
+	left = strings.ToLower(strings.TrimRight(strings.TrimSpace(left), "."))
+	right = strings.ToLower(strings.TrimRight(strings.TrimSpace(right), "."))
+	if left == "" || right == "" {
+		return false
+	}
+	if left == right {
+		return true
+	}
+	leftPrefix, leftOK := reverseZoneIPv4Prefix(left)
+	rightPrefix, rightOK := reverseZoneIPv4Prefix(right)
+	return leftOK && rightOK && leftPrefix == rightPrefix
+}
+
+func reverseZoneIPv4Prefix(zone string) (netip.Prefix, bool) {
+	if prefix, ok := parseIPv4Prefix(zone); ok {
+		return prefix.Masked(), true
+	}
+	zone = strings.ToLower(strings.TrimRight(strings.TrimSpace(zone), "."))
+	const suffix = ".in-addr.arpa"
+	if !strings.HasSuffix(zone, suffix) {
+		return netip.Prefix{}, false
+	}
+	base := strings.TrimSuffix(zone, suffix)
+	if base == "" {
+		addr, _ := netip.ParseAddr("0.0.0.0")
+		return netip.PrefixFrom(addr, 0), true
+	}
+	labels := strings.Split(base, ".")
+	if len(labels) > 4 {
+		return netip.Prefix{}, false
+	}
+	octets := make([]string, 0, 4)
+	for index := len(labels) - 1; index >= 0; index-- {
+		octet, err := strconv.Atoi(labels[index])
+		if err != nil || octet < 0 || octet > 255 {
+			return netip.Prefix{}, false
+		}
+		octets = append(octets, strconv.Itoa(octet))
+	}
+	for len(octets) < 4 {
+		octets = append(octets, "0")
+	}
+	addr, err := netip.ParseAddr(strings.Join(octets, "."))
+	if err != nil {
+		return netip.Prefix{}, false
+	}
+	return netip.PrefixFrom(addr, len(labels)*8).Masked(), true
 }

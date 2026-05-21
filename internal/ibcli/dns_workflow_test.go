@@ -258,6 +258,10 @@ func TestDNSEditAManagedPTRDeletesOldPTRAndRefreshesReverseCaches(t *testing.T) 
 					"zone":     "2.0.192.in-addr.arpa",
 				}}})
 			default:
+				if r.URL.Query().Get("name") == "20.100.51.198.in-addr.arpa" {
+					_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+					return
+				}
 				t.Fatalf("unexpected PTR lookup query: %s", r.URL.RawQuery)
 			}
 		case r.Method == http.MethodPost && trimWAPIPath(r.URL.Path) == "record:ptr":

@@ -273,6 +273,56 @@ func TestRunDNSCreatePTRFindsCIDRReverseZone(t *testing.T) {
 	assertQueuedRecordRefreshes(t, refreshes, "192.168.100.0/24")
 }
 
+func TestRunDNSDeletePTRFallsBackToReverseOwnerNameInCIDRZone(t *testing.T) {
+	var sawAddressLookup, sawNameLookup, sawDelete bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			if r.URL.Query().Get("fqdn") != "" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"fqdn":        "10.128.1.0/24",
+				"view":        "default",
+				"zone_format": "IPV4",
+			}}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/record:ptr"):
+			switch {
+			case r.URL.Query().Get("ipv4addr") == "10.128.1.44":
+				sawAddressLookup = true
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+			case r.URL.Query().Get("name") == "44.1.128.10.in-addr.arpa":
+				sawNameLookup = true
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+					"_ref":     "record:ptr/ref",
+					"name":     "44.1.128.10.in-addr.arpa",
+					"ptrdname": "test.com",
+					"zone":     "1.128.10.in-addr.arpa",
+				}}})
+			default:
+				t.Fatalf("unexpected PTR lookup query: %s", r.URL.RawQuery)
+			}
+		case r.Method == http.MethodDelete && trimWAPIPath(r.URL.Path) == "record:ptr/ref":
+			sawDelete = true
+			_ = json.NewEncoder(w).Encode("record:ptr/ref")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app := dnsCommandTestApp(t, server.URL, "")
+	refreshes := captureRecordRefreshes(app)
+	if err := app.runDNSDeletePTR("10.128.1.44", true); err != nil {
+		t.Fatalf("delete ptr: %v", err)
+	}
+	if !sawAddressLookup || !sawNameLookup || !sawDelete {
+		t.Fatalf("sawAddressLookup=%t sawNameLookup=%t sawDelete=%t", sawAddressLookup, sawNameLookup, sawDelete)
+	}
+	assertQueuedRecordRefreshes(t, refreshes, "10.128.1.0/24")
+}
+
 func TestRunDNSCreatePTRRejectsNonIPFirstArgument(t *testing.T) {
 	var requests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -430,7 +480,7 @@ func TestSyncPTRForAddressReadsPrimaryServer(t *testing.T) {
 	if _, err := app.syncPTRForAddress(Profile{Name: defaultProfileName, DNSView: "default"}, client, mustAddr(t, "192.0.2.10"), "app.example.com", -1, ""); err != nil {
 		t.Fatalf("sync ptr: %v", err)
 	}
-	if primaryGETs != 2 || readGETs != 0 {
+	if primaryGETs != 3 || readGETs != 0 {
 		t.Fatalf("primaryGETs=%d readGETs=%d", primaryGETs, readGETs)
 	}
 }
