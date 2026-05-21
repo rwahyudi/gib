@@ -307,7 +307,7 @@ func TestNetListWithoutNetworkViewQueriesAllViews(t *testing.T) {
 	defer server.Close()
 
 	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
-	if err := app.Execute([]string{"-o", "json", "net", "list"}); err != nil {
+	if err := app.Execute([]string{"-o", "json", "net", "list", "--columns", "network,type,network_view,comment"}); err != nil {
 		t.Fatalf("net list: %v\nstdout:\n%s", err, stdout.String())
 	}
 	var rows []map[string]any
@@ -390,7 +390,7 @@ func TestNetSearchWithoutNetworkViewQueriesAllViews(t *testing.T) {
 	defer server.Close()
 
 	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
-	if err := app.Execute([]string{"-o", "json", "net", "search", "shared"}); err != nil {
+	if err := app.Execute([]string{"-o", "json", "net", "search", "shared", "--columns", "network,type,network_view,comment"}); err != nil {
 		t.Fatalf("net search: %v\nstdout:\n%s", err, stdout.String())
 	}
 	var rows []map[string]any
