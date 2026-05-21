@@ -521,13 +521,16 @@ func TestNetSearchDerivesChildCIDRsFromContainingParentPrefix(t *testing.T) {
 		comment string
 	}{
 		{"10.128.48.0/23", "Servers"},
-		{"10.128.48.0/24", "derived /24 from 10.128.48.0/23"},
-		{"10.128.49.0/24", "derived /24 from 10.128.48.0/23"},
+		{"10.128.48.0/24", ""},
+		{"10.128.49.0/24", ""},
 	}
 	for index, expected := range want {
 		if cleanString(rows[index]["type"]) != ipamTypeNetwork || cleanString(rows[index]["network"]) != expected.network || cleanString(rows[index]["comment"]) != expected.comment {
 			t.Fatalf("row %d = %#v, want network %s %s", index, rows[index], expected.network, expected.comment)
 		}
+	}
+	if strings.Contains(stdout.String(), "derived /24 from") {
+		t.Fatalf("net search output should not include derived provenance comments:\n%s", stdout.String())
 	}
 }
 
@@ -568,13 +571,16 @@ func TestNetListDerivesChildCIDRsFromParentWithoutSearch(t *testing.T) {
 		comment  string
 	}{
 		{ipamTypeContainer, "10.128.48.0/23", "Servers"},
-		{ipamTypeNetwork, "10.128.48.0/24", "derived /24 from 10.128.48.0/23"},
-		{ipamTypeNetwork, "10.128.49.0/24", "derived /24 from 10.128.48.0/23"},
+		{ipamTypeNetwork, "10.128.48.0/24", ""},
+		{ipamTypeNetwork, "10.128.49.0/24", ""},
 	}
 	for index, expected := range want {
 		if cleanString(rows[index]["type"]) != expected.itemType || cleanString(rows[index]["network"]) != expected.network || cleanString(rows[index]["comment"]) != expected.comment {
 			t.Fatalf("row %d = %#v, want %s %s %s", index, rows[index], expected.itemType, expected.network, expected.comment)
 		}
+	}
+	if strings.Contains(stdout.String(), "derived /24 from") {
+		t.Fatalf("net list output should not include derived provenance comments:\n%s", stdout.String())
 	}
 }
 

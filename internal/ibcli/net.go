@@ -642,7 +642,7 @@ func appendDerivedNetworkRows(rows *[]map[string]any, seen map[string]bool, deri
 			"type":         ipamTypeNetwork,
 			"network":      derived.cidr,
 			"network_view": derived.view,
-			"comment":      "derived /24 from " + derived.source,
+			"comment":      "",
 		})
 	}
 }
