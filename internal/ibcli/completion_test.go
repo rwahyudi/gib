@@ -340,9 +340,9 @@ func TestZoneCompletionsAreWiredToCommandsAndFlags(t *testing.T) {
 		{"__complete", "dns", "zone", "info", "ex"},
 		{"__complete", "dns", "zone", "delete", "ex"},
 		{"__complete", "dns", "list", "ex"},
-		{"__complete", "dns", "delete", "app", "ex"},
-		{"__complete", "dns", "create", "app", "host", "192.0.2.10", "--zone", "ex"},
-		{"__complete", "dns", "edit", "app", "host", "192.0.2.10", "--zone", "ex"},
+		{"__complete", "dns", "delete", "a", "app", "ex"},
+		{"__complete", "dns", "create", "host", "app", "192.0.2.10", "--zone", "ex"},
+		{"__complete", "dns", "edit", "host", "app", "192.0.2.10", "--zone", "ex"},
 		{"__complete", "dns", "search", "app", "--zone", "ex"},
 		{"__complete", "dns", "search", "app", "-z", "ex"},
 	}
@@ -600,14 +600,14 @@ func TestZoneCreateDoesNotCompleteExistingZones(t *testing.T) {
 	}
 }
 
-func TestDNSCreateCompletesRecordTypesAfterName(t *testing.T) {
+func TestDNSCreateCompletesRecordTypesAtTypePosition(t *testing.T) {
 	app := testApp(t)
 	var stdout bytes.Buffer
 	app.Stdout = &stdout
 	app.Stderr = &bytes.Buffer{}
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 
-	if err := app.Execute([]string{"__complete", "dns", "create", "app", "h"}); err != nil {
+	if err := app.Execute([]string{"__complete", "dns", "create", "h"}); err != nil {
 		t.Fatalf("completion: %v", err)
 	}
 	output := stdout.String()
@@ -711,7 +711,7 @@ func TestDNSCreateCompletesFlagsAfterPositionalArgs(t *testing.T) {
 	app.Stderr = &bytes.Buffer{}
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 
-	if err := app.Execute([]string{"__complete", "dns", "create", "app", "host", "192.0.2.10", ""}); err != nil {
+	if err := app.Execute([]string{"__complete", "dns", "create", "host", "app", "192.0.2.10", ""}); err != nil {
 		t.Fatalf("completion: %v", err)
 	}
 	output := stdout.String()
@@ -795,12 +795,24 @@ func TestNetSortCompletesValues(t *testing.T) {
 	}
 }
 
-func TestDNSDeleteCompletesRecordNames(t *testing.T) {
+func TestDNSDeleteCompletesRecordTypesThenRecordNames(t *testing.T) {
 	app, stdout := completionAppWithRecords(t)
-	if err := app.Execute([]string{"__complete", "dns", "delete", "ap"}); err != nil {
-		t.Fatalf("completion: %v", err)
+	if err := app.Execute([]string{"__complete", "dns", "delete", "a"}); err != nil {
+		t.Fatalf("type completion: %v", err)
 	}
 	output := stdout.String()
+	if !strings.Contains(output, "a\tIPv4 address record") || !strings.Contains(output, "aaaa\tIPv6 address record") {
+		t.Fatalf("type completion output missing A/AAAA record types:\n%s", output)
+	}
+	if !strings.Contains(output, ":4") {
+		t.Fatalf("type completion did not disable file completion:\n%s", output)
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"__complete", "dns", "delete", "a", "ap"}); err != nil {
+		t.Fatalf("record completion: %v", err)
+	}
+	output = stdout.String()
 	if !strings.Contains(output, "app\tA 192.0.2.10") {
 		t.Fatalf("completion output missing app record:\n%s", output)
 	}
@@ -819,7 +831,7 @@ func TestDNSDeleteCompletionTreatsCurrentTokenAsRecordName(t *testing.T) {
 		t.Fatalf("find delete command: %v", err)
 	}
 
-	rows, directive := app.existingRecordArgCompletion(cmd, []string{"ap"}, "ap")
+	rows, directive := app.existingRecordArgCompletion(cmd, []string{"a", "ap"}, "ap")
 	if directive != cobra.ShellCompDirectiveNoFileComp {
 		t.Fatalf("directive = %v", directive)
 	}
@@ -830,7 +842,7 @@ func TestDNSDeleteCompletionTreatsCurrentTokenAsRecordName(t *testing.T) {
 		t.Fatalf("record-name completion included zone rows: %#v", rows)
 	}
 
-	rows, directive = app.existingRecordArgCompletion(cmd, []string{"app", "ex"}, "ex")
+	rows, directive = app.existingRecordArgCompletion(cmd, []string{"a", "app", "ex"}, "ex")
 	if directive != cobra.ShellCompDirectiveNoFileComp {
 		t.Fatalf("zone directive = %v", directive)
 	}
@@ -841,21 +853,21 @@ func TestDNSDeleteCompletionTreatsCurrentTokenAsRecordName(t *testing.T) {
 
 func TestDNSEditCompletesRecordNamesAndTypes(t *testing.T) {
 	app, stdout := completionAppWithRecords(t)
-	if err := app.Execute([]string{"__complete", "dns", "edit", "ap"}); err != nil {
-		t.Fatalf("record completion: %v", err)
+	if err := app.Execute([]string{"__complete", "dns", "edit", "h"}); err != nil {
+		t.Fatalf("type completion: %v", err)
 	}
 	output := stdout.String()
-	if !strings.Contains(output, "app\tA 192.0.2.10") || !strings.Contains(output, ":4") {
-		t.Fatalf("record completion output =\n%s", output)
+	if !strings.Contains(output, "host\thost record") || strings.Contains(output, "txt\ttext record") {
+		t.Fatalf("type completion output =\n%s", output)
 	}
 
 	stdout.Reset()
-	if err := app.Execute([]string{"__complete", "dns", "edit", "app", "h"}); err != nil {
-		t.Fatalf("type completion: %v", err)
+	if err := app.Execute([]string{"__complete", "dns", "edit", "host", "ap"}); err != nil {
+		t.Fatalf("record completion: %v", err)
 	}
 	output = stdout.String()
-	if !strings.Contains(output, "host\thost record") || strings.Contains(output, "txt\ttext record") {
-		t.Fatalf("type completion output =\n%s", output)
+	if !strings.Contains(output, "app\tA 192.0.2.10") || !strings.Contains(output, ":4") {
+		t.Fatalf("record completion output =\n%s", output)
 	}
 }
 
@@ -1420,7 +1432,7 @@ func TestNoDescCompletionMatchesGeneratedBashPaths(t *testing.T) {
 
 func TestNoDescRecordCompletionMatchesGeneratedBashPath(t *testing.T) {
 	app, stdout := completionAppWithRecords(t)
-	if err := app.Execute([]string{"__completeNoDesc", "dns", "delete", "ap"}); err != nil {
+	if err := app.Execute([]string{"__completeNoDesc", "dns", "delete", "a", "ap"}); err != nil {
 		t.Fatalf("completion: %v", err)
 	}
 	output := stdout.String()
@@ -1518,10 +1530,10 @@ printf 'types:%s\n' "${COMPREPLY[*]}"
 	}
 	output := string(raw)
 	if strings.Contains(output, "Usage") {
-		t.Fatalf("create name slot should complete record types instead of printing usage:\n%s", output)
+		t.Fatalf("create type slot should complete record types instead of printing usage:\n%s", output)
 	}
 	if !strings.Contains(output, "types:a aaaa cname host mx ptr srv txt") {
-		t.Fatalf("create name slot missing record type completions:\n%s", output)
+		t.Fatalf("create type slot missing record type completions:\n%s", output)
 	}
 
 	cmd = exec.Command("bash", "-lc", `source "$1"
@@ -1580,9 +1592,9 @@ COMP_POINT=${#COMP_LINE}
 __ib_dynamic_completion
 printf 'flags:%s\n' "${COMPREPLY[*]}"
 COMPREPLY=()
-COMP_WORDS=("$2" "dns" "create" "app" "host" "192.0.2.10" "--output" "")
+COMP_WORDS=("$2" "dns" "create" "host" "app" "192.0.2.10" "--output" "")
 COMP_CWORD=7
-COMP_LINE="$2 dns create app host 192.0.2.10 --output "
+COMP_LINE="$2 dns create host app 192.0.2.10 --output "
 COMP_POINT=${#COMP_LINE}
 __ib_dynamic_completion
 printf 'outputs:%s\n' "${COMPREPLY[*]}"

@@ -35,7 +35,7 @@ func TestDNSCreateWorkflowPostsToPrimaryWithoutMandatoryTTL(t *testing.T) {
 	writeWorkflowRecordCache(t, app, profile)
 	refreshes := captureRecordRefreshes(app)
 
-	if err := app.Execute([]string{"dns", "create", "app", "a", "192.0.2.10", "--noptr"}); err != nil {
+	if err := app.Execute([]string{"dns", "create", "a", "app", "192.0.2.10", "--noptr"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -81,7 +81,7 @@ func TestDNSCreateCNAMEQualifiesShortTarget(t *testing.T) {
 	profile := mustLoadProfile(t, app)
 	refreshes := captureRecordRefreshes(app)
 
-	if err := app.Execute([]string{"dns", "create", "hostalias1", "cname", "computer1"}); err != nil {
+	if err := app.Execute([]string{"dns", "create", "cname", "hostalias1", "computer1"}); err != nil {
 		t.Fatalf("create cname: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func TestDNSCreateUsesDNSContextOverrides(t *testing.T) {
 	defer read.Close()
 
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
-	if err := app.Execute([]string{"dns", "--zone", "override.example.com", "--view", "DNS Alt View", "create", "app", "a", "192.0.2.10", "--noptr"}); err != nil {
+	if err := app.Execute([]string{"dns", "--zone", "override.example.com", "--view", "DNS Alt View", "create", "a", "app", "192.0.2.10", "--noptr"}); err != nil {
 		t.Fatalf("create with context overrides: %v", err)
 	}
 
@@ -129,7 +129,7 @@ func TestDNSCreateUsesDNSContextOverrides(t *testing.T) {
 	}
 }
 
-func TestDNSCreateWorkflowRejectsOldTypeNameValueOrder(t *testing.T) {
+func TestDNSCreateWorkflowRejectsOldNameTypeValueOrder(t *testing.T) {
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
@@ -141,15 +141,36 @@ func TestDNSCreateWorkflowRejectsOldTypeNameValueOrder(t *testing.T) {
 	defer read.Close()
 
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
-	err := app.Execute([]string{"dns", "create", "a", "app", "192.0.2.10", "--noptr"})
+	err := app.Execute([]string{"dns", "create", "app", "a", "192.0.2.10", "--noptr"})
 	if err == nil {
-		t.Fatal("old TYPE NAME VALUE order succeeded, want unsupported record type error")
+		t.Fatal("old NAME TYPE VALUE order succeeded, want unsupported record type error")
 	}
 	if !strings.Contains(err.Error(), `unsupported record type "app"`) {
 		t.Fatalf("error = %v", err)
 	}
 	if len(primaryRequests) != 0 {
 		t.Fatalf("old order made primary requests: %#v", primaryRequests)
+	}
+}
+
+func TestDNSEditWorkflowRejectsOldNameTypeValueOrder(t *testing.T) {
+	var readRequests []string
+	read := recordLookupServer(t, &readRequests)
+	defer read.Close()
+
+	primary := emptyReadServer(t)
+	defer primary.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	err := app.Execute([]string{"dns", "edit", "app", "a", "192.0.2.20"})
+	if err == nil {
+		t.Fatal("old NAME TYPE VALUE edit order succeeded, want unsupported record type error")
+	}
+	if !strings.Contains(err.Error(), `unsupported record type "app"`) {
+		t.Fatalf("error = %v", err)
+	}
+	if len(readRequests) != 0 {
+		t.Fatalf("old edit order made read requests: %#v", readRequests)
 	}
 }
 
@@ -177,7 +198,7 @@ func TestDNSEditWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	writeWorkflowRecordCache(t, app, profile)
 	refreshes := captureRecordRefreshes(app)
 
-	if err := app.Execute([]string{"dns", "edit", "app", "a", "192.0.2.20", "--ttl", "600", "--comment", "Updated", "--noptr"}); err != nil {
+	if err := app.Execute([]string{"dns", "edit", "a", "app", "192.0.2.20", "--ttl", "600", "--comment", "Updated", "--noptr"}); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
 
@@ -268,7 +289,7 @@ func TestDNSEditAManagedPTRDeletesOldPTRAndRefreshesReverseCaches(t *testing.T) 
 	}
 	refreshes := captureRecordRefreshes(app)
 
-	if err := app.Execute([]string{"dns", "edit", "app", "a", "198.51.100.20"}); err != nil {
+	if err := app.Execute([]string{"dns", "edit", "a", "app", "198.51.100.20"}); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
 
@@ -309,7 +330,7 @@ func TestDNSEditCNAMEQualifiesShortTarget(t *testing.T) {
 	profile := mustLoadProfile(t, app)
 	refreshes := captureRecordRefreshes(app)
 
-	if err := app.Execute([]string{"dns", "edit", "hostalias1", "cname", "computer1"}); err != nil {
+	if err := app.Execute([]string{"dns", "edit", "cname", "hostalias1", "computer1"}); err != nil {
 		t.Fatalf("edit cname: %v", err)
 	}
 
@@ -361,7 +382,7 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 		return false, nil
 	}
 
-	if err := app.Execute([]string{"dns", "delete", "app", "-y"}); err != nil {
+	if err := app.Execute([]string{"dns", "delete", "a", "app", "-y"}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -375,6 +396,19 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	assertRecordCacheInvalidated(t, app, profile, reverseZone)
 	assertRecordRefreshQueued(t, refreshes, "example.com")
 	assertRecordRefreshQueued(t, refreshes, reverseZone)
+}
+
+func TestDNSDeleteRejectsMissingType(t *testing.T) {
+	app := testApp(t)
+	var stderr bytes.Buffer
+	app.Stderr = &stderr
+	err := app.Execute([]string{"dns", "delete", "app", "-y"})
+	if err == nil {
+		t.Fatal("delete without type succeeded")
+	}
+	if !strings.Contains(stderr.String(), "ib dns delete TYPE NAME [ZONE]") {
+		t.Fatalf("delete without type usage missing type-first usage:\n%s\nerr=%v", stderr.String(), err)
+	}
 }
 
 func TestZoneCreateQueuesZoneAndRecordCacheRefresh(t *testing.T) {
@@ -470,7 +504,7 @@ func TestDNSDeleteRequiresConfirmationBeforeDelete(t *testing.T) {
 	defer read.Close()
 
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
-	err := app.Execute([]string{"dns", "delete", "app"})
+	err := app.Execute([]string{"dns", "delete", "a", "app"})
 	if err == nil {
 		t.Fatal("delete succeeded without confirmation in non-interactive mode")
 	}
@@ -512,7 +546,7 @@ func TestDNSDeleteCanceledBeforePrimaryDelete(t *testing.T) {
 		return false, nil
 	}
 
-	if err := app.Execute([]string{"dns", "delete", "app"}); err != nil {
+	if err := app.Execute([]string{"dns", "delete", "a", "app"}); err != nil {
 		t.Fatalf("cancelled delete returned error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "INFO: delete cancelled") {
@@ -551,7 +585,7 @@ func TestDNSDeleteDuplicateSelectionCanceledPrintsInfo(t *testing.T) {
 		return TypedRecord{}, false, nil
 	}
 
-	if err := app.Execute([]string{"dns", "delete", "app"}); err != nil {
+	if err := app.Execute([]string{"dns", "delete", "cname", "app"}); err != nil {
 		t.Fatalf("cancelled duplicate delete returned error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "INFO: delete cancelled") {
@@ -610,7 +644,7 @@ func TestDNSDeleteDuplicateRecordsUsesSelectedRef(t *testing.T) {
 		return true, nil
 	}
 
-	if err := app.Execute([]string{"dns", "delete", "app"}); err != nil {
+	if err := app.Execute([]string{"dns", "delete", "cname", "app"}); err != nil {
 		t.Fatalf("delete duplicate: %v", err)
 	}
 
@@ -639,7 +673,7 @@ func TestDNSDeleteDuplicateRecordsFailsSafelyWhenNonInteractive(t *testing.T) {
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
 	app.Output = jsonOutput
 
-	err := app.Execute([]string{"dns", "delete", "app"})
+	err := app.Execute([]string{"dns", "delete", "cname", "app"})
 	if err == nil {
 		t.Fatal("duplicate delete succeeded in non-interactive mode")
 	}
@@ -647,10 +681,10 @@ func TestDNSDeleteDuplicateRecordsFailsSafelyWhenNonInteractive(t *testing.T) {
 	for _, want := range []string{
 		"multiple records found for app.example.com",
 		"run in an interactive terminal to choose one",
-		"ref=record:a/ref-a",
 		"ref=record:cname/ref-cname",
-		"value=192.0.2.10",
+		"ref=record:cname/ref-cname-2",
 		"value=alias.example.com",
+		"value=alias2.example.com",
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("duplicate error missing %q:\n%s", want, message)
@@ -1547,6 +1581,13 @@ func duplicateRecordLookupServer(t *testing.T, requests *[]string) *httptest.Ser
 					"view":      "default",
 					"zone":      "example.com",
 					"comment":   "temporary alias",
+				}, {
+					"_ref":      "record:cname/ref-cname-2",
+					"name":      "app.example.com",
+					"canonical": "alias2.example.com",
+					"view":      "default",
+					"zone":      "example.com",
+					"comment":   "secondary alias",
 				}},
 			})
 		default:

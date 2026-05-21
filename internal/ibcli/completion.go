@@ -100,8 +100,6 @@ func createArgCompletion(cmd *cobra.Command, args []string, toComplete string) (
 	switch {
 	case len(args) == 0:
 		return recordTypeCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
-	case len(args) == 1:
-		return recordTypeCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
 	case len(args) >= 3:
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	default:
@@ -116,8 +114,10 @@ func (a *App) existingRecordArgCompletion(cmd *cobra.Command, args []string, toC
 	}
 	switch len(args) {
 	case 0:
-		return a.completeRecordNames(cmd, commandZoneFlag(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
+		return recordTypeCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
 	case 1:
+		return a.completeRecordNames(cmd, commandZoneFlag(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
+	case 2:
 		return a.completeZoneNames(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	default:
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
@@ -131,9 +131,9 @@ func (a *App) editArgCompletion(cmd *cobra.Command, args []string, toComplete st
 	}
 	switch len(args) {
 	case 0:
-		return a.completeRecordNames(cmd, commandZoneFlag(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
-	case 1:
 		return recordTypeCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
+	case 1:
+		return a.completeRecordNames(cmd, commandZoneFlag(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
 	case 2:
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	default:

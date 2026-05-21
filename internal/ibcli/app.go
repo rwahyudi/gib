@@ -161,9 +161,9 @@ Common usage:
 	  ib dns search app
 	  ib net list
 	  ib net next-ip 192.0.2.0/24 -n 3
-	  ib dns create app host 192.0.2.10 -c "Application host"
-	  ib dns edit app host 192.0.2.20 -t 300 -c "Application host"
-	  ib dns delete app`),
+	  ib dns create host app 192.0.2.10 -c "Application host"
+	  ib dns edit host app 192.0.2.20 -t 300 -c "Application host"
+	  ib dns delete a app`),
 	}
 
 	root.PersistentFlags().StringVarP(

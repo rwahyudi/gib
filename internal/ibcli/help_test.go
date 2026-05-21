@@ -122,6 +122,8 @@ func TestDNSDeleteHelpShowsConfirmationSkip(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"Delete Record Usage",
+		"ib dns delete <type> <record-name> [zone]",
+		"ib dns delete a app",
 		"prompts before deleting; use -y to skip",
 		"-y, --yes",
 		"skip delete confirmation prompt",
@@ -573,7 +575,7 @@ func TestArgumentErrorsPrintUsage(t *testing.T) {
 		want string
 	}{
 		{[]string{"dns", "zone", "info"}, "ib dns zone info ZONE"},
-		{[]string{"dns", "create", "app", "host"}, "ib dns create NAME TYPE VALUE"},
+		{[]string{"dns", "create", "host", "app"}, "ib dns create TYPE NAME VALUE"},
 	}
 	for _, tt := range tests {
 		app := testApp(t)
@@ -616,7 +618,7 @@ func TestCreateHelpUsesStyledUsagePanel(t *testing.T) {
 		"Create Record Usage",
 		"Current Context",
 		"ttl      optional; omit to use the zone default",
-		`ib dns create app host 192.0.2.10 -c "Application host"`,
+		`ib dns create host app 192.0.2.10 -c "Application host"`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q:\n%s", want, output)

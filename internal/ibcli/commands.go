@@ -540,12 +540,16 @@ func (a *App) dnsCreateCommand() *cobra.Command {
 	var ttl int
 	var noptr bool
 	cmd := &cobra.Command{
-		Use:               "create NAME TYPE VALUE",
+		Use:               "create TYPE NAME VALUE",
 		Short:             "Create a DNS record",
 		Args:              cobra.ExactArgs(3),
 		ValidArgsFunction: createArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.runDNSCreate(args[1], args[0], args[2], a.dnsZoneOverride, ttl, noptr, comment)
+			recordType, err := normalizeRecordTypeArg(args[0])
+			if err != nil {
+				return err
+			}
+			return a.runDNSCreate(recordType, args[1], args[2], a.dnsZoneOverride, ttl, noptr, comment)
 		},
 	}
 	cmd.Flags().IntVarP(&ttl, "ttl", "t", -1, "optional record TTL in seconds")
@@ -592,20 +596,17 @@ func (a *App) dnsEditCommand() *cobra.Command {
 	var ttl int
 	var noptr bool
 	cmd := &cobra.Command{
-		Use:               "edit NAME [TYPE] [VALUE]",
+		Use:               "edit TYPE NAME [VALUE]",
 		Short:             "Edit an existing DNS record",
-		Args:              cobra.RangeArgs(1, 3),
+		Args:              cobra.RangeArgs(2, 3),
 		ValidArgsFunction: a.editArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			recordName := args[0]
-			recordType := ""
-			var value *string
-			if len(args) >= 2 {
-				recordType = strings.ToLower(args[1])
-				if _, ok := recordTypes[recordType]; !ok {
-					return cliError("unsupported record type %q. Supported: %s", recordType, strings.Join(supportedRecordTypes(), ", "))
-				}
+			recordType, err := normalizeRecordTypeArg(args[0])
+			if err != nil {
+				return err
 			}
+			recordName := args[1]
+			var value *string
 			if len(args) == 3 {
 				value = &args[2]
 			}
@@ -780,16 +781,20 @@ func addNetworkColumnsFlag(cmd *cobra.Command, target *string) {
 func (a *App) dnsDeleteCommand() *cobra.Command {
 	var skipConfirm bool
 	cmd := &cobra.Command{
-		Use:               "delete NAME [ZONE]",
-		Short:             "Delete a DNS record by name",
-		Args:              cobra.RangeArgs(1, 2),
+		Use:               "delete TYPE NAME [ZONE]",
+		Short:             "Delete a DNS record by type and name",
+		Args:              cobra.RangeArgs(2, 3),
 		ValidArgsFunction: a.existingRecordArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			zone := ""
-			if len(args) > 1 {
-				zone = args[1]
+			recordType, err := normalizeRecordTypeArg(args[0])
+			if err != nil {
+				return err
 			}
-			return a.runDNSDelete(args[0], zone, skipConfirm)
+			zone := ""
+			if len(args) > 2 {
+				zone = args[2]
+			}
+			return a.runDNSDelete(recordType, args[1], zone, skipConfirm)
 		},
 	}
 	cmd.Flags().BoolVarP(&skipConfirm, "yes", "y", false, "skip delete confirmation prompt")
@@ -802,6 +807,14 @@ func (a *App) configuredClient() (Profile, *WapiClient, error) {
 		return Profile{}, nil, err
 	}
 	return profile, a.newClient(profile), nil
+}
+
+func normalizeRecordTypeArg(raw string) (string, error) {
+	recordType := strings.ToLower(strings.TrimSpace(raw))
+	if _, ok := recordTypes[recordType]; !ok {
+		return "", cliError("unsupported record type %q. Supported: %s", raw, strings.Join(supportedRecordTypes(), ", "))
+	}
+	return recordType, nil
 }
 
 func (a *App) runConfigOverview() error {
@@ -1562,7 +1575,7 @@ func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr 
 func (a *App) runDNSCreatePTR(profile Profile, client *WapiClient, name, value, zone string, ttl int, noptr bool, comment string) error {
 	address, err := netip.ParseAddr(strings.TrimSpace(name))
 	if err != nil {
-		return cliError("full IP address is required. Use: ib dns create <ip-address> ptr <ptr-target>")
+		return cliError("full IP address is required. Use: ib dns create ptr <ip-address> <ptr-target>")
 	}
 	reverseZone := ""
 	if zone != "" {
@@ -1851,22 +1864,33 @@ func recordTypeList(records []TypedRecord) string {
 	return strings.Join(types, ", ")
 }
 
-func (a *App) runDNSDelete(recordName, zone string, skipConfirm bool) error {
-	if strings.EqualFold(recordName, "ptr") {
-		if zone == "" {
+func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool) error {
+	recordType = strings.ToLower(strings.TrimSpace(recordType))
+	if recordType == "ptr" {
+		if recordName == "" {
 			return cliError("full IP address is required. Use: ib dns delete ptr <ip-address>")
 		}
-		return a.runDNSDeletePTR(zone, skipConfirm)
+		return a.runDNSDeletePTR(recordName, skipConfirm)
 	}
 	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
-	target, matches, _, err := a.findForwardRecords(profile, client, recordName, zone)
+	target, matches, allMatches, err := a.findForwardRecords(profile, client, recordName, zone)
 	if err != nil {
 		return err
 	}
+	filtered := matches[:0]
+	for _, match := range matches {
+		if match.Type == recordType {
+			filtered = append(filtered, match)
+		}
+	}
+	matches = filtered
 	if len(matches) == 0 {
+		if len(allMatches) > 0 {
+			return cliError("%s has existing record types %s; requested delete type was %s", target, recordTypeList(allMatches), strings.ToUpper(recordType))
+		}
 		return cliError("no forward DNS record found for %s in view %s\nHINT: To delete a reverse DNS PTR entry, run: ib dns delete ptr <ip-address>", target, client.View)
 	}
 	if len(matches) > 1 {

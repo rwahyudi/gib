@@ -105,7 +105,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		return sectionWithLines("Workflow", []string{
 			"ib config new --default  ->  ib dns zone use example.com  ->  ib dns list",
 			"ib net list  ->  ib net next-ip 192.0.2.0/24 -n 3",
-			`ib dns create app host 192.0.2.10 -c "Application host"`,
+			`ib dns create host app 192.0.2.10 -c "Application host"`,
 		})
 	case "ib config":
 		return strings.Join([]string{
@@ -173,7 +173,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"types", strings.Join(supportedRecordTypes(), ", ")},
 			{"zone", "--zone -> ib dns zone use -> IB_ZONE -> configured default"},
 			{"ttl", "optional; omit to use the zone default"},
-			{"example", `ib dns create app host 192.0.2.10 -c "Application host"`},
+			{"example", `ib dns create host app 192.0.2.10 -c "Application host"`},
 			{"creates", "HOST app.example.com with IPv4 address 192.0.2.10"},
 		})
 	case "ib dns list":
@@ -274,11 +274,11 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		})
 	case "ib dns delete":
 		return sectionWithRows("Delete Record Usage", [][]string{
-			{"forward", "ib dns delete <record-name> [zone]"},
+			{"forward", "ib dns delete <type> <record-name> [zone]"},
 			{"ptr", "ib dns delete ptr <ip-address>"},
 			{"confirm", "prompts before deleting; use -y to skip"},
 			{"duplicates", "interactive table mode prompts you to choose one matching record"},
-			{"example", "ib dns delete app"},
+			{"example", "ib dns delete a app"},
 		})
 	case "ib config completion":
 		return strings.Join([]string{

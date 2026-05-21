@@ -26,7 +26,7 @@ For manual checks, prefer focused commands such as `./ib --help`, `./ib dns crea
 
 Follow standard Go style: tabs from `gofmt`, short package-local helper names, and exported identifiers only when needed outside a package. Use Cobra for command structure, Lipgloss for styled output, and the existing Gum wrapper for interactive prompts. Keep table output styled, but keep `-o json` and `-o csv` plain and machine-readable.
 
-Preserve operator-facing conventions: compact help text, `Current Context: Profile: ... | View: ... | Zone: ...`, HOST-first create examples, and color-coded DNS record types in table output.
+Preserve operator-facing conventions: compact help text, `Current Context: Profile: ... | View: ... | Zone: ...`, type-first DNS write examples, and color-coded DNS record types in table output.
 
 Keep comments attached to non-obvious behavior such as WAPI read/write routing, config validation order, cache freshness/SWR, refresh leases, dynamic completion, and background subprocess handoff. When changing those flows, update nearby comments in the same patch so they describe the current behavior rather than historical intent.
 
@@ -85,7 +85,7 @@ Good separate-agent doc tasks:
 - Compare CLI help output against README and man-page examples.
 - Check whether cache or WAPI behavior changes require updates to `docs/performance-caching.md` or SVG diagrams.
 - Inspect generated completion behavior against `packaging/bash_completion/ib`.
-- Verify command examples still use the current argument order and HOST-first create examples.
+- Verify command examples still use the current type-first DNS write argument order.
 - Report stale docs with file/line references and suggested replacement text.
 
 For infographic changes, prefer editing the source SVG text/labels directly and keep terminology aligned with code names such as `record_cache`, `zone_cache`, SWR, refresh leases, read server, and primary server.

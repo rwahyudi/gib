@@ -286,9 +286,9 @@ For a deeper explanation with diagrams, see [Performance & Caching](docs/perform
 | `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones, `-t/--type` to filter record types, `-e/--exclude` to hide matching records, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns search KEYWORD` | Search records by name, value, or comment. Use `--global` for all searchable zones, `-r` for child zones under the current/root zone, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns next-ip NETWORK` | Compatibility path for next available IPv4 address lookup against a network or container. Prefer `ib net next-ip NETWORK` for IPAM work. |
-| `ib dns create NAME TYPE VALUE` | Create a DNS record, for example `ib dns create app host 192.0.2.10 -c "Application host"`. |
-| `ib dns edit NAME [TYPE] [VALUE]` | Edit an existing DNS record. |
-| `ib dns delete NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
+| `ib dns create TYPE NAME VALUE` | Create a DNS record, for example `ib dns create host app 192.0.2.10 -c "Application host"`. |
+| `ib dns edit TYPE NAME [VALUE]` | Edit an existing DNS record. |
+| `ib dns delete TYPE NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
 | `ib dns view list` | List DNS views. |
 | `ib dns view use VIEW` | Set the active DNS view for the current shell session. |
 | `ib dns zone create ZONE` | Create an authoritative DNS zone. |
@@ -322,9 +322,9 @@ ib net view list
 ib net list prod --network-view default
 ib net address 192.0.2.10 --network-view default
 ib net next-ip 192.0.2.0/24 -n 3
-ib dns create app host 192.0.2.10 -c "Application host"
-ib dns edit app host 192.0.2.20 -t 300 -c "Application host"
-ib dns delete app
+ib dns create host app 192.0.2.10 -c "Application host"
+ib dns edit host app 192.0.2.20 -t 300 -c "Application host"
+ib dns delete a app
 ```
 
 `ib dns list` and `ib dns search` operate on the current zone by default. Add `-r` or `--recursive` to include child zones. For IPv4 reverse DNS, `ib dns list` also accepts a larger CIDR scope such as `10.128.48.0/23` and lists records from matching child reverse zones such as `10.128.48.0/24` and `10.128.49.0/24`. `ib dns list` also supports `-t/--type` and `-e/--exclude` filters like search. Add `-s` or `--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`; a blank `--sort` sorts by name, and a leading minus sorts descending, for example `--sort=-name`. Add `-C` or `--columns` to print selected columns from `type`, `name`, `value`, `zone`, `ttl`, and `comment`, for example `--columns name,value`. `ib dns search --global` searches every searchable zone in the selected view.
@@ -335,7 +335,7 @@ ib dns delete app
 
 `ib net show`, `ib net next-ip`, and the compatibility `ib dns next-ip` path resolve both networks and containers; when the same CIDR exists as both, the container is preferred. `ib net next-ip` can use cached rows for the object lookup, while `ib dns next-ip` performs a live read-only object lookup. Both send the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
 
-`ib dns delete` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records match, interactive table mode shows a Huh select list so one record can be chosen.
+`ib dns delete TYPE NAME` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records of that type match, interactive table mode shows a Huh select list so one record can be chosen.
 
 #### Output Controls
 
