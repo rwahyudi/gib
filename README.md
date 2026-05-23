@@ -88,7 +88,8 @@ Copy-Item "$HOME\bin\ib-latest\ib.exe" "$HOME\bin\ib.exe" -Force
 
 Add `$HOME\bin` to the user `PATH` if needed, open a new PowerShell window, and
 run `ib config completion windows`. For source builds, see
-[Build From Source](docs/build-from-source.md).
+[Build From Source](docs/build-from-source.md). For publishing, see
+[Release Process](docs/release-process.md).
 
 ## Setup
 
