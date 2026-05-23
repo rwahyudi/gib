@@ -139,11 +139,14 @@ func (a *App) readConfigSettings() (ConfigSettings, bool, error) {
 }
 
 func (a *App) configSettings() ConfigSettings {
-	settings, _, err := a.readConfigSettings()
+	merged, err := a.readMergedConfig(false)
 	if err != nil {
 		return defaultConfigSettings()
 	}
-	return settings
+	if len(merged.FileData) == 0 {
+		return defaultConfigSettings()
+	}
+	return merged.Settings.complete()
 }
 
 func (a *App) cacheTTL() time.Duration {
@@ -397,6 +400,82 @@ func (a *App) readConfigProfiles(decrypt bool) (string, map[string]Profile, bool
 	return "", nil, false, cliError("no profiles configured in %s; run: ib config new [PROFILE]", a.ConfigFile)
 }
 
+type configFileData struct {
+	Location        configLocation
+	DefaultProfile  string
+	Profiles        map[string]Profile
+	Legacy          bool
+	Settings        ConfigSettings
+	SettingsMissing bool
+}
+
+type mergedConfigData struct {
+	DefaultProfile   string
+	Profiles         map[string]Profile
+	ProfileLocations map[string]configLocation
+	FileData         map[configScope]configFileData
+	Settings         ConfigSettings
+}
+
+func (a *App) readConfigFileData(location configLocation, decrypt bool) (configFileData, bool, error) {
+	if _, err := os.Stat(location.File); err != nil {
+		if os.IsNotExist(err) {
+			return configFileData{}, false, nil
+		}
+		return configFileData{}, false, err
+	}
+	var data configFileData
+	err := a.withConfigLocation(location, func() error {
+		defaultProfile, profiles, legacy, err := a.readConfigProfiles(decrypt)
+		if err != nil {
+			return err
+		}
+		settings, settingsMissing, err := a.readConfigSettings()
+		if err != nil {
+			return err
+		}
+		data = configFileData{
+			Location:        location,
+			DefaultProfile:  defaultProfile,
+			Profiles:        profiles,
+			Legacy:          legacy,
+			Settings:        settings,
+			SettingsMissing: settingsMissing,
+		}
+		return nil
+	})
+	if err != nil {
+		return configFileData{}, true, err
+	}
+	return data, true, nil
+}
+
+func (a *App) readMergedConfig(decrypt bool) (mergedConfigData, error) {
+	merged := mergedConfigData{
+		Profiles:         map[string]Profile{},
+		ProfileLocations: map[string]configLocation{},
+		FileData:         map[configScope]configFileData{},
+		Settings:         defaultConfigSettings(),
+	}
+	for _, location := range a.readConfigLocations() {
+		data, exists, err := a.readConfigFileData(location, decrypt)
+		if err != nil {
+			return mergedConfigData{}, err
+		}
+		if !exists {
+			continue
+		}
+		merged.FileData[location.Scope] = data
+		merged.DefaultProfile = data.DefaultProfile
+		merged.Settings = data.Settings
+		for name, profile := range data.Profiles {
+			merged.Profiles[name] = profile
+			merged.ProfileLocations[name] = location
+		}
+	}
+	return merged, nil
+}
+
 func (a *App) writeConfigProfiles(defaultProfile string, profiles map[string]Profile) error {
 	settings, _, err := a.readConfigSettings()
 	if err != nil {
@@ -479,37 +558,69 @@ func (a *App) loadConfig(required bool) (Profile, error) {
 func (a *App) loadConfigProfile(profileName string, required bool) (Profile, error) {
 	original := a.currentConfigLocation()
 	originalGroup := a.globalConfigGroup
-	locations := []configLocation{a.localConfigLocation(), a.globalConfigLocation()}
-	for _, location := range locations {
-		if _, err := os.Stat(location.File); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			a.useConfigLocation(original)
-			a.globalConfigGroup = originalGroup
-			return Profile{}, err
-		}
-		a.useConfigLocation(location)
-		profile, err := a.loadConfigProfileActive(profileName, required)
-		if err == nil {
-			return profile, nil
-		}
-		if strings.TrimSpace(profileName) != "" && isProfileNotFound(err) {
-			continue
-		}
+	merged, err := a.readMergedConfig(false)
+	if err != nil {
 		a.useConfigLocation(original)
 		a.globalConfigGroup = originalGroup
 		return Profile{}, err
 	}
-	a.useConfigLocation(original)
-	a.globalConfigGroup = originalGroup
-	if required {
-		if strings.TrimSpace(profileName) != "" {
-			return Profile{}, cliError("profile %q does not exist in local config %s or global config %s", strings.TrimSpace(profileName), a.localConfigLocation().File, a.globalConfigLocation().File)
+	if len(merged.Profiles) == 0 {
+		a.useConfigLocation(original)
+		a.globalConfigGroup = originalGroup
+		if required {
+			return Profile{}, cliError("no configuration file found. Run: ib config new [PROFILE] or ib config new --global-config [PROFILE]")
 		}
-		return Profile{}, cliError("no configuration file found. Run: ib config new [PROFILE] or ib config new --global-config [PROFILE]")
+		return Profile{}, os.ErrNotExist
 	}
-	return Profile{}, os.ErrNotExist
+	selected := merged.DefaultProfile
+	if strings.TrimSpace(profileName) != "" {
+		selected, err = normalizeProfileName(profileName)
+		if err != nil {
+			a.useConfigLocation(original)
+			a.globalConfigGroup = originalGroup
+			return Profile{}, err
+		}
+	}
+	location, ok := merged.ProfileLocations[selected]
+	if !ok {
+		a.useConfigLocation(original)
+		a.globalConfigGroup = originalGroup
+		if required {
+			return Profile{}, cliError("profile %q does not exist in local config %s or global config %s", selected, a.localConfigLocation().File, a.globalConfigLocation().File)
+		}
+		return Profile{}, os.ErrNotExist
+	}
+	data, _, err := a.readConfigFileData(location, true)
+	if err != nil {
+		a.useConfigLocation(original)
+		a.globalConfigGroup = originalGroup
+		return Profile{}, err
+	}
+	profile, ok := data.Profiles[selected]
+	if !ok {
+		a.useConfigLocation(original)
+		a.globalConfigGroup = originalGroup
+		return Profile{}, profileNotFoundError{profile: selected, path: location.File}
+	}
+	a.activateConfigLocation(location, data.Settings)
+	profile, err = a.prepareLoadedProfile(selected, profile, location.File)
+	if err != nil {
+		a.useConfigLocation(original)
+		a.globalConfigGroup = originalGroup
+		return Profile{}, err
+	}
+	if location.Scope == localConfigScope && (data.Legacy || data.SettingsMissing) {
+		rewriteProfiles := data.Profiles
+		if data.Legacy {
+			rewriteProfiles = map[string]Profile{data.DefaultProfile: profile}
+		}
+		if err := a.writeConfigProfilesWithSettings(data.DefaultProfile, rewriteProfiles, data.Settings); err != nil {
+			a.useConfigLocation(original)
+			a.globalConfigGroup = originalGroup
+			return Profile{}, err
+		}
+	}
+	return profile, nil
 }
 
 func (a *App) loadConfigProfileActive(profileName string, required bool) (Profile, error) {
@@ -541,21 +652,10 @@ func (a *App) loadConfigProfileActive(profileName string, required bool) (Profil
 	if !ok {
 		return Profile{}, profileNotFoundError{profile: selected, path: a.ConfigFile}
 	}
-	profile = profile.complete()
-	if profile.Server == "" || profile.Username == "" || profile.Password == "" {
-		return Profile{}, cliError("profile %q is missing server, username, or password in %s", selected, a.ConfigFile)
-	}
-	profile.Server, err = normalizeServer(profile.Server)
+	profile, err = a.prepareLoadedProfile(selected, profile, a.ConfigFile)
 	if err != nil {
 		return Profile{}, err
 	}
-	if profile.ReadServer != "" {
-		profile.ReadServer, err = normalizeServer(profile.ReadServer)
-		if err != nil {
-			return Profile{}, err
-		}
-	}
-	profile.DNSView = a.resolveDNSView(profile)
 	// Global profiles are usually group-readable but not group-writable. Avoid
 	// surprising normal users with a config rewrite while loading /etc/ib/config.
 	if (legacy || settingsMissing) && !a.activeConfigIsGlobal() {
@@ -567,6 +667,26 @@ func (a *App) loadConfigProfileActive(profileName string, required bool) (Profil
 			return Profile{}, err
 		}
 	}
+	return profile, nil
+}
+
+func (a *App) prepareLoadedProfile(selected string, profile Profile, configFile string) (Profile, error) {
+	profile = profile.complete()
+	if profile.Server == "" || profile.Username == "" || profile.Password == "" {
+		return Profile{}, cliError("profile %q is missing server, username, or password in %s", selected, configFile)
+	}
+	var err error
+	profile.Server, err = normalizeServer(profile.Server)
+	if err != nil {
+		return Profile{}, err
+	}
+	if profile.ReadServer != "" {
+		profile.ReadServer, err = normalizeServer(profile.ReadServer)
+		if err != nil {
+			return Profile{}, err
+		}
+	}
+	profile.DNSView = a.resolveDNSView(profile)
 	return profile, nil
 }
 
@@ -585,20 +705,9 @@ func isProfileNotFound(err error) bool {
 }
 
 func (a *App) defaultConfigValues() Profile {
-	for _, location := range []configLocation{a.localConfigLocation(), a.globalConfigLocation()} {
-		if _, err := os.Stat(location.File); err != nil {
-			continue
-		}
-		var defaultProfile string
-		var profiles map[string]Profile
-		err := a.withConfigLocation(location, func() error {
-			var readErr error
-			defaultProfile, profiles, _, readErr = a.readConfigProfiles(false)
-			return readErr
-		})
-		if err == nil {
-			return profiles[defaultProfile].complete()
-		}
+	merged, err := a.readMergedConfig(false)
+	if err == nil && len(merged.Profiles) > 0 {
+		return merged.Profiles[merged.DefaultProfile].complete()
 	}
 	return Profile{Name: defaultProfileName}
 }

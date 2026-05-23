@@ -108,6 +108,13 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			`ib dns create host app 192.0.2.10 -c "Application host"`,
 		})
 	case "ib config":
+		a.ensureConfigPathDefaults()
+		storage := a.ConfigFile
+		key := a.ConfigKeyFile
+		if globalConfigSupported() {
+			storage = fmt.Sprintf("local %s; Linux global %s merges when present", a.LocalConfigFile, a.GlobalConfigFile)
+			key = fmt.Sprintf("local %s; selected global profiles use %s", a.LocalConfigKeyFile, a.GlobalConfigKeyFile)
+		}
 		return strings.Join([]string{
 			sectionWithRows("Configuration Usage", [][]string{
 				{"setup", "ib config new [PROFILE]"},
@@ -120,8 +127,8 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			}),
 			sectionWithRows("Profile Details", [][]string{
 				{"prompts", "server reachability/TLS trust, validated credentials, auto WAPI version, auto GCM read endpoint, DNS view, default zone"},
-				{"storage", a.ConfigFile},
-				{"key", a.ConfigKeyFile},
+				{"storage", storage},
+				{"key", key},
 				{"password", credentialProtectionDescription()},
 			}),
 		}, "\n")

@@ -109,31 +109,32 @@ func (a *App) withConfigLocation(location configLocation, fn func() error) error
 	return err
 }
 
-func (a *App) firstExistingConfigLocation() (configLocation, bool, error) {
-	for _, location := range []configLocation{a.localConfigLocation(), a.globalConfigLocation()} {
-		if _, err := os.Stat(location.File); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return configLocation{}, false, err
-		}
-		return location, true, nil
+func (a *App) readConfigLocations() []configLocation {
+	locations := []configLocation{}
+	if globalConfigSupported() {
+		locations = append(locations, a.globalConfigLocation())
 	}
-	return configLocation{}, false, nil
+	return append(locations, a.localConfigLocation())
 }
 
-func (a *App) useFirstExistingConfigLocation() (bool, error) {
-	location, ok, err := a.firstExistingConfigLocation()
-	if err != nil || !ok {
+func (a *App) useDefaultConfigLocation() (bool, error) {
+	merged, err := a.readMergedConfig(false)
+	if err != nil || len(merged.Profiles) == 0 {
 		return false, err
 	}
-	a.useConfigLocation(location)
-	if location.Scope == globalConfigScope {
-		if settings, _, err := a.readConfigSettings(); err == nil && settings.GlobalGroup != "" {
-			a.globalConfigGroup = settings.GlobalGroup
-		}
+	location, ok := merged.ProfileLocations[merged.DefaultProfile]
+	if !ok {
+		return false, nil
 	}
+	a.activateConfigLocation(location, merged.FileData[location.Scope].Settings)
 	return true, nil
+}
+
+func (a *App) activateConfigLocation(location configLocation, settings ConfigSettings) {
+	a.useConfigLocation(location)
+	if location.Scope == globalConfigScope && settings.GlobalGroup != "" {
+		a.globalConfigGroup = settings.GlobalGroup
+	}
 }
 
 func (a *App) prepareGlobalConfigGroup(groupName string) (string, error) {

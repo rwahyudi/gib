@@ -82,8 +82,8 @@ builds write new password tokens with user-scope DPAPI instead.
 Local DNS/IPAM cache database.
 .TP
 .I /etc/ib/config
-Linux global profile configuration. Normal commands check local config first and
-fall back to this file when no matching local profile exists.
+Linux global profile configuration. Normal commands merge this file with local
+config; local profiles and metadata override matching global names.
 .TP
 .I /etc/ib/key
 Linux global key file for shared encrypted profile password tokens.

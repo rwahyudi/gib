@@ -79,6 +79,20 @@ func writePlainTestConfig(t *testing.T, path string, defaultProfile string, prof
 	}
 }
 
+func plainTestProfile(name, server string) Profile {
+	return Profile{
+		Name:        name,
+		Server:      server,
+		Username:    name + "-user",
+		Password:    name + "-secret",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		DefaultZone: name + ".example",
+		VerifySSL:   true,
+		Timeout:     defaultTimeoutSeconds,
+	}
+}
+
 func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 	info, err := os.Stat(path)
@@ -174,7 +188,7 @@ func TestProfileCompleteUsesDefaultTimeout(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFallsBackToGlobalConfig(t *testing.T) {
+func TestLoadConfigUsesGlobalConfigWhenOnlyGlobalExists(t *testing.T) {
 	app := testApp(t)
 	writePlainTestConfig(t, app.GlobalConfigFile, defaultProfileName, map[string]Profile{
 		defaultProfileName: {
@@ -246,7 +260,7 @@ func TestLoadConfigPrefersLocalDefaultOverGlobal(t *testing.T) {
 	}
 }
 
-func TestLoadConfigExplicitProfileFallsBackToGlobal(t *testing.T) {
+func TestLoadConfigExplicitProfileUsesGlobalOnlyProfile(t *testing.T) {
 	app := testApp(t)
 	writePlainTestConfig(t, app.LocalConfigFile, "local", map[string]Profile{
 		"local": {
@@ -281,6 +295,115 @@ func TestLoadConfigExplicitProfileFallsBackToGlobal(t *testing.T) {
 	}
 	if profile.Name != "shared" || app.ConfigFile != app.GlobalConfigFile {
 		t.Fatalf("profile = %#v, active config = %q", profile, app.ConfigFile)
+	}
+	if got := app.cachePath(); got != filepath.Join(app.GlobalConfigDir, cacheFileName) {
+		t.Fatalf("cache path = %q, want global cache", got)
+	}
+}
+
+func TestMergedConfigAddsGlobalProfilesAndLocalOverrides(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": plainTestProfile("shared", "https://shared.example"),
+		"common": plainTestProfile("common", "https://global-common.example"),
+	}, "ibusers")
+	writePlainTestConfig(t, app.LocalConfigFile, "local", map[string]Profile{
+		"local":  plainTestProfile("local", "https://local.example"),
+		"common": plainTestProfile("common", "https://local-common.example"),
+	}, "")
+
+	merged, err := app.readMergedConfig(false)
+	if err != nil {
+		t.Fatalf("read merged config: %v", err)
+	}
+	if merged.DefaultProfile != "local" {
+		t.Fatalf("default profile = %q, want local metadata default", merged.DefaultProfile)
+	}
+	for _, name := range []string{"local", "shared", "common"} {
+		if _, ok := merged.Profiles[name]; !ok {
+			t.Fatalf("merged profiles missing %q: %#v", name, merged.Profiles)
+		}
+	}
+	if got := merged.Profiles["common"].Server; got != "https://local-common.example" {
+		t.Fatalf("common server = %q, want local override", got)
+	}
+	if got := merged.ProfileLocations["shared"].File; got != app.GlobalConfigFile {
+		t.Fatalf("shared profile location = %q, want global", got)
+	}
+	if got := merged.ProfileLocations["common"].File; got != app.LocalConfigFile {
+		t.Fatalf("common profile location = %q, want local", got)
+	}
+}
+
+func TestLoadConfigUsesLocalScopeForLocalOverride(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "common", map[string]Profile{
+		"common": plainTestProfile("common", "https://global-common.example"),
+	}, "ibusers")
+	writePlainTestConfig(t, app.LocalConfigFile, "common", map[string]Profile{
+		"common": plainTestProfile("common", "https://local-common.example"),
+	}, "")
+
+	profile, err := app.loadConfigProfile("common", true)
+	if err != nil {
+		t.Fatalf("load common profile: %v", err)
+	}
+	if profile.Server != "https://local-common.example" {
+		t.Fatalf("server = %q, want local override", profile.Server)
+	}
+	if app.ConfigFile != app.LocalConfigFile {
+		t.Fatalf("active config = %q, want local", app.ConfigFile)
+	}
+	if got := app.cachePath(); got != filepath.Join(app.LocalConfigDir, cacheFileName) {
+		t.Fatalf("cache path = %q, want local cache", got)
+	}
+}
+
+func TestConfigListShowsMergedProfiles(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": plainTestProfile("shared", "https://shared.example"),
+	}, "ibusers")
+	writePlainTestConfig(t, app.LocalConfigFile, "local", map[string]Profile{
+		"local": plainTestProfile("local", "https://local.example"),
+	}, "")
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"-o", "json", "config", "list"}); err != nil {
+		t.Fatalf("config list: %v", err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
+		t.Fatalf("parse config list json: %v\n%s", err, stdout.String())
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[fmt.Sprint(row["profile"])] = true
+	}
+	for _, name := range []string{"local", "shared"} {
+		if !seen[name] {
+			t.Fatalf("config list missing %q: %#v", name, rows)
+		}
+	}
+}
+
+func TestProfileCompletionShowsMergedProfiles(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": plainTestProfile("shared", "https://shared.example"),
+	}, "ibusers")
+	writePlainTestConfig(t, app.LocalConfigFile, "local", map[string]Profile{
+		"local": plainTestProfile("local", "https://local.example"),
+	}, "")
+
+	matches := app.completeProfileNames("", true)
+	for _, want := range []string{"local", "shared"} {
+		if !containsString(matches, want) {
+			t.Fatalf("profile completion missing %q: %#v", want, matches)
+		}
 	}
 }
 

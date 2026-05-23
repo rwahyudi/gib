@@ -380,6 +380,8 @@ func TestConfigHelpCoversWorkflowAndStorage(t *testing.T) {
 		"ib config cache status|clear",
 		"Profile Details",
 		"server reachability/TLS trust, validated credentials, auto WAPI version, auto GCM read endpoint, DNS view, default zone",
+		"merges when present",
+		"selected global profiles use",
 		"encrypted at rest",
 	} {
 		if !strings.Contains(output, want) {

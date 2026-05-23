@@ -1258,14 +1258,14 @@ func completionFlagValue(args []string, longName string, shortName string) strin
 }
 
 func (a *App) completeProfileNames(toComplete string, includeDefault bool) []string {
-	defaultProfile, profiles, _, err := a.readConfigProfiles(false)
+	merged, err := a.readMergedConfig(false)
 	if err != nil {
 		return nil
 	}
 	prefix := strings.ToLower(strings.TrimSpace(toComplete))
-	names := make([]string, 0, len(profiles))
-	for name := range profiles {
-		if !includeDefault && name == defaultProfile {
+	names := make([]string, 0, len(merged.Profiles))
+	for name := range merged.Profiles {
+		if !includeDefault && name == merged.DefaultProfile {
 			continue
 		}
 		if prefix != "" && !strings.HasPrefix(strings.ToLower(name), prefix) {

@@ -96,7 +96,7 @@ func (a *App) cacheCommand() *cobra.Command {
 		Short: "Show cache status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := a.useFirstExistingConfigLocation(); err != nil {
+			if _, err := a.useDefaultConfigLocation(); err != nil {
 				return err
 			}
 			snapshot, err := a.cacheStatusSnapshot()
@@ -114,7 +114,7 @@ func (a *App) cacheCommand() *cobra.Command {
 		Short: "Clear cache entries",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := a.useFirstExistingConfigLocation(); err != nil {
+			if _, err := a.useDefaultConfigLocation(); err != nil {
 				return err
 			}
 			if err := a.clearCache(); err != nil {
@@ -834,11 +834,11 @@ func normalizeRecordTypeArg(raw string) (string, error) {
 }
 
 func (a *App) runConfigOverview() error {
-	ok, err := a.useFirstExistingConfigLocation()
+	merged, err := a.readMergedConfig(false)
 	if err != nil {
 		return err
 	}
-	if !ok {
+	if len(merged.Profiles) == 0 {
 		if !a.isTableOutput() {
 			return a.emitRows("Infoblox Profiles (0)", []string{"profile", "default", "server", "read_server", "dns_view", "default_zone"}, []map[string]any{})
 		}
@@ -853,32 +853,28 @@ func (a *App) runConfigOverview() error {
 }
 
 func (a *App) listProfiles() error {
-	ok, err := a.useFirstExistingConfigLocation()
+	merged, err := a.readMergedConfig(false)
 	if err != nil {
 		return err
 	}
-	if !ok {
+	if len(merged.Profiles) == 0 {
 		if a.isTableOutput() {
 			a.PrintWarning("No profiles configured. Run: ib config new [PROFILE]")
 			return nil
 		}
 		return a.emitRows("Infoblox Profiles (0)", []string{"profile", "default", "server", "read_server", "dns_view", "default_zone"}, []map[string]any{})
 	}
-	defaultProfile, profiles, _, err := a.readConfigProfiles(false)
-	if err != nil {
-		return err
-	}
-	names := make([]string, 0, len(profiles))
-	for name := range profiles {
+	names := make([]string, 0, len(merged.Profiles))
+	for name := range merged.Profiles {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	rows := make([]map[string]any, 0, len(names))
 	for _, name := range names {
-		profile := profiles[name]
+		profile := merged.Profiles[name]
 		rows = append(rows, map[string]any{
 			"profile":      name,
-			"default":      name == defaultProfile,
+			"default":      name == merged.DefaultProfile,
 			"server":       profile.Server,
 			"read_server":  profile.ReadServer,
 			"dns_view":     profile.DNSView,
