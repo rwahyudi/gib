@@ -55,7 +55,7 @@ func renderTableWithRowStyles(title string, headers []string, rows [][]string, r
 	if title == "" {
 		return t.String()
 	}
-	return tableTitleStyle.Render(title) + "\n" + t.String()
+	return tableTitleStyle.Render(strings.ToLower(title)) + "\n" + t.String()
 }
 
 func numericTableColumns(headers []string) map[int]bool {

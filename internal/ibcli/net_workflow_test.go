@@ -41,7 +41,7 @@ func TestNetViewList(t *testing.T) {
 		t.Fatalf("net view table list: %v\nstdout:\n%s", err, stdout.String())
 	}
 	output := stdout.String()
-	for _, want := range []string{"IPAM Network Views", "Current Context:", "Profile:", "default", "Rows:", "2"} {
+	for _, want := range []string{"ipam network views", "Current Context:", "Profile:", "default", "Rows:", "2"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("network view table missing %q:\n%s", want, output)
 		}
@@ -796,7 +796,7 @@ func TestNetListTableOutputShowsExpiredCacheNotice(t *testing.T) {
 		t.Fatalf("net list expired table: %v\nstdout:\n%s", err, stdout.String())
 	}
 	output := stdout.String()
-	for _, want := range []string{"IPAM Networks and Containers", "192.0.2.0/24", "INFO: showing cached IPAM data; refresh queued in background"} {
+	for _, want := range []string{"ipam networks and containers", "192.0.2.0/24", "INFO: showing cached IPAM data; refresh queued in background"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expired cache table output missing %q:\n%s", want, output)
 		}
