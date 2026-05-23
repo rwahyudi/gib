@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -890,23 +891,19 @@ func (a *App) emitConfigProfileRows(title string, fields []string, rows []map[st
 		return a.emitRows(title, fields, rows)
 	}
 	displayRows := make([][]string, 0, len(rows))
-	for _, row := range rows {
+	activeRows := map[int]lipgloss.Style{}
+	for rowIndex, row := range rows {
+		if profileRowIsActive(row) {
+			activeRows[rowIndex] = activeTableRowStyle
+		}
 		display := make([]string, 0, len(fields))
 		for _, field := range fields {
-			display = append(display, configProfileTableValue(field, row))
+			display = append(display, stringify(row[field]))
 		}
 		displayRows = append(displayRows, display)
 	}
-	fmt.Fprintln(a.Stdout, renderTable(title, titleCaseFields(fields), displayRows))
+	fmt.Fprintln(a.Stdout, renderTableWithRowStyles(title, titleCaseFields(fields), displayRows, activeRows))
 	return nil
-}
-
-func configProfileTableValue(field string, row map[string]any) string {
-	value := stringify(row[field])
-	if !profileRowIsActive(row) || value == "" {
-		return value
-	}
-	return successStyle.Render(value)
 }
 
 func profileRowIsActive(row map[string]any) bool {

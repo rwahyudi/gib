@@ -16,6 +16,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func testApp(t *testing.T) *App {
@@ -427,10 +430,11 @@ func TestConfigListShowsMergedProfiles(t *testing.T) {
 }
 
 func TestConfigListHighlightsActiveProfileRow(t *testing.T) {
-	styledActive := successStyle.Render("active")
-	if styledActive == "active" {
-		t.Skip("lipgloss color output is disabled")
-	}
+	originalProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(originalProfile)
+	})
 	app := testApp(t)
 	writePlainTestConfig(t, app.LocalConfigFile, "active", map[string]Profile{
 		"active":  plainTestProfile("active", "https://active.example"),
@@ -445,11 +449,15 @@ func TestConfigListHighlightsActiveProfileRow(t *testing.T) {
 		t.Fatalf("config list: %v", err)
 	}
 	output := stdout.String()
-	if !strings.Contains(output, styledActive) {
-		t.Fatalf("config list did not highlight active profile:\n%s", output)
+	if !strings.Contains(output, activeTableRowStyle.Render("active")) {
+		t.Fatalf("config list did not apply active row background:\n%q", output)
 	}
-	if strings.Contains(output, successStyle.Render("passive")) {
-		t.Fatalf("config list highlighted inactive profile:\n%s", output)
+	activePadding := lipgloss.NewStyle().Background(lipgloss.Color("#4ade80")).Render(" ")
+	if strings.Count(output, activePadding) < 6 {
+		t.Fatalf("config list did not color active row padding:\n%q", output)
+	}
+	if strings.Contains(output, activeTableRowStyle.Render("passive")) {
+		t.Fatalf("config list highlighted inactive profile:\n%q", output)
 	}
 }
 

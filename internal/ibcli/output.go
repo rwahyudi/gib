@@ -12,13 +12,18 @@ import (
 )
 
 var (
-	tableBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#38bdf8"))
-	tableHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#67e8f9"))
-	tableCellStyle   = lipgloss.NewStyle().Padding(0, 1)
-	tableTitleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ade80"))
+	tableBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#38bdf8"))
+	tableHeaderStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#67e8f9"))
+	tableCellStyle      = lipgloss.NewStyle().Padding(0, 1)
+	tableTitleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ade80"))
+	activeTableRowStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#052e16")).Background(lipgloss.Color("#4ade80")).ColorWhitespace(true)
 )
 
 func renderTable(title string, headers []string, rows [][]string) string {
+	return renderTableWithRowStyles(title, headers, rows, nil)
+}
+
+func renderTableWithRowStyles(title string, headers []string, rows [][]string, rowStyles map[int]lipgloss.Style) string {
 	numericColumns := numericTableColumns(headers)
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
@@ -35,7 +40,14 @@ func renderTable(title string, headers []string, rows [][]string) string {
 				return style
 			}
 			if rightAlign {
-				return tableCellStyle.Align(lipgloss.Right)
+				style := tableCellStyle.Align(lipgloss.Right)
+				if rowStyle, ok := rowStyles[row]; ok {
+					return style.Inherit(rowStyle)
+				}
+				return style
+			}
+			if rowStyle, ok := rowStyles[row]; ok {
+				return tableCellStyle.Inherit(rowStyle)
 			}
 			return tableCellStyle
 		})
