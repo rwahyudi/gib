@@ -404,10 +404,11 @@ func usageDetails(cmd *cobra.Command) string {
 }
 
 func localOptionsBlock(cmd *cobra.Command) string {
+	flagSets := []*pflag.FlagSet{cmd.NonInheritedFlags(), cmd.PersistentFlags()}
 	if cmd == cmd.Root() {
-		return ""
+		flagSets = []*pflag.FlagSet{cmd.LocalNonPersistentFlags()}
 	}
-	rows := flagRowsForCommand(cmd, false, cmd.NonInheritedFlags(), cmd.PersistentFlags())
+	rows := flagRowsForCommand(cmd, false, flagSets...)
 	if len(rows) == 0 {
 		return ""
 	}

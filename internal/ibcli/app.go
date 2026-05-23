@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -58,6 +59,13 @@ var (
 	contextZoneValueStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ade80"))
 	contextSourceStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8"))
 	recordTotalBadgeStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e0f2fe")).Background(lipgloss.Color("#1d4ed8")).Padding(0, 1)
+)
+
+var (
+	// Release tooling overrides these values with ldflags. Source builds keep a
+	// usable version and fall back to the executable timestamp for the build date.
+	Version   = "0.3.4"
+	BuildDate = ""
 )
 
 type App struct {
@@ -158,12 +166,22 @@ func (a *App) Execute(args []string) error {
 }
 
 func (a *App) RootCommand() *cobra.Command {
+	showVersion := false
 	root := &cobra.Command{
 		Use:               "ib",
 		Short:             "Infoblox DNS and IPAM command line client",
+		Args:              cobra.NoArgs,
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if showVersion {
+				a.PrintVersion()
+				return nil
+			}
+			a.PrintContext()
+			return nil
+		},
 		Long: strings.TrimSpace(`Infoblox DNS and IPAM command line client.
 
 Run "ib config new [PROFILE]" first to save an Infoblox profile with server,
@@ -186,6 +204,13 @@ Common usage:
 	  ib dns delete a app`),
 	}
 
+	root.Flags().BoolVarP(
+		&showVersion,
+		"version",
+		"v",
+		false,
+		"print version and build date",
+	)
 	root.PersistentFlags().StringVarP(
 		&a.Output,
 		"output",
@@ -405,6 +430,31 @@ func (a *App) PrintNote(message string) {
 
 func (a *App) PrintContext() {
 	fmt.Fprintln(a.Stdout, a.dnsContextLine())
+}
+
+func (a *App) PrintVersion() {
+	fmt.Fprintln(a.Stdout, VersionString())
+}
+
+func VersionString() string {
+	version := strings.TrimSpace(Version)
+	if version == "" {
+		version = "dev"
+	}
+	return fmt.Sprintf("ib %s (built %s)", version, effectiveBuildDate())
+}
+
+func effectiveBuildDate() string {
+	buildDate := strings.TrimSpace(BuildDate)
+	if buildDate != "" && buildDate != "unknown" {
+		return buildDate
+	}
+	if executable, err := os.Executable(); err == nil {
+		if info, err := os.Stat(executable); err == nil {
+			return info.ModTime().UTC().Format(time.RFC3339)
+		}
+	}
+	return "unknown"
 }
 
 func renderContextPair(label, value string, valueStyle lipgloss.Style) string {

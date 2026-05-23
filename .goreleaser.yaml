@@ -15,7 +15,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w
+      - -s -w -X github.com/rwahyudi/gib/internal/ibcli.Version={{ .Version }} -X github.com/rwahyudi/gib/internal/ibcli.BuildDate={{ .Date }}
   - id: ib-windows
     main: ./cmd/ib
     binary: ib
@@ -30,7 +30,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w
+      - -s -w -X github.com/rwahyudi/gib/internal/ibcli.Version={{ .Version }} -X github.com/rwahyudi/gib/internal/ibcli.BuildDate={{ .Date }}
 
 archives:
   - id: ib-linux

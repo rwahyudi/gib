@@ -52,6 +52,7 @@ Linux tarball:
 ```bash
 curl -fL https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64.tar.gz | tar -xz ib
 sudo install -m 0755 ib /usr/local/bin/ib
+ib -v
 ib --help
 ```
 
@@ -153,6 +154,13 @@ For source builds, development checks, and packaging notes, see
 behavior, see [Performance & Caching](docs/performance-caching.md).
 
 ## Command Reference
+
+### Top Level
+
+| Command | Description |
+| --- | --- |
+| `ib` | Print the current profile, DNS view, and DNS zone context. |
+| `ib -v`, `ib --version` | Print the version number and build date. |
 
 ### Config
 

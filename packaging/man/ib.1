@@ -3,7 +3,7 @@
 ib \- operator-focused Infoblox DNS CLI
 .SH SYNOPSIS
 .B ib
-[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+[\fIOPTIONS\fR] [\fICOMMAND\fR] [\fIARGS\fR]
 .SH DESCRIPTION
 .B ib
 is a command line interface for managing Infoblox DNS and IPAM records from the shell.
@@ -23,12 +23,21 @@ Manage IPAM network views, IPv4 networks and containers, address details, and
 next available IP lookups.
 .SH OPTIONS
 .TP
+.B \-v, \-\-version
+Print the version number and build date.
+.TP
 .B \-h, \-\-help
 Show command help.
 .TP
 .B \-o, \-\-output table|json|csv
 Select output format.
 .SH EXAMPLES
+.TP
+.B ib
+Print the current profile, DNS view, and DNS zone context.
+.TP
+.B ib -v
+Print the version number and build date.
 .TP
 .B ib config new --default
 Create a default Infoblox profile.

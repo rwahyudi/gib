@@ -41,6 +41,56 @@ func TestRootHelpUsesModules(t *testing.T) {
 	}
 }
 
+func TestRootWithoutArgsPrintsCurrentContext(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.ConfigFile, "demo", map[string]Profile{
+		"demo": plainTestProfile("demo", "https://infoblox.example"),
+	}, "")
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{}); err != nil {
+		t.Fatalf("root command: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{"Current Context:", "Profile:", "demo", "View:", "default", "Zone:", "demo.example"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("root output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "Usage:") {
+		t.Fatalf("root output should not print help usage:\n%s", output)
+	}
+}
+
+func TestRootVersionFlagPrintsVersionAndBuildDate(t *testing.T) {
+	oldVersion, oldBuildDate := Version, BuildDate
+	Version = "1.2.3"
+	BuildDate = "2026-05-23T10:20:30Z"
+	t.Cleanup(func() {
+		Version = oldVersion
+		BuildDate = oldBuildDate
+	})
+	app := testApp(t)
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"-v"}); err != nil {
+		t.Fatalf("version flag: %v", err)
+	}
+	output := stdout.String()
+	if want := "ib 1.2.3 (built 2026-05-23T10:20:30Z)"; !strings.Contains(output, want) {
+		t.Fatalf("version output missing %q:\n%s", want, output)
+	}
+	if strings.Contains(output, "Current Context:") {
+		t.Fatalf("version output should not print current context:\n%s", output)
+	}
+}
+
 func TestNetModuleHelpShowsIPAMCommands(t *testing.T) {
 	app := testApp(t)
 	var stdout bytes.Buffer
