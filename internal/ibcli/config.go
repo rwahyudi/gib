@@ -460,6 +460,9 @@ func (a *App) readMergedConfig(decrypt bool) (mergedConfigData, error) {
 	for _, location := range a.readConfigLocations() {
 		data, exists, err := a.readConfigFileData(location, decrypt)
 		if err != nil {
+			if skipUnreadableGlobalConfig(location, err) {
+				continue
+			}
 			return mergedConfigData{}, err
 		}
 		if !exists {
@@ -474,6 +477,10 @@ func (a *App) readMergedConfig(decrypt bool) (mergedConfigData, error) {
 		}
 	}
 	return merged, nil
+}
+
+func skipUnreadableGlobalConfig(location configLocation, err error) bool {
+	return location.Scope == globalConfigScope && os.IsPermission(err)
 }
 
 func (a *App) writeConfigProfiles(defaultProfile string, profiles map[string]Profile) error {

@@ -335,6 +335,42 @@ func TestMergedConfigAddsGlobalProfilesAndLocalOverrides(t *testing.T) {
 	}
 }
 
+func TestMergedConfigSkipsUnreadableGlobalConfig(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Unix file permission semantics only")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can read files without read permission")
+	}
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": plainTestProfile("shared", "https://shared.example"),
+	}, "ibusers")
+	writePlainTestConfig(t, app.LocalConfigFile, "local", map[string]Profile{
+		"local": plainTestProfile("local", "https://local.example"),
+	}, "")
+	if err := os.Chmod(app.GlobalConfigFile, 0o000); err != nil {
+		t.Fatalf("make global config unreadable: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(app.GlobalConfigFile, 0o600)
+	})
+
+	merged, err := app.readMergedConfig(false)
+	if err != nil {
+		t.Fatalf("read merged config with unreadable global config: %v", err)
+	}
+	if _, ok := merged.Profiles["shared"]; ok {
+		t.Fatalf("unreadable global profile was included: %#v", merged.Profiles)
+	}
+	if _, ok := merged.Profiles["local"]; !ok {
+		t.Fatalf("local profile missing after skipping unreadable global config: %#v", merged.Profiles)
+	}
+	if merged.DefaultProfile != "local" {
+		t.Fatalf("default profile = %q, want local", merged.DefaultProfile)
+	}
+}
+
 func TestLoadConfigUsesLocalScopeForLocalOverride(t *testing.T) {
 	app := testApp(t)
 	writePlainTestConfig(t, app.GlobalConfigFile, "common", map[string]Profile{
