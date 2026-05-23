@@ -44,7 +44,11 @@ Print the version number and AEST build date.
 Create a default Infoblox profile.
 .TP
 .B sudo ib config new --global-config shared
-Create a Linux global profile under /etc/ib for a shared group.
+Create a Linux global profile under /etc/ib for a shared group. Global profile
+creation requires root.
+.TP
+.B sudo ib config edit --global-config shared
+Edit a Linux global profile under /etc/ib. Global profile edits require root.
 .TP
 .B ib dns list
 List records in the current DNS context. Larger IPv4 reverse CIDR scopes can

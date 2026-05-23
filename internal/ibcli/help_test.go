@@ -484,6 +484,7 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 				"connection test must pass before saving",
 				"failed connection test shows a retry prompt",
 				"--global-config writes Linux shared config",
+				"requires root",
 				"ib config new prod --default",
 			},
 		},
@@ -494,6 +495,8 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 				"omit to edit the current default profile",
 				"leave blank to keep the existing encrypted password",
 				"failed connection test shows a retry prompt",
+				"--global-config edits Linux shared config",
+				"requires root",
 			},
 		},
 		{

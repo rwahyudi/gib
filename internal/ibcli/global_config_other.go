@@ -7,8 +7,16 @@ type globalConfigGroupInfo struct {
 	GID  int
 }
 
+var globalConfigEffectiveUserIDFunc = func() int {
+	return -1
+}
+
 func globalConfigSupported() bool {
 	return false
+}
+
+func requireGlobalConfigRoot() error {
+	return nil
 }
 
 func lookupGlobalConfigGroup(groupName string) (globalConfigGroupInfo, error) {

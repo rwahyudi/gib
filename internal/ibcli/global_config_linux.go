@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var globalConfigEffectiveUserIDFunc = os.Geteuid
+
 type globalConfigGroupInfo struct {
 	Name string
 	GID  int
@@ -16,6 +18,13 @@ type globalConfigGroupInfo struct {
 
 func globalConfigSupported() bool {
 	return true
+}
+
+func requireGlobalConfigRoot() error {
+	if globalConfigEffectiveUserIDFunc() == 0 {
+		return nil
+	}
+	return cliError("global config writes /etc/ib and requires root. Re-run with sudo")
 }
 
 func lookupGlobalConfigGroup(groupName string) (globalConfigGroupInfo, error) {

@@ -50,14 +50,16 @@ func (a *App) configCommand() *cobra.Command {
 		ValidArgsFunction: a.profileArgCompletion(true),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			makeDefault, _ := cmd.Flags().GetBool("default")
+			globalConfig, _ := cmd.Flags().GetBool("global-config")
 			profileName := ""
 			if len(args) > 0 {
 				profileName = args[0]
 			}
-			return a.saveConfigInteractive(profileName, false, makeDefault, false)
+			return a.saveConfigInteractive(profileName, false, makeDefault, globalConfig)
 		},
 	}
 	editCmd.Flags().Bool("default", false, "make this profile the default")
+	editCmd.Flags().Bool("global-config", false, "edit the profile in /etc/ib for Linux group access")
 	cmd.AddCommand(editCmd)
 	cmd.AddCommand(&cobra.Command{
 		Use:   "list",
@@ -1005,8 +1007,8 @@ func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault
 		if !globalConfigSupported() {
 			return cliError("--global-config is only supported on Linux")
 		}
-		if !create {
-			return cliError("--global-config is only supported with: ib config new")
+		if err := requireGlobalConfigRoot(); err != nil {
+			return err
 		}
 		a.useConfigLocation(a.globalConfigLocation())
 	} else {
@@ -1049,7 +1051,7 @@ func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault
 		if _, ok := profiles[selected]; ok {
 			return cliError("profile %q already exists", selected)
 		}
-	} else if len(profiles) > 0 {
+	} else {
 		if _, ok := profiles[selected]; !ok {
 			return cliError("profile %q does not exist", selected)
 		}

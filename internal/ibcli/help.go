@@ -144,7 +144,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"test", "connection test must pass before saving"},
 			{"retry", "failed connection test shows a retry prompt"},
 			{"default", "--default makes this profile the selected default"},
-			{"global", "--global-config writes Linux shared config, key, and cache under /etc/ib"},
+			{"global", "--global-config writes Linux shared config, key, and cache under /etc/ib; requires root"},
 			{"example", "ib config new prod --default"},
 		})
 	case "ib config edit":
@@ -154,6 +154,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"test", "connection test must pass before saving changes"},
 			{"retry", "failed connection test shows a retry prompt"},
 			{"default", "--default makes this profile the selected default"},
+			{"global", "--global-config edits Linux shared config, key, and cache under /etc/ib; requires root"},
 			{"example", "ib config edit prod"},
 		})
 	case "ib config list":

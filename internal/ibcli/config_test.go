@@ -593,6 +593,37 @@ func TestWriteGlobalConfigPersistsGroupAndPermissions(t *testing.T) {
 	assertFileMode(t, app.GlobalConfigKeyFile, 0o640)
 }
 
+func TestGlobalConfigNewAndEditRequireRoot(t *testing.T) {
+	if !globalConfigSupported() {
+		t.Skip("global config is only supported on Linux")
+	}
+	oldEffectiveUserID := globalConfigEffectiveUserIDFunc
+	globalConfigEffectiveUserIDFunc = func() int { return 1000 }
+	t.Cleanup(func() {
+		globalConfigEffectiveUserIDFunc = oldEffectiveUserID
+	})
+
+	tests := [][]string{
+		{"config", "new", "--global-config", "shared"},
+		{"config", "edit", "--global-config", "shared"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			app := testApp(t)
+			err := app.Execute(args)
+			if err == nil {
+				t.Fatalf("Execute(%v) error = nil, want root error", args)
+			}
+			if !strings.Contains(err.Error(), "requires root") || !strings.Contains(err.Error(), "sudo") {
+				t.Fatalf("Execute(%v) error = %v, want root/sudo guidance", args, err)
+			}
+			if app.ConfigFile == app.GlobalConfigFile {
+				t.Fatalf("Execute(%v) selected global config before root check", args)
+			}
+		})
+	}
+}
+
 func TestWriteConfigProfilesEncryptsPasswordAndReadsItBack(t *testing.T) {
 	app := testApp(t)
 	profiles := map[string]Profile{

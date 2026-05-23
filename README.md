@@ -98,13 +98,14 @@ Create or edit an Infoblox profile:
 ```bash
 ib config new --default
 sudo ib config new --global-config shared
+sudo ib config edit --global-config shared
 ib config edit
 ib config list
 ```
 
 Profiles store the primary server, auto-detected WAPI version, auto-detected GCM read endpoint when available, credentials, DNS view, and default zone. Config validates server reachability before asking for credentials, then validates the username and password before WAPI setup. Trusted HTTPS certificates are verified; untrusted HTTPS certificates show certificate details and require confirmation before `verify_ssl = false` is saved. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Unix builds use a key file; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles.
 
-By default, profiles live under `~/.ib/`. On Linux, `ib config new --global-config [PROFILE]` writes a shared profile under `/etc/ib/` and asks which Linux group should have access. Users in that group can read `/etc/ib/config` and `/etc/ib/key`, and can read/write the shared `/etc/ib/cache.sqlite3`. Normal commands merge `/etc/ib/config` with `~/.ib/config`; local profiles and local metadata override matching global names, while global-only profiles remain available. If `/etc/ib/config` is missing or not readable, commands continue silently with local config only. Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, or cache data.
+By default, profiles live under `~/.ib/`. On Linux, `ib config new --global-config [PROFILE]` writes a shared profile under `/etc/ib/` and asks which Linux group should have access. `ib config new --global-config` and `ib config edit --global-config` must be run as root, for example with `sudo`, because they write `/etc/ib/config` and `/etc/ib/key`. Users in the configured group can read `/etc/ib/config` and `/etc/ib/key`, and can read/write the shared `/etc/ib/cache.sqlite3`. Normal commands merge `/etc/ib/config` with `~/.ib/config`; local profiles and local metadata override matching global names, while global-only profiles remain available. If `/etc/ib/config` is missing or not readable, commands continue silently with local config only. Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, or cache data.
 
 ## DNS 
 
@@ -168,8 +169,8 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | Command | Description |
 | --- | --- |
 | `ib config` | Show profile overview and short usage. |
-| `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust, credentials, and primary access, auto-detects WAPI version and a usable GCM read endpoint, and selects single DNS view/zone choices automatically. Add `--global-config` on Linux to create the profile under `/etc/ib/`. |
-| `ib config edit [PROFILE]` | Edit an existing profile; server reachability/TLS trust is rechecked, leaving the password blank keeps the current encrypted password, and WAPI version detection updates the prompt default when available. |
+| `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust, credentials, and primary access, auto-detects WAPI version and a usable GCM read endpoint, and selects single DNS view/zone choices automatically. Add `--global-config` on Linux as root to create the profile under `/etc/ib/`. |
+| `ib config edit [PROFILE]` | Edit an existing profile; server reachability/TLS trust is rechecked, leaving the password blank keeps the current encrypted password, and WAPI version detection updates the prompt default when available. Add `--global-config` on Linux as root to edit the profile under `/etc/ib/`. |
 | `ib config list` | List configured profiles with username, WAPI, SSL, DNS context, and merged config metadata in table output. |
 | `ib config use PROFILE` | Set the default profile. |
 | `ib config delete PROFILE` | Delete a non-default local profile and clear its cache rows. |
