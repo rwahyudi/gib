@@ -158,7 +158,8 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		})
 	case "ib config list":
 		return sectionWithRows("List Profiles", [][]string{
-			{"shows", "profile, default, server, read endpoint, DNS view, default zone"},
+			{"shows", "profile, default, username, server, read endpoint, WAPI, SSL, DNS view, default zone"},
+			{"metadata", "table output also shows merged config metadata"},
 			{"formats", "-o table, -o json, or -o csv"},
 			{"empty", "prints setup guidance when no profiles exist"},
 		})

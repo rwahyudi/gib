@@ -841,7 +841,7 @@ func (a *App) runConfigOverview() error {
 	}
 	if len(merged.Profiles) == 0 {
 		if !a.isTableOutput() {
-			return a.emitRows("Infoblox Profiles (0)", []string{"profile", "default", "server", "read_server", "dns_view", "default_zone"}, []map[string]any{})
+			return a.emitRows("Infoblox Profiles (0)", configProfileFields(), []map[string]any{})
 		}
 		a.printConfigEmptyState()
 		return nil
@@ -863,7 +863,7 @@ func (a *App) listProfiles() error {
 			a.PrintWarning("No profiles configured. Run: ib config new [PROFILE]")
 			return nil
 		}
-		return a.emitRows("Infoblox Profiles (0)", []string{"profile", "default", "server", "read_server", "dns_view", "default_zone"}, []map[string]any{})
+		return a.emitRows("Infoblox Profiles (0)", configProfileFields(), []map[string]any{})
 	}
 	names := make([]string, 0, len(merged.Profiles))
 	for name := range merged.Profiles {
@@ -876,14 +876,28 @@ func (a *App) listProfiles() error {
 		rows = append(rows, map[string]any{
 			"profile":      name,
 			"default":      name == merged.DefaultProfile,
+			"username":     profile.Username,
 			"server":       profile.Server,
 			"read_server":  profile.ReadServer,
+			"wapi_version": profile.WAPIVersion,
+			"verify_ssl":   profile.VerifySSL,
 			"dns_view":     profile.DNSView,
 			"default_zone": profile.DefaultZone,
 		})
 	}
-	fields := []string{"profile", "default", "server", "read_server", "dns_view", "default_zone"}
-	return a.emitConfigProfileRows(fmt.Sprintf("Infoblox Profiles (%d)", len(rows)), fields, rows)
+	fields := configProfileFields()
+	if err := a.emitConfigProfileRows(fmt.Sprintf("Infoblox Profiles (%d)", len(rows)), fields, rows); err != nil {
+		return err
+	}
+	if a.isTableOutput() {
+		fmt.Fprintln(a.Stdout)
+		fmt.Fprintln(a.Stdout, renderTable("Config Metadata", []string{"Field", "Value"}, configMetadataTableRows(merged)))
+	}
+	return nil
+}
+
+func configProfileFields() []string {
+	return []string{"profile", "default", "username", "server", "read_server", "wapi_version", "verify_ssl", "dns_view", "default_zone"}
 }
 
 func (a *App) emitConfigProfileRows(title string, fields []string, rows []map[string]any) error {
@@ -904,6 +918,24 @@ func (a *App) emitConfigProfileRows(title string, fields []string, rows []map[st
 	}
 	fmt.Fprintln(a.Stdout, renderTableWithRowStyles(title, titleCaseFields(fields), displayRows, activeRows))
 	return nil
+}
+
+func configMetadataTableRows(merged mergedConfigData) [][]string {
+	settings := merged.Settings.complete()
+	rows := [][]string{
+		{"metadata_source", string(merged.SettingsLocation.Scope)},
+		{"config_file", merged.SettingsLocation.File},
+		{"default_profile", merged.DefaultProfile},
+		{configCacheTTLKey, strconv.Itoa(settings.CacheTTLSeconds)},
+		{configDNSSearchWorkerLimitKey, strconv.Itoa(settings.DNSSearchWorkerLimit)},
+		{configRecordsCacheSWRKey, strconv.Itoa(settings.RecordsCacheSWRSeconds)},
+		{configMaxBackgroundWorkerWaitKey, strconv.Itoa(settings.MaxBackgroundWorkerWaitSeconds)},
+		{configCompletionCachePrefetchKey, strconv.FormatBool(settings.CompletionCachePrefetch)},
+	}
+	if settings.GlobalGroup != "" {
+		rows = append(rows, []string{configGlobalGroupKey, settings.GlobalGroup})
+	}
+	return rows
 }
 
 func profileRowIsActive(row map[string]any) bool {

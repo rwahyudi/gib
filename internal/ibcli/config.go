@@ -415,6 +415,7 @@ type mergedConfigData struct {
 	ProfileLocations map[string]configLocation
 	FileData         map[configScope]configFileData
 	Settings         ConfigSettings
+	SettingsLocation configLocation
 }
 
 func (a *App) readConfigFileData(location configLocation, decrypt bool) (configFileData, bool, error) {
@@ -471,6 +472,7 @@ func (a *App) readMergedConfig(decrypt bool) (mergedConfigData, error) {
 		merged.FileData[location.Scope] = data
 		merged.DefaultProfile = data.DefaultProfile
 		merged.Settings = data.Settings
+		merged.SettingsLocation = location
 		for name, profile := range data.Profiles {
 			merged.Profiles[name] = profile
 			merged.ProfileLocations[name] = location

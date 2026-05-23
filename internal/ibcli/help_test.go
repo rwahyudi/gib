@@ -426,7 +426,8 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 			args: []string{"config", "list", "--help"},
 			want: []string{
 				"List Profiles",
-				"profile, default, server, read endpoint, DNS view, default zone",
+				"profile, default, username, server, read endpoint, WAPI, SSL, DNS view, default zone",
+				"table output also shows merged config metadata",
 				"-o table, -o json, or -o csv",
 			},
 		},

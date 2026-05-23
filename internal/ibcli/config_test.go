@@ -419,13 +419,27 @@ func TestConfigListShowsMergedProfiles(t *testing.T) {
 		t.Fatalf("parse config list json: %v\n%s", err, stdout.String())
 	}
 	seen := map[string]bool{}
+	var localRow map[string]any
 	for _, row := range rows {
-		seen[fmt.Sprint(row["profile"])] = true
+		name := fmt.Sprint(row["profile"])
+		seen[name] = true
+		if name == "local" {
+			localRow = row
+		}
 	}
 	for _, name := range []string{"local", "shared"} {
 		if !seen[name] {
 			t.Fatalf("config list missing %q: %#v", name, rows)
 		}
+	}
+	if got := fmt.Sprint(localRow["username"]); got != "local-user" {
+		t.Fatalf("local username = %q, want local-user: %#v", got, localRow)
+	}
+	if got := fmt.Sprint(localRow["wapi_version"]); got != defaultWAPIVersion {
+		t.Fatalf("local wapi_version = %q, want %s: %#v", got, defaultWAPIVersion, localRow)
+	}
+	if got, ok := localRow["verify_ssl"].(bool); !ok || !got {
+		t.Fatalf("local verify_ssl = %#v, want true: %#v", localRow["verify_ssl"], localRow)
 	}
 }
 
@@ -458,6 +472,50 @@ func TestConfigListHighlightsActiveProfileRow(t *testing.T) {
 	}
 	if strings.Contains(output, activeTableRowStyle.Render("passive")) {
 		t.Fatalf("config list highlighted inactive profile:\n%q", output)
+	}
+}
+
+func TestConfigListShowsMetadataTable(t *testing.T) {
+	app := testApp(t)
+	writeConfigForSettings(t, app, ConfigSettings{
+		CacheTTLSeconds:                900,
+		DNSSearchWorkerLimit:           12,
+		RecordsCacheSWRSeconds:         3600,
+		MaxBackgroundWorkerWaitSeconds: 7,
+		CompletionCachePrefetch:        false,
+		completionCachePrefetchSet:     true,
+	})
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "list"}); err != nil {
+		t.Fatalf("config list: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"Config Metadata",
+		"metadata_source",
+		"local",
+		"config_file",
+		app.LocalConfigFile,
+		"default_profile",
+		"default",
+		"cache_ttl",
+		"900",
+		"dns_search_worker_limit",
+		"12",
+		"records_cache_swr_ttl",
+		"3600",
+		"max_background_worker_wait",
+		"7",
+		"completion_cache_prefetch",
+		"false",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("config list metadata missing %q:\n%s", want, output)
+		}
 	}
 }
 
