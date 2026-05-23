@@ -987,11 +987,7 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	current := profiles[selected].complete()
 	a.printConfigureStep(step, "Infoblox Endpoint", "Enter the Grid Master URL; the WAPI suffix is normalized automatically.")
 	step++
-	server, err := a.gum.Input("Infoblox server", current.Server, false)
-	if err != nil {
-		return err
-	}
-	server, err = normalizeServer(server)
+	server, verifySSL, err := a.promptReachableServer(current.Server, firstNonZero(current.Timeout, defaultTimeoutSeconds))
 	if err != nil {
 		return err
 	}
@@ -1016,12 +1012,8 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	if username == "" || password == "" {
 		return cliError("username and password are required")
 	}
-	a.printConfigureStep(step, "WAPI and TLS", "Confirm certificate verification and the WAPI version before testing the connection.")
+	a.printConfigureStep(step, "WAPI", "Confirm the auto-detected WAPI version before testing the connection.")
 	step++
-	verifySSL, err := a.gum.Confirm("Verify SSL certificates", current.VerifySSL)
-	if err != nil {
-		return err
-	}
 	wapiDefault := firstNonEmpty(current.WAPIVersion, defaultWAPIVersion)
 	versionProbe := Profile{
 		Name:      selected,

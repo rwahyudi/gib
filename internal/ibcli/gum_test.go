@@ -11,8 +11,8 @@ import (
 )
 
 func TestGumConfirmArgsIncludeDefault(t *testing.T) {
-	got := gumConfirmArgs("Verify SSL certificates", false)
-	want := []string{"confirm", "--default=false", "Verify SSL certificates"}
+	got := gumConfirmArgs("Trust this Infoblox HTTPS certificate for this profile?", false)
+	want := []string{"confirm", "--default=false", "Trust this Infoblox HTTPS certificate for this profile?"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("confirm args = %#v, want %#v", got, want)
 	}

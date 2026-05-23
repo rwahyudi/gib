@@ -2,7 +2,11 @@ package ibcli
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
+	"io"
+	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -346,7 +350,7 @@ func TestConfigOverviewWithoutProfilesUsesSetupPanel(t *testing.T) {
 		"Config Usage",
 		"Create a profile first; credentials are encrypted.",
 		"ib config new [PROFILE]",
-		"server, username, password, WAPI/TLS",
+		"server/TLS, username, password, WAPI",
 		"auto GCM read endpoint",
 		"runs before saving; retry on failure",
 		"ib config completion [SHELL]",
@@ -605,7 +609,6 @@ func TestConfigureNewProfileNamePromptStartsBlankAndDefaultsOnEnter(t *testing.T
 		server.URL,
 		"admin",
 		"secret",
-		"n",
 		"",
 		"",
 		"",
@@ -680,7 +683,6 @@ func TestConfigureNewDefaultsWAPIVersionFromSchema(t *testing.T) {
 		server.URL,
 		"admin",
 		"secret",
-		"n",
 		"",
 		"",
 		"",
@@ -719,7 +721,6 @@ func TestConfigureNewFallsBackWhenWAPIVersionDetectionFails(t *testing.T) {
 		server.URL,
 		"admin",
 		"secret",
-		"n",
 		"",
 		"",
 		"",
@@ -738,6 +739,194 @@ func TestConfigureNewFallsBackWhenWAPIVersionDetectionFails(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "INFO: could not auto-detect WAPI version; using "+defaultWAPIVersion+" as the default") {
 		t.Fatalf("configure output missing fallback message:\n%s", stdout.String())
+	}
+}
+
+func TestConfigureNewRetriesUnreachableServerBeforeCredentials(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	unreachable := "https://" + listener.Addr().String()
+	_ = listener.Close()
+	server := newConfigSuccessServer(t)
+
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		unreachable,
+		server.URL,
+		"admin",
+		"secret",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	output := stdout.String()
+	warningIndex := strings.Index(output, "WARNING: Infoblox server is not reachable")
+	usernameIndex := strings.Index(output, "Username:")
+	if warningIndex < 0 {
+		t.Fatalf("configure output missing reachability warning:\n%s", output)
+	}
+	if usernameIndex < 0 || warningIndex > usernameIndex {
+		t.Fatalf("server warning should be printed before credentials are requested:\n%s", output)
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if got := profiles["demo"].Server; got != server.URL {
+		t.Fatalf("server = %q, want %q", got, server.URL)
+	}
+}
+
+func TestConfigureNewAcceptsUntrustedHTTPSCertificate(t *testing.T) {
+	server := newConfigTLSSuccessServer(t)
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		server.URL,
+		"y",
+		"admin",
+		"secret",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"WARNING: HTTPS certificate is not trusted",
+		"INFO: Subject:",
+		"INFO: Issuer:",
+		"INFO: SHA256 fingerprint:",
+		"Trust this Infoblox HTTPS certificate for this profile?",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("configure output missing %q:\n%s", want, output)
+		}
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if profiles["demo"].VerifySSL {
+		t.Fatalf("VerifySSL = true, want false after accepting untrusted certificate")
+	}
+}
+
+func TestConfigureNewDeclinesUntrustedHTTPSCertificateAndReprompts(t *testing.T) {
+	untrusted := newConfigTLSSuccessServer(t)
+	server := newConfigSuccessServer(t)
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		untrusted.URL,
+		"n",
+		server.URL,
+		"admin",
+		"secret",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "WARNING: certificate was not trusted; enter a different Infoblox server.") {
+		t.Fatalf("configure output missing certificate decline warning:\n%s", output)
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if got := profiles["demo"].Server; got != server.URL {
+		t.Fatalf("server = %q, want %q", got, server.URL)
+	}
+}
+
+func TestConfigureNewTrustedHTTPSCertificateSkipsTrustPrompt(t *testing.T) {
+	server := newConfigTLSSuccessServer(t)
+	app := testApp(t)
+	trustTLSServer(t, app, server)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		server.URL,
+		"admin",
+		"secret",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	output := stdout.String()
+	if strings.Contains(output, "Trust this Infoblox HTTPS certificate") {
+		t.Fatalf("trusted certificate should not show trust prompt:\n%s", output)
+	}
+	if !strings.Contains(output, "INFO: Infoblox server is reachable over HTTPS with a trusted certificate.") {
+		t.Fatalf("configure output missing trusted HTTPS message:\n%s", output)
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if !profiles["demo"].VerifySSL {
+		t.Fatalf("VerifySSL = false, want true for trusted HTTPS")
+	}
+}
+
+func TestConfigureNewPlainHTTPDisablesSSLVerification(t *testing.T) {
+	server := newConfigSuccessServer(t)
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		server.URL,
+		"admin",
+		"secret",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "WARNING: Infoblox server is reachable over plain HTTP; SSL verification is not available.") {
+		t.Fatalf("configure output missing plain HTTP warning:\n%s", stdout.String())
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if profiles["demo"].VerifySSL {
+		t.Fatalf("VerifySSL = true, want false for plain HTTP")
 	}
 }
 
@@ -794,7 +983,6 @@ func TestConfigureNewAutoSavesGCMReadServer(t *testing.T) {
 		primary.URL,
 		"admin",
 		"secret",
-		"n",
 		"",
 		"",
 		"",
@@ -833,7 +1021,6 @@ func TestConfigureAutoSelectsSingleDNSViewAndZone(t *testing.T) {
 		server.URL,
 		"admin",
 		"secret",
-		"n",
 		"",
 	}, "\n") + "\n")
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
@@ -897,7 +1084,6 @@ func TestConfigureEditClearsOldReadServerWhenNoUsableGCM(t *testing.T) {
 		"",
 		"",
 		"",
-		"n",
 		"",
 		"",
 		"",
@@ -928,7 +1114,6 @@ func TestConfigNewCanRetryDetailsAfterValidationError(t *testing.T) {
 		server.URL,
 		"admin",
 		"secret",
-		"n",
 		"",
 		"",
 		"",
@@ -971,13 +1156,11 @@ func TestConfigureNewConnectionFailureShowsRetryPopup(t *testing.T) {
 		failServer.URL,
 		"admin",
 		"secret",
-		"n",
 		"",
 		"y",
 		successServer.URL,
 		"admin",
 		"secret",
-		"n",
 		"",
 		"",
 		"",
@@ -1026,7 +1209,6 @@ func TestConfigureEditConnectionFailureShowsRetryPopup(t *testing.T) {
 		"",
 		"",
 		"",
-		"n",
 		"",
 		"n",
 	}, "\n") + "\n")
@@ -1061,7 +1243,6 @@ func TestConfigureViewAndZonePromptsAreIndentedAndSequenced(t *testing.T) {
 		server.URL,
 		"admin",
 		"secret",
-		"n",
 		"",
 		"",
 		"",
@@ -1392,6 +1573,41 @@ func newConfigSuccessServer(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+func newConfigTLSSuccessServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewUnstartedServer(configSuccessHandler())
+	server.Config.ErrorLog = log.New(io.Discard, "", 0)
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	return server
+}
+
+func configSuccessHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/wapi/v1.0/":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"supported_versions": []string{defaultWAPIVersion},
+			})
+		case strings.HasSuffix(r.URL.Path, "/grid"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "grid"}})
+		case strings.HasSuffix(r.URL.Path, "/member"),
+			strings.HasSuffix(r.URL.Path, "/view"),
+			strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+func trustTLSServer(t *testing.T, app *App, server *httptest.Server) {
+	t.Helper()
+	pool := x509.NewCertPool()
+	pool.AddCert(server.Certificate())
+	app.tlsRootCAs = pool
 }
 
 func newConfigViewSuccessServer(t *testing.T) *httptest.Server {

@@ -1,6 +1,7 @@
 package ibcli
 
 import (
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -75,6 +76,7 @@ type App struct {
 	backgroundNetRefresher      func(Profile, string, string, string) error
 	dnsDeleteRecordSelector     func(string, []TypedRecord) (TypedRecord, bool, error)
 	dnsDeleteConfirmer          func(string, TypedRecord) (bool, error)
+	tlsRootCAs                  *x509.CertPool
 }
 
 func NewDefaultApp() (*App, error) {

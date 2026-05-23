@@ -379,7 +379,7 @@ func TestConfigHelpCoversWorkflowAndStorage(t *testing.T) {
 		"ib config edit [PROFILE]",
 		"ib config cache status|clear",
 		"Profile Details",
-		"server, username, password, SSL, auto WAPI version, auto GCM read endpoint, DNS view, default zone",
+		"server reachability/TLS trust, username, password, auto WAPI version, auto GCM read endpoint, DNS view, default zone",
 		"encrypted at rest",
 	} {
 		if !strings.Contains(output, want) {
@@ -401,8 +401,9 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 			want: []string{
 				"Create Profile",
 				"blank prompt creates profile 'default'",
-				"TLS/WAPI auto-detection",
-				"auto GCM read endpoint",
+				"endpoint reachability",
+				"TLS trust",
+				"auto GCM",
 				"connection test must pass before saving",
 				"failed connection test shows a retry prompt",
 				"ib config new prod --default",

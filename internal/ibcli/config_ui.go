@@ -51,7 +51,7 @@ func (a *App) printConfigEmptyState() {
 		"Create a profile first; credentials are encrypted.",
 		[][]string{
 			{"Create profile", "ib config new [PROFILE]"},
-			{"Questions", "server, username, password, WAPI/TLS"},
+			{"Questions", "server/TLS, username, password, WAPI"},
 			{"DNS defaults", "auto GCM read endpoint, DNS view, default zone"},
 			{"Connection test", "runs before saving; retry on failure"},
 			{"Shell completion", "ib config completion [SHELL]"},
