@@ -426,6 +426,33 @@ func TestConfigListShowsMergedProfiles(t *testing.T) {
 	}
 }
 
+func TestConfigListHighlightsActiveProfileRow(t *testing.T) {
+	styledActive := successStyle.Render("active")
+	if styledActive == "active" {
+		t.Skip("lipgloss color output is disabled")
+	}
+	app := testApp(t)
+	writePlainTestConfig(t, app.LocalConfigFile, "active", map[string]Profile{
+		"active":  plainTestProfile("active", "https://active.example"),
+		"passive": plainTestProfile("passive", "https://passive.example"),
+	}, "")
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "list"}); err != nil {
+		t.Fatalf("config list: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, styledActive) {
+		t.Fatalf("config list did not highlight active profile:\n%s", output)
+	}
+	if strings.Contains(output, successStyle.Render("passive")) {
+		t.Fatalf("config list highlighted inactive profile:\n%s", output)
+	}
+}
+
 func TestProfileCompletionShowsMergedProfiles(t *testing.T) {
 	app := testApp(t)
 	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{

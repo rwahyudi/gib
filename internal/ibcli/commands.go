@@ -881,7 +881,37 @@ func (a *App) listProfiles() error {
 			"default_zone": profile.DefaultZone,
 		})
 	}
-	return a.emitRows(fmt.Sprintf("Infoblox Profiles (%d)", len(rows)), []string{"profile", "default", "server", "read_server", "dns_view", "default_zone"}, rows)
+	fields := []string{"profile", "default", "server", "read_server", "dns_view", "default_zone"}
+	return a.emitConfigProfileRows(fmt.Sprintf("Infoblox Profiles (%d)", len(rows)), fields, rows)
+}
+
+func (a *App) emitConfigProfileRows(title string, fields []string, rows []map[string]any) error {
+	if !a.isTableOutput() {
+		return a.emitRows(title, fields, rows)
+	}
+	displayRows := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		display := make([]string, 0, len(fields))
+		for _, field := range fields {
+			display = append(display, configProfileTableValue(field, row))
+		}
+		displayRows = append(displayRows, display)
+	}
+	fmt.Fprintln(a.Stdout, renderTable(title, titleCaseFields(fields), displayRows))
+	return nil
+}
+
+func configProfileTableValue(field string, row map[string]any) string {
+	value := stringify(row[field])
+	if !profileRowIsActive(row) || value == "" {
+		return value
+	}
+	return successStyle.Render(value)
+}
+
+func profileRowIsActive(row map[string]any) bool {
+	active, ok := row["default"].(bool)
+	return ok && active
 }
 
 func (a *App) useProfile(profileName string) error {
