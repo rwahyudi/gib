@@ -108,6 +108,13 @@ func writeConfigForSettings(t *testing.T, app *App, settings ConfigSettings) {
 	}
 }
 
+func TestProfileCompleteUsesDefaultTimeout(t *testing.T) {
+	profile := Profile{}.complete()
+	if profile.Timeout != 15 {
+		t.Fatalf("timeout = %d, want 15", profile.Timeout)
+	}
+}
+
 func TestWriteConfigProfilesEncryptsPasswordAndReadsItBack(t *testing.T) {
 	app := testApp(t)
 	profiles := map[string]Profile{

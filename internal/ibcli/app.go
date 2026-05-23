@@ -19,7 +19,7 @@ const (
 	configFileName                = "config"
 	configKeyFileName             = "key"
 	defaultWAPIVersion            = "v2.12.3"
-	defaultTimeoutSeconds         = 30
+	defaultTimeoutSeconds         = 15
 	defaultProfileName            = "default"
 	defaultZoneEnv                = "IB_ZONE"
 	defaultViewEnv                = "IB_VIEW"
