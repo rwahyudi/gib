@@ -72,8 +72,12 @@ func (a *App) runNetViewList() error {
 	if err != nil {
 		return err
 	}
-	views, err := a.cachedNetworkViews(profile, client)
-	if err != nil {
+	var views []map[string]any
+	if err := a.withSpinner("Loading IPAM network views...", func() error {
+		var loadErr error
+		views, loadErr = a.cachedNetworkViews(profile, client)
+		return loadErr
+	}); err != nil {
 		return err
 	}
 	rows := make([]map[string]any, 0, len(views))
@@ -113,8 +117,12 @@ func (a *App) runNetObjectList(search string, networkView string, option NetSort
 			staleCacheServed = true
 		},
 	}
-	objects, err := a.cachedNetworkObjectsForList(profile, client, networkView, cacheOptions)
-	if err != nil {
+	var objects []map[string]any
+	if err := a.withSpinner("Loading IPAM networks and containers...", func() error {
+		var loadErr error
+		objects, loadErr = a.cachedNetworkObjectsForList(profile, client, networkView, cacheOptions)
+		return loadErr
+	}); err != nil {
 		return err
 	}
 	objects = filterNetworks(objects, search)
@@ -206,8 +214,12 @@ func (a *App) runNetShow(network string, networkView string) error {
 	if err != nil {
 		return err
 	}
-	matchedNetwork, err := a.cachedFindNetworkObject(profile, client, network, networkView)
-	if err != nil {
+	var matchedNetwork map[string]any
+	if err := a.withSpinner("Loading IPAM network details...", func() error {
+		var loadErr error
+		matchedNetwork, loadErr = a.cachedFindNetworkObject(profile, client, network, networkView)
+		return loadErr
+	}); err != nil {
 		return err
 	}
 	row := networkDetailRow(matchedNetwork)
@@ -229,15 +241,23 @@ func (a *App) runNetAddress(address string, networkView string) error {
 	if err != nil {
 		return err
 	}
-	results, err := a.cachedIPv4Addresses(profile, client, ip, networkView)
-	if err != nil {
+	var results []map[string]any
+	if err := a.withSpinner("Loading IPAM address details...", func() error {
+		var loadErr error
+		results, loadErr = a.cachedIPv4Addresses(profile, client, ip, networkView)
+		return loadErr
+	}); err != nil {
 		return err
 	}
 	if len(results) == 0 {
 		return cliError("no IPv4 address found for %s", ip)
 	}
-	containers, err := a.cachedNetworkContainers(profile, client, networkView)
-	if err != nil {
+	var containers []map[string]any
+	if err := a.withSpinner("Loading IPAM network containers...", func() error {
+		var loadErr error
+		containers, loadErr = a.cachedNetworkContainers(profile, client, networkView)
+		return loadErr
+	}); err != nil {
 		return err
 	}
 	rows := make([]map[string]any, 0, len(results))
@@ -270,16 +290,22 @@ func (a *App) runNextIP(network string, networkView string, num int, exclude []s
 	}
 	var rows []map[string]any
 	if cachedLookup {
-		matchedNetwork, findErr := a.cachedFindNetworkObject(profile, client, network, networkView)
-		if findErr != nil {
-			return findErr
+		if err := a.withSpinner("Loading IPAM next available addresses...", func() error {
+			matchedNetwork, findErr := a.cachedFindNetworkObject(profile, client, network, networkView)
+			if findErr != nil {
+				return findErr
+			}
+			var loadErr error
+			rows, loadErr = nextAvailableIPRowsForNetwork(client, matchedNetwork, network, num, exclude)
+			return loadErr
+		}); err != nil {
+			return err
 		}
-		rows, err = nextAvailableIPRowsForNetwork(client, matchedNetwork, network, num, exclude)
 	} else {
 		rows, err = nextAvailableIPRows(client, network, networkView, num, exclude)
-	}
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
 	}
 	if printContext && a.isTableOutput() {
 		a.PrintContext()
