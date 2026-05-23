@@ -18,6 +18,7 @@ const (
 	configDirName                 = ".ib"
 	configFileName                = "config"
 	configKeyFileName             = "key"
+	globalConfigDir               = "/etc/ib"
 	defaultWAPIVersion            = "v2.12.3"
 	defaultTimeoutSeconds         = 15
 	defaultProfileName            = "default"
@@ -60,14 +61,20 @@ var (
 )
 
 type App struct {
-	ConfigDir     string
-	ConfigFile    string
-	ConfigKeyFile string
-	Output        string
-	Stdout        io.Writer
-	Stderr        io.Writer
-	Stdin         io.Reader
-	gum           *Gum
+	ConfigDir           string
+	ConfigFile          string
+	ConfigKeyFile       string
+	LocalConfigDir      string
+	LocalConfigFile     string
+	LocalConfigKeyFile  string
+	GlobalConfigDir     string
+	GlobalConfigFile    string
+	GlobalConfigKeyFile string
+	Output              string
+	Stdout              io.Writer
+	Stderr              io.Writer
+	Stdin               io.Reader
+	gum                 *Gum
 
 	dnsZoneOverride             string
 	dnsViewOverride             string
@@ -77,6 +84,8 @@ type App struct {
 	dnsDeleteRecordSelector     func(string, []TypedRecord) (TypedRecord, bool, error)
 	dnsDeleteConfirmer          func(string, TypedRecord) (bool, error)
 	tlsRootCAs                  *x509.CertPool
+	configScope                 configScope
+	globalConfigGroup           string
 }
 
 func NewDefaultApp() (*App, error) {
@@ -86,13 +95,19 @@ func NewDefaultApp() (*App, error) {
 	}
 	configDir := filepath.Join(home, configDirName)
 	app := &App{
-		ConfigDir:     configDir,
-		ConfigFile:    filepath.Join(configDir, configFileName),
-		ConfigKeyFile: filepath.Join(configDir, configKeyFileName),
-		Output:        tableOutput,
-		Stdout:        os.Stdout,
-		Stderr:        os.Stderr,
-		Stdin:         os.Stdin,
+		ConfigDir:           configDir,
+		ConfigFile:          filepath.Join(configDir, configFileName),
+		ConfigKeyFile:       filepath.Join(configDir, configKeyFileName),
+		LocalConfigDir:      configDir,
+		LocalConfigFile:     filepath.Join(configDir, configFileName),
+		LocalConfigKeyFile:  filepath.Join(configDir, configKeyFileName),
+		GlobalConfigDir:     globalConfigDir,
+		GlobalConfigFile:    filepath.Join(globalConfigDir, configFileName),
+		GlobalConfigKeyFile: filepath.Join(globalConfigDir, configKeyFileName),
+		Output:              tableOutput,
+		Stdout:              os.Stdout,
+		Stderr:              os.Stderr,
+		Stdin:               os.Stdin,
 	}
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 	return app, nil
@@ -153,6 +168,8 @@ func (a *App) RootCommand() *cobra.Command {
 
 Run "ib config new [PROFILE]" first to save an Infoblox profile with server,
 credentials, DNS view, and default zone.
+On Linux, "ib config new --global-config [PROFILE]" can create a shared
+profile under /etc/ib for a configured group.
 
 Common usage:
   ib dns view list

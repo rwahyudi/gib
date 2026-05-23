@@ -24,20 +24,23 @@ func (a *App) configCommand() *cobra.Command {
 			return a.runConfigOverview()
 		},
 	}
-	cmd.AddCommand(&cobra.Command{
+	newCmd := &cobra.Command{
 		Use:   "new [PROFILE]",
 		Short: "Create a new Infoblox profile",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			makeDefault, _ := cmd.Flags().GetBool("default")
+			globalConfig, _ := cmd.Flags().GetBool("global-config")
 			profileName := ""
 			if len(args) > 0 {
 				profileName = args[0]
 			}
-			return a.saveConfigInteractive(profileName, true, makeDefault)
+			return a.saveConfigInteractive(profileName, true, makeDefault, globalConfig)
 		},
-	})
-	cmd.Commands()[0].Flags().Bool("default", false, "make this profile the default")
+	}
+	newCmd.Flags().Bool("default", false, "make this profile the default")
+	newCmd.Flags().Bool("global-config", false, "create the profile in /etc/ib for Linux group access")
+	cmd.AddCommand(newCmd)
 
 	editCmd := &cobra.Command{
 		Use:               "edit [PROFILE]",
@@ -50,7 +53,7 @@ func (a *App) configCommand() *cobra.Command {
 			if len(args) > 0 {
 				profileName = args[0]
 			}
-			return a.saveConfigInteractive(profileName, false, makeDefault)
+			return a.saveConfigInteractive(profileName, false, makeDefault, false)
 		},
 	}
 	editCmd.Flags().Bool("default", false, "make this profile the default")
@@ -87,12 +90,15 @@ func (a *App) configCommand() *cobra.Command {
 }
 
 func (a *App) cacheCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "cache", Short: "Manage local SQLite cache"}
+	cmd := &cobra.Command{Use: "cache", Short: "Manage SQLite cache"}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "status",
-		Short: "Show local cache status",
+		Short: "Show cache status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := a.useFirstExistingConfigLocation(); err != nil {
+				return err
+			}
 			snapshot, err := a.cacheStatusSnapshot()
 			if err != nil {
 				return err
@@ -105,16 +111,19 @@ func (a *App) cacheCommand() *cobra.Command {
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "clear",
-		Short: "Clear local cache entries",
+		Short: "Clear cache entries",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := a.useFirstExistingConfigLocation(); err != nil {
+				return err
+			}
 			if err := a.clearCache(); err != nil {
 				return err
 			}
 			if !a.isTableOutput() {
-				return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("clear", "CACHE", "local", "", "", "cleared local cache"))
+				return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("clear", "CACHE", "selected", "", "", "cleared cache"))
 			}
-			a.PrintSuccess("SUCCESS: cleared local cache")
+			a.PrintSuccess("SUCCESS: cleared cache")
 			return nil
 		},
 	})
@@ -825,7 +834,11 @@ func normalizeRecordTypeArg(raw string) (string, error) {
 }
 
 func (a *App) runConfigOverview() error {
-	if _, err := os.Stat(a.ConfigFile); err != nil {
+	ok, err := a.useFirstExistingConfigLocation()
+	if err != nil {
+		return err
+	}
+	if !ok {
 		if !a.isTableOutput() {
 			return a.emitRows("Infoblox Profiles (0)", []string{"profile", "default", "server", "read_server", "dns_view", "default_zone"}, []map[string]any{})
 		}
@@ -840,7 +853,11 @@ func (a *App) runConfigOverview() error {
 }
 
 func (a *App) listProfiles() error {
-	if _, err := os.Stat(a.ConfigFile); err != nil {
+	ok, err := a.useFirstExistingConfigLocation()
+	if err != nil {
+		return err
+	}
+	if !ok {
 		if a.isTableOutput() {
 			a.PrintWarning("No profiles configured. Run: ib config new [PROFILE]")
 			return nil
@@ -872,6 +889,7 @@ func (a *App) listProfiles() error {
 }
 
 func (a *App) useProfile(profileName string) error {
+	a.useConfigLocation(a.localConfigLocation())
 	selected, err := normalizeProfileName(profileName)
 	if err != nil {
 		return err
@@ -896,6 +914,7 @@ func (a *App) useProfile(profileName string) error {
 }
 
 func (a *App) deleteProfile(profileName string) error {
+	a.useConfigLocation(a.localConfigLocation())
 	selected, err := normalizeProfileName(profileName)
 	if err != nil {
 		return err
@@ -926,21 +945,37 @@ func (a *App) deleteProfile(profileName string) error {
 	return nil
 }
 
-func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault bool) error {
+func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault bool, globalConfig bool) error {
+	if globalConfig {
+		if !globalConfigSupported() {
+			return cliError("--global-config is only supported on Linux")
+		}
+		if !create {
+			return cliError("--global-config is only supported with: ib config new")
+		}
+		a.useConfigLocation(a.globalConfigLocation())
+	} else {
+		a.useConfigLocation(a.localConfigLocation())
+	}
 	defaultProfile := defaultProfileName
 	profiles := map[string]Profile{}
+	settings := defaultConfigSettings()
 	if _, err := os.Stat(a.ConfigFile); err == nil {
 		loadedDefault, loadedProfiles, _, err := a.readConfigProfiles(true)
 		if err != nil {
 			return err
 		}
 		defaultProfile, profiles = loadedDefault, loadedProfiles
+		loadedSettings, _, err := a.readConfigSettings()
+		if err != nil {
+			return err
+		}
+		settings = loadedSettings
 	}
 
 	selected := profileName
 	a.printConfigureIntro(create, selected)
 	step := 1
-	detailsStartStep := step
 	var err error
 	if selected == "" && create {
 		selected, err = a.gum.Input("Profile name", "", false)
@@ -964,12 +999,22 @@ func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault
 			return cliError("profile %q does not exist", selected)
 		}
 	}
+	if globalConfig {
+		a.printConfigureStep(step, "Global Access", "Linux group allowed to read /etc/ib/config and /etc/ib/key.")
+		step++
+		group, err := a.promptGlobalConfigGroup(settings.GlobalGroup)
+		if err != nil {
+			return err
+		}
+		settings.GlobalGroup = group
+	}
+	detailsStartStep := step
 
 	for {
 		// Do not write partial profile updates when validation fails. The user can
 		// retry the same flow until the primary connection and selected defaults
 		// all validate successfully.
-		err := a.saveConfigInteractiveDetails(selected, defaultProfile, profiles, makeDefault, detailsStartStep)
+		err := a.saveConfigInteractiveDetails(selected, defaultProfile, profiles, makeDefault, detailsStartStep, settings)
 		if err == nil {
 			return nil
 		}
@@ -982,7 +1027,7 @@ func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault
 	}
 }
 
-func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile string, profiles map[string]Profile, makeDefault bool, startStep int) error {
+func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile string, profiles map[string]Profile, makeDefault bool, startStep int, settings ConfigSettings) error {
 	step := startStep
 	current := profiles[selected].complete()
 	a.printConfigureStep(step, "Infoblox Endpoint", "Enter the Grid Master URL; the WAPI suffix is normalized automatically.")
@@ -1097,7 +1142,7 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	if makeDefault || len(profiles) == 1 {
 		defaultProfile = selected
 	}
-	if err := a.writeConfigProfiles(defaultProfile, profiles); err != nil {
+	if err := a.writeConfigProfilesWithSettings(defaultProfile, profiles, settings); err != nil {
 		return err
 	}
 	isDefault := defaultProfile == selected
@@ -1109,6 +1154,25 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 		a.PrintSuccess("SUCCESS: profile '" + selected + "' saved.")
 	}
 	return nil
+}
+
+func (a *App) promptGlobalConfigGroup(currentGroup string) (string, error) {
+	for {
+		group, err := a.gum.Input("Linux group", currentGroup, false)
+		if err != nil {
+			return "", err
+		}
+		group = strings.TrimSpace(group)
+		if group == "" {
+			a.PrintWarning("WARNING: Linux group is required for global config access.")
+			continue
+		}
+		group, err = a.prepareGlobalConfigGroup(group)
+		if err == nil {
+			return group, nil
+		}
+		a.PrintWarning("WARNING: " + err.Error())
+	}
 }
 
 func (a *App) promptConfigRetry(err error) bool {

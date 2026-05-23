@@ -1130,7 +1130,7 @@ func (a *App) startCompletionCachePrefetch(args []string) {
 	}
 	// Completion prefetch is intentionally configurable: it improves the next
 	// DNS command after tab completion, but some operators prefer completion to
-	// be a local cache read only and never start detached refresh helpers.
+	// only read the selected cache and never start detached refresh helpers.
 	if !a.completionCachePrefetchEnabled() {
 		return
 	}

@@ -1,7 +1,7 @@
 # Performance & Caching
 
 `ib` is built for large Infoblox DNS zones and IPAM read workflows. List and
-search commands prefer a local SQLite cache, DNS record reads use `/allrecords`
+search commands prefer the selected local or global SQLite cache, DNS record reads use `/allrecords`
 to avoid one request per record type, and multi-zone searches run with a bounded
 worker pool.
 
@@ -47,7 +47,7 @@ active refresh of the same cache scope to finish.
 
 For IPAM list/search, cached parent CIDRs are not expanded into synthetic child
 rows. Results only include network and container objects returned by Infoblox or
-already present in local cache.
+already present in the selected cache.
 
 Shell completion never performs a foreground Infoblox refresh for zone names,
 record names, or IPAM network CIDRs. With `completion_cache_prefetch = true`,
@@ -56,7 +56,7 @@ completion checks the selected IPAM network view, then starts detached zone-list
 current-zone record, network-list, or container-list refresh helpers when those
 cache rows are missing or stale. PTR delete completion reads cached PTR records
 from cached reverse zones and completes owner IPs instead of forward-zone names.
-With `completion_cache_prefetch = false`, completion only reads local cache rows
+With `completion_cache_prefetch = false`, completion only reads selected cache rows
 and does not start background refresh helpers.
 
 ## Read, Write, And Worker Flow

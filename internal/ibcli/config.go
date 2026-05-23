@@ -25,6 +25,7 @@ const (
 	configRecordsCacheSWRKey              = "records_cache_swr_ttl"
 	configMaxBackgroundWorkerWaitKey      = "max_background_worker_wait"
 	configCompletionCachePrefetchKey      = "completion_cache_prefetch"
+	configGlobalGroupKey                  = "global_group"
 )
 
 type Profile struct {
@@ -47,6 +48,7 @@ type ConfigSettings struct {
 	MaxBackgroundWorkerWaitSeconds int
 	CompletionCachePrefetch        bool
 	completionCachePrefetchSet     bool
+	GlobalGroup                    string
 }
 
 func defaultConfigSettings() ConfigSettings {
@@ -93,6 +95,7 @@ func configSettingsFromSections(sections map[string]map[string]string) (ConfigSe
 	settings.RecordsCacheSWRSeconds, missing = positiveIntSetting(meta, configRecordsCacheSWRKey, settings.RecordsCacheSWRSeconds, missing)
 	settings.MaxBackgroundWorkerWaitSeconds, missing = positiveIntSetting(meta, configMaxBackgroundWorkerWaitKey, settings.MaxBackgroundWorkerWaitSeconds, missing)
 	settings.CompletionCachePrefetch, settings.completionCachePrefetchSet, missing = boolSetting(meta, configCompletionCachePrefetchKey, settings.CompletionCachePrefetch, missing)
+	settings.GlobalGroup = strings.TrimSpace(meta[configGlobalGroupKey])
 	return settings.complete(), missing
 }
 
@@ -233,17 +236,20 @@ func parseBool(value string, fallback bool) bool {
 }
 
 func (a *App) ensureConfigDir() error {
-	if err := os.MkdirAll(a.ConfigDir, 0o700); err != nil {
+	mode := os.FileMode(0o700)
+	if a.activeConfigIsGlobal() {
+		mode = 0o2770
+	}
+	if err := os.MkdirAll(a.ConfigDir, mode); err != nil {
 		return err
 	}
-	return protectConfigDir(a.ConfigDir)
+	return a.protectConfigDirForScope(false)
 }
 
 func (a *App) getOrCreateConfigKey() (string, error) {
 	raw, err := os.ReadFile(a.ConfigKeyFile)
 	if err == nil {
-		_ = protectPrivateFile(a.ConfigKeyFile)
-		return strings.TrimSpace(string(raw)), nil
+		return strings.TrimSpace(string(raw)), a.protectConfigKeyFileForScope(true)
 	}
 	if !os.IsNotExist(err) {
 		return "", err
@@ -258,7 +264,7 @@ func (a *App) getOrCreateConfigKey() (string, error) {
 	if err := os.WriteFile(a.ConfigKeyFile, []byte(key+"\n"), 0o600); err != nil {
 		return "", err
 	}
-	return key, protectPrivateFile(a.ConfigKeyFile)
+	return key, a.protectConfigKeyFileForScope(true)
 }
 
 func (a *App) readConfigKey() (string, error) {
@@ -266,7 +272,7 @@ func (a *App) readConfigKey() (string, error) {
 	if err != nil {
 		return "", cliError("missing encryption key file at %s; run: ib config new [PROFILE]", a.ConfigKeyFile)
 	}
-	_ = protectPrivateFile(a.ConfigKeyFile)
+	_ = a.protectConfigKeyFileForScope(false)
 	return strings.TrimSpace(string(raw)), nil
 }
 
@@ -407,19 +413,37 @@ func (a *App) writeConfigProfilesWithSettings(defaultProfile string, profiles ma
 	if _, ok := profiles[defaultProfile]; !ok {
 		return cliError("default profile %q does not exist", defaultProfile)
 	}
+	settings = settings.complete()
+	if a.activeConfigIsGlobal() {
+		group := settings.GlobalGroup
+		if group == "" {
+			group = a.globalConfigGroup
+		}
+		group, err = a.prepareGlobalConfigGroup(group)
+		if err != nil {
+			return err
+		}
+		settings.GlobalGroup = group
+	}
 	if err := a.ensureConfigDir(); err != nil {
+		return err
+	}
+	if err := a.protectConfigDirForScope(true); err != nil {
 		return err
 	}
 
 	var builder strings.Builder
-	settings = settings.complete()
 	builder.WriteString("[meta]\n")
 	builder.WriteString("default_profile = " + defaultProfile + "\n")
 	builder.WriteString(configCacheTTLKey + " = " + strconv.Itoa(settings.CacheTTLSeconds) + "\n")
 	builder.WriteString(configDNSSearchWorkerLimitKey + " = " + strconv.Itoa(settings.DNSSearchWorkerLimit) + "\n")
 	builder.WriteString(configRecordsCacheSWRKey + " = " + strconv.Itoa(settings.RecordsCacheSWRSeconds) + "\n")
 	builder.WriteString(configMaxBackgroundWorkerWaitKey + " = " + strconv.Itoa(settings.MaxBackgroundWorkerWaitSeconds) + "\n")
-	builder.WriteString(configCompletionCachePrefetchKey + " = " + strconv.FormatBool(settings.CompletionCachePrefetch) + "\n\n")
+	builder.WriteString(configCompletionCachePrefetchKey + " = " + strconv.FormatBool(settings.CompletionCachePrefetch) + "\n")
+	if a.activeConfigIsGlobal() {
+		builder.WriteString(configGlobalGroupKey + " = " + settings.GlobalGroup + "\n")
+	}
+	builder.WriteString("\n")
 
 	names := make([]string, 0, len(profiles))
 	for name := range profiles {
@@ -445,7 +469,7 @@ func (a *App) writeConfigProfilesWithSettings(defaultProfile string, profiles ma
 	if err := os.WriteFile(a.ConfigFile, []byte(builder.String()), 0o600); err != nil {
 		return err
 	}
-	return protectPrivateFile(a.ConfigFile)
+	return a.protectConfigFileForScope(true)
 }
 
 func (a *App) loadConfig(required bool) (Profile, error) {
@@ -453,6 +477,42 @@ func (a *App) loadConfig(required bool) (Profile, error) {
 }
 
 func (a *App) loadConfigProfile(profileName string, required bool) (Profile, error) {
+	original := a.currentConfigLocation()
+	originalGroup := a.globalConfigGroup
+	locations := []configLocation{a.localConfigLocation(), a.globalConfigLocation()}
+	for _, location := range locations {
+		if _, err := os.Stat(location.File); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			a.useConfigLocation(original)
+			a.globalConfigGroup = originalGroup
+			return Profile{}, err
+		}
+		a.useConfigLocation(location)
+		profile, err := a.loadConfigProfileActive(profileName, required)
+		if err == nil {
+			return profile, nil
+		}
+		if strings.TrimSpace(profileName) != "" && isProfileNotFound(err) {
+			continue
+		}
+		a.useConfigLocation(original)
+		a.globalConfigGroup = originalGroup
+		return Profile{}, err
+	}
+	a.useConfigLocation(original)
+	a.globalConfigGroup = originalGroup
+	if required {
+		if strings.TrimSpace(profileName) != "" {
+			return Profile{}, cliError("profile %q does not exist in local config %s or global config %s", strings.TrimSpace(profileName), a.localConfigLocation().File, a.globalConfigLocation().File)
+		}
+		return Profile{}, cliError("no configuration file found. Run: ib config new [PROFILE] or ib config new --global-config [PROFILE]")
+	}
+	return Profile{}, os.ErrNotExist
+}
+
+func (a *App) loadConfigProfileActive(profileName string, required bool) (Profile, error) {
 	if _, err := os.Stat(a.ConfigFile); err != nil {
 		if required {
 			return Profile{}, cliError("no configuration file found. Run: ib config new [PROFILE]")
@@ -467,6 +527,9 @@ func (a *App) loadConfigProfile(profileName string, required bool) (Profile, err
 	if err != nil {
 		return Profile{}, err
 	}
+	if a.activeConfigIsGlobal() && settings.GlobalGroup != "" {
+		a.globalConfigGroup = settings.GlobalGroup
+	}
 	selected := defaultProfile
 	if strings.TrimSpace(profileName) != "" {
 		selected, err = normalizeProfileName(profileName)
@@ -476,7 +539,7 @@ func (a *App) loadConfigProfile(profileName string, required bool) (Profile, err
 	}
 	profile, ok := profiles[selected]
 	if !ok {
-		return Profile{}, cliError("profile %q does not exist in %s", selected, a.ConfigFile)
+		return Profile{}, profileNotFoundError{profile: selected, path: a.ConfigFile}
 	}
 	profile = profile.complete()
 	if profile.Server == "" || profile.Username == "" || profile.Password == "" {
@@ -493,7 +556,9 @@ func (a *App) loadConfigProfile(profileName string, required bool) (Profile, err
 		}
 	}
 	profile.DNSView = a.resolveDNSView(profile)
-	if legacy || settingsMissing {
+	// Global profiles are usually group-readable but not group-writable. Avoid
+	// surprising normal users with a config rewrite while loading /etc/ib/config.
+	if (legacy || settingsMissing) && !a.activeConfigIsGlobal() {
 		rewriteProfiles := profiles
 		if legacy {
 			rewriteProfiles = map[string]Profile{defaultProfile: profile}
@@ -505,12 +570,37 @@ func (a *App) loadConfigProfile(profileName string, required bool) (Profile, err
 	return profile, nil
 }
 
+type profileNotFoundError struct {
+	profile string
+	path    string
+}
+
+func (e profileNotFoundError) Error() string {
+	return fmt.Sprintf("profile %q does not exist in %s", e.profile, e.path)
+}
+
+func isProfileNotFound(err error) bool {
+	_, ok := err.(profileNotFoundError)
+	return ok
+}
+
 func (a *App) defaultConfigValues() Profile {
-	defaultProfile, profiles, _, err := a.readConfigProfiles(false)
-	if err != nil {
-		return Profile{Name: defaultProfileName}
+	for _, location := range []configLocation{a.localConfigLocation(), a.globalConfigLocation()} {
+		if _, err := os.Stat(location.File); err != nil {
+			continue
+		}
+		var defaultProfile string
+		var profiles map[string]Profile
+		err := a.withConfigLocation(location, func() error {
+			var readErr error
+			defaultProfile, profiles, _, readErr = a.readConfigProfiles(false)
+			return readErr
+		})
+		if err == nil {
+			return profiles[defaultProfile].complete()
+		}
 	}
-	return profiles[defaultProfile].complete()
+	return Profile{Name: defaultProfileName}
 }
 
 const sessionParentPIDEnv = "IB_SHELL_PID"

@@ -1280,15 +1280,15 @@ func TestConfigureAliasCompletesCacheCommands(t *testing.T) {
 		{
 			args: []string{"__complete", "configure", "ca"},
 			wants: []string{
-				"cache\tManage local SQLite cache",
+				"cache\tManage SQLite cache",
 				":4",
 			},
 		},
 		{
 			args: []string{"__complete", "configure", "cache", ""},
 			wants: []string{
-				"clear\tClear local cache entries",
-				"status\tShow local cache status",
+				"clear\tClear cache entries",
+				"status\tShow cache status",
 				":4",
 			},
 		},

@@ -111,6 +111,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		return strings.Join([]string{
 			sectionWithRows("Configuration Usage", [][]string{
 				{"setup", "ib config new [PROFILE]"},
+				{"global setup", "ib config new --global-config [PROFILE]"},
 				{"edit", "ib config edit [PROFILE]"},
 				{"switch", "ib config use PROFILE"},
 				{"inspect", "ib config list"},
@@ -136,6 +137,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"test", "connection test must pass before saving"},
 			{"retry", "failed connection test shows a retry prompt"},
 			{"default", "--default makes this profile the selected default"},
+			{"global", "--global-config writes Linux shared config, key, and cache under /etc/ib"},
 			{"example", "ib config new prod --default"},
 		})
 	case "ib config edit":
@@ -163,7 +165,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib config delete":
 		return sectionWithRows("Delete Profile", [][]string{
 			{"allowed", "removes a non-default profile from the config file"},
-			{"cache", "clears local cache entries for the deleted profile"},
+			{"cache", "clears cache entries for the deleted local profile"},
 			{"blocked", "the current default profile cannot be deleted"},
 			{"before", "run ib config use OTHER_PROFILE to delete the current default"},
 			{"example", "ib config delete old-profile"},
@@ -303,9 +305,9 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib config cache":
 		return sectionWithRows("Cache Usage", [][]string{
 			{"status", "show DNS and IPAM cache entries with age and expiry"},
-			{"clear", "delete local DNS and IPAM cache entries"},
+			{"clear", "delete DNS and IPAM cache entries"},
 			{"scope", "DNS caches use profile/view/zone; IPAM caches use profile/network view/IP"},
-			{"storage", "local SQLite cache under ~/.ib"},
+			{"storage", "~/.ib/cache.sqlite3 locally or /etc/ib/cache.sqlite3 for Linux global profiles"},
 		})
 	case "ib config cache status":
 		return sectionWithRows("Cache Status", [][]string{

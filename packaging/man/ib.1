@@ -13,7 +13,7 @@ lookup, and shell completion.
 .SH COMMANDS
 .TP
 .B ib config
-Manage profiles, completion, and local cache data.
+Manage profiles, completion, and cache data.
 .TP
 .B ib dns
 Manage DNS views, zones, records, and searches.
@@ -32,6 +32,9 @@ Select output format.
 .TP
 .B ib config new --default
 Create a default Infoblox profile.
+.TP
+.B sudo ib config new --global-config shared
+Create a Linux global profile under /etc/ib for a shared group.
 .TP
 .B ib dns list
 List records in the current DNS context. Larger IPv4 reverse CIDR scopes can
@@ -76,7 +79,17 @@ Unix key file for legacy \fBenc:v1\fR profile password tokens. Native Windows
 builds write new password tokens with user-scope DPAPI instead.
 .TP
 .I ~/.ib/cache.sqlite3
-Local DNS cache database.
+Local DNS/IPAM cache database.
+.TP
+.I /etc/ib/config
+Linux global profile configuration. Normal commands check local config first and
+fall back to this file when no matching local profile exists.
+.TP
+.I /etc/ib/key
+Linux global key file for shared encrypted profile password tokens.
+.TP
+.I /etc/ib/cache.sqlite3
+Linux global DNS/IPAM cache database.
 .SH ENVIRONMENT
 .TP
 .B IB_SEARCH_DEBUG=1

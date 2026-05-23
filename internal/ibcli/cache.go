@@ -219,7 +219,7 @@ func (a *App) ensureCacheDBReady(db *sql.DB) error {
 	if err := migrateCacheDB(db); err != nil {
 		return err
 	}
-	if err := protectPrivateFile(path); err != nil {
+	if err := a.protectCacheFileForScope(false); err != nil {
 		return err
 	}
 

@@ -10,7 +10,7 @@ IPAM work from the shell.
 ![ib cli preview](docs/assets/go-record1.gif)
 
 Read-heavy workflows can use a validated Grid Master Candidate, and large
-record/IPAM searches use local SQLite caching plus bounded workers to stay
+record/IPAM searches use SQLite caching plus bounded workers to stay
 responsive.
 
 ## Features
@@ -26,7 +26,7 @@ responsive.
   interactive duplicate selection, and confirmation.
 - IPAM read workflows for network views, IPv4 network/container list/search/details,
   address details, and next available IP lookup with network-view selection.
-- Large-zone performance through `/allrecords`, local SQLite caching,
+- Large-zone performance through `/allrecords`, SQLite caching,
   worker-limited global search, and stale-while-revalidate refreshes.
 - Dynamic shell completion for profiles, views, zones, records, flags, record
   types, and output formats from the live `ib` binary.
@@ -95,11 +95,14 @@ Create or edit an Infoblox profile:
 
 ```bash
 ib config new --default
+sudo ib config new --global-config shared
 ib config edit
 ib config list
 ```
 
-Profiles store the primary server, auto-detected WAPI version, auto-detected GCM read endpoint when available, credentials, DNS view, and default zone. Config validates server reachability before asking for credentials, then validates the username and password before WAPI setup. Trusted HTTPS certificates are verified; untrusted HTTPS certificates show certificate details and require confirmation before `verify_ssl = false` is saved. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Unix builds use a local `~/.ib/key`; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles. Do not commit `~/.ib/config`, `~/.ib/key`, or cache data.
+Profiles store the primary server, auto-detected WAPI version, auto-detected GCM read endpoint when available, credentials, DNS view, and default zone. Config validates server reachability before asking for credentials, then validates the username and password before WAPI setup. Trusted HTTPS certificates are verified; untrusted HTTPS certificates show certificate details and require confirmation before `verify_ssl = false` is saved. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Unix builds use a key file; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles.
+
+By default, profiles live under `~/.ib/`. On Linux, `ib config new --global-config [PROFILE]` writes a shared profile under `/etc/ib/` and asks which Linux group should have access. Users in that group can read `/etc/ib/config` and `/etc/ib/key`, and can read/write the shared `/etc/ib/cache.sqlite3`. Normal commands load local config first and fall back to global config when no matching local profile exists. Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, or cache data.
 
 ## DNS 
 
@@ -135,7 +138,7 @@ ib dns --view "DNS Zone View" search app
 
 | Module | Purpose | Start here |
 | --- | --- | --- |
-| `config` | Manage profiles, encrypted credentials, completion, and local cache. | `ib config new --default` |
+| `config` | Manage profiles, encrypted credentials, completion, and cache. | `ib config new --default` |
 | `dns` | Manage Infoblox DNS views, zones, records, searches, and context overrides. | `ib dns list` |
 | `net` | Manage IPAM network views, IPv4 networks and containers, addresses, and next-IP lookups. | `ib net list` |
 
@@ -143,7 +146,7 @@ ib dns --view "DNS Zone View" search app
 
 `cmd/ib/main.go` starts the Cobra CLI and hands command behavior to `internal/ibcli`. Profile loading decrypts the stored password, resolves the current DNS view/zone, and builds a WAPI client. GET requests can use a configured GCM read endpoint, while create, update, and delete requests always use the primary server.
 
-DNS listing/search and IPAM read workflows prefer local SQLite cache rows. Freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` are returned immediately while one detached refresh process updates the cache. DNS records revalidate with the zone serial before refreshing `/allrecords`; IPAM cache refreshes skip serial checks and re-download the relevant WAPI object.
+DNS listing/search and IPAM read workflows prefer SQLite cache rows from the selected local or global config scope. Freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` are returned immediately while one detached refresh process updates the cache. DNS records revalidate with the zone serial before refreshing `/allrecords`; IPAM cache refreshes skip serial checks and re-download the relevant WAPI object.
 
 For source builds, development checks, and packaging notes, see
 [Build From Source](docs/build-from-source.md). For cache diagrams and worker
@@ -156,14 +159,14 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | Command | Description |
 | --- | --- |
 | `ib config` | Show profile overview and short usage. |
-| `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust, credentials, and primary access, auto-detects WAPI version and a usable GCM read endpoint, and selects single DNS view/zone choices automatically. |
+| `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust, credentials, and primary access, auto-detects WAPI version and a usable GCM read endpoint, and selects single DNS view/zone choices automatically. Add `--global-config` on Linux to create the profile under `/etc/ib/`. |
 | `ib config edit [PROFILE]` | Edit an existing profile; server reachability/TLS trust is rechecked, leaving the password blank keeps the current encrypted password, and WAPI version detection updates the prompt default when available. |
 | `ib config list` | List configured profiles and their default/read endpoint context. |
 | `ib config use PROFILE` | Set the default profile. |
-| `ib config delete PROFILE` | Delete a non-default profile and clear its local cache rows. |
+| `ib config delete PROFILE` | Delete a non-default local profile and clear its cache rows. |
 | `ib config completion [bash\|zsh\|fish\|windows]` | Generate or install dynamic shell completion. |
-| `ib config cache status` | Show local SQLite cache entries with table statistics, or structured statistics with `-o json`. |
-| `ib config cache clear` | Clear local SQLite cache entries. |
+| `ib config cache status` | Show SQLite cache entries with table statistics, or structured statistics with `-o json`. |
+| `ib config cache clear` | Clear SQLite cache entries for the selected local/global config scope. |
 
 ### DNS
 
@@ -220,7 +223,7 @@ ib dns delete a app
 
 `ib dns zone list` supports the same output control pattern for zones. `--type` filters zone formats `FORWARD`, `IPV4`, or `IPV6`; `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment`; and `--columns` selects from the same zone fields. Use `--view` to list zones from another DNS view; `--zone` and `-z` are not accepted by this command.
 
-`ib net list` and `ib net search` are read-only IPAM workflows. Without `--network-view`, they build one merged dataset from unscoped WAPI `network` and `networkcontainer` results plus both object types for each discovered IPAM network view, then de-duplicate by type, CIDR, and network view so every network and container can be displayed. Add `--network-view` to limit the request to one view. Search text matches type, CIDR, network view, and comment. A CIDR-field match also includes related parent and child networks or containers in the same network view, but list/search only display network or container objects returned by Infoblox or the local cache; covered child CIDRs are not synthesized. Existing IPAM cache rows are returned immediately even after normal SWR expiry, and table output prints a note when a background refresh is queued; use `--refresh` when the command must wait for fresh WAPI data. Default output prints `network`, `type`, and `comment`, with the network first and the type second. Table output color-codes the `network` CIDR by prefix size and the `type` column so `NETWORK` and `CONTAINER` rows are visually distinct. Add `-s` or `--sort` to sort by `network`, `type`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `network`, `type`, `network_view`, and `comment`.
+`ib net list` and `ib net search` are read-only IPAM workflows. Without `--network-view`, they build one merged dataset from unscoped WAPI `network` and `networkcontainer` results plus both object types for each discovered IPAM network view, then de-duplicate by type, CIDR, and network view so every network and container can be displayed. Add `--network-view` to limit the request to one view. Search text matches type, CIDR, network view, and comment. A CIDR-field match also includes related parent and child networks or containers in the same network view, but list/search only display network or container objects returned by Infoblox or the selected cache; covered child CIDRs are not synthesized. Existing IPAM cache rows are returned immediately even after normal SWR expiry, and table output prints a note when a background refresh is queued; use `--refresh` when the command must wait for fresh WAPI data. Default output prints `network`, `type`, and `comment`, with the network first and the type second. Table output color-codes the `network` CIDR by prefix size and the `type` column so `NETWORK` and `CONTAINER` rows are visually distinct. Add `-s` or `--sort` to sort by `network`, `type`, `network_view`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `network`, `type`, `network_view`, and `comment`.
 
 `ib net show`, `ib net next-ip`, and the compatibility `ib dns next-ip` path resolve both networks and containers; when the same CIDR exists as both, the container is preferred. `ib net next-ip` can use cached rows for the object lookup, while `ib dns next-ip` performs a live read-only object lookup. Both send the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
 
@@ -260,7 +263,7 @@ answering the WAPI request instead of Infoblox JSON.
 
 ## Cache
 
-Zone, record, and IPAM caches are stored in `~/.ib/cache.sqlite3`.
+Zone, record, and IPAM caches are stored in `~/.ib/cache.sqlite3` for local profiles or `/etc/ib/cache.sqlite3` for Linux global profiles.
 
 Record and IPAM cache freshness uses `cached_at + cache_ttl`. Expired records and IPAM rows inside `records_cache_swr_ttl` are returned immediately while a single background refresh process updates the cache. `ib net list` and `ib net search` go further: when an IPAM network-view, network, or container cache row exists, they return it even after SWR expiry and queue a background refresh; add `--refresh` to wait for fresh WAPI data instead. DNS records revalidate the zone serial before refreshing `/allrecords`; IPAM rows skip serial checks and refresh the relevant `networkview`, `network`, `networkcontainer`, or `ipv4address` WAPI data.
 
@@ -270,7 +273,7 @@ When DNS record cache is missing or already outside the stale window, list/searc
 
 `ib net next-ip` can use cached network or container rows to find the target `_ref`, but the `next_available_ip` function call is always sent live to the primary server so returned addresses are current.
 
-Shell completion prefetches cache freshness in the background by default. With `completion_cache_prefetch = true`, most DNS completion checks the current DNS view and zone, and network CIDR completion checks the selected IPAM network view, then starts lease-protected zone-list, current-zone record, network-list, or container-list refresh helpers when cache rows are missing or stale. `ib dns create <tab><tab>` offers supported record types and filters typed prefixes such as `p` to `ptr`; `ib dns delete ptr <tab><tab>` completes PTR owner IPs from cached reverse-zone records instead of forward-zone names. `ib dns next-ip`, `ib net next-ip`, and `ib net show` complete both network and container CIDRs from local cache when available, including stale rows. When the typed value matches a parent CIDR or CIDR prefix, completion also offers child network/container CIDRs in the same network view; if only a larger parent such as `/23` is cached, completion derives direct `/24` child candidates for selection. Completion does not perform foreground Infoblox refresh work. Set `completion_cache_prefetch = false` in `[meta]` to make completion read local cache only and skip background refresh starts.
+Shell completion prefetches cache freshness in the background by default. With `completion_cache_prefetch = true`, most DNS completion checks the current DNS view and zone, and network CIDR completion checks the selected IPAM network view, then starts lease-protected zone-list, current-zone record, network-list, or container-list refresh helpers when cache rows are missing or stale. `ib dns create <tab><tab>` offers supported record types and filters typed prefixes such as `p` to `ptr`; `ib dns delete ptr <tab><tab>` completes PTR owner IPs from cached reverse-zone records instead of forward-zone names. `ib dns next-ip`, `ib net next-ip`, and `ib net show` complete both network and container CIDRs from the selected cache when available, including stale rows. When the typed value matches a parent CIDR or CIDR prefix, completion also offers child network/container CIDRs in the same network view; if only a larger parent such as `/23` is cached, completion derives direct `/24` child candidates for selection. Completion does not perform foreground Infoblox refresh work. Set `completion_cache_prefetch = false` in `[meta]` to make completion read the selected cache only and skip background refresh starts.
 
 `ib config cache status` keeps the detailed cache row table and adds a colored
 summary footer for table output: cache entries, cached records, fresh entries,
@@ -300,7 +303,7 @@ PowerShell:
 $env:IB_SEARCH_DEBUG = "1"; ib dns search app --global
 ```
 
-Deleting a profile also clears local cache rows for that profile.
+Deleting a local profile also clears cache rows for that profile.
 
 ## Completion
 

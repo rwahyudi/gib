@@ -407,6 +407,7 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 				"auto GCM",
 				"connection test must pass before saving",
 				"failed connection test shows a retry prompt",
+				"--global-config writes Linux shared config",
 				"ib config new prod --default",
 			},
 		},
@@ -439,7 +440,7 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 			args: []string{"config", "delete", "--help"},
 			want: []string{
 				"Delete Profile",
-				"clears local cache entries for the deleted profile",
+				"clears cache entries for the deleted local profile",
 				"the current default profile cannot be deleted",
 				"ib config use OTHER_PROFILE",
 			},

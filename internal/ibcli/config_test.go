@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -19,20 +21,77 @@ import (
 func testApp(t *testing.T) *App {
 	t.Helper()
 	dir := t.TempDir()
+	globalDir := filepath.Join(dir, "global")
 	app := &App{
-		ConfigDir:     dir,
-		ConfigFile:    filepath.Join(dir, "config"),
-		ConfigKeyFile: filepath.Join(dir, "key"),
-		Output:        tableOutput,
-		Stdout:        os.Stdout,
-		Stderr:        os.Stderr,
-		Stdin:         strings.NewReader(""),
+		ConfigDir:           dir,
+		ConfigFile:          filepath.Join(dir, "config"),
+		ConfigKeyFile:       filepath.Join(dir, "key"),
+		LocalConfigDir:      dir,
+		LocalConfigFile:     filepath.Join(dir, "config"),
+		LocalConfigKeyFile:  filepath.Join(dir, "key"),
+		GlobalConfigDir:     globalDir,
+		GlobalConfigFile:    filepath.Join(globalDir, "config"),
+		GlobalConfigKeyFile: filepath.Join(globalDir, "key"),
+		Output:              tableOutput,
+		Stdout:              os.Stdout,
+		Stderr:              os.Stderr,
+		Stdin:               strings.NewReader(""),
 	}
 	app.backgroundRecordRevalidator = func(Profile, string) error { return nil }
 	app.backgroundZoneRefresher = func(Profile) error { return nil }
 	app.backgroundNetRefresher = func(Profile, string, string, string) error { return nil }
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 	return app
+}
+
+func writePlainTestConfig(t *testing.T, path string, defaultProfile string, profiles map[string]Profile, globalGroup string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	var builder strings.Builder
+	builder.WriteString("[meta]\n")
+	builder.WriteString("default_profile = " + defaultProfile + "\n")
+	builder.WriteString("cache_ttl = 300\n")
+	builder.WriteString("dns_search_worker_limit = 16\n")
+	builder.WriteString("records_cache_swr_ttl = 259200\n")
+	builder.WriteString("max_background_worker_wait = 3\n")
+	builder.WriteString("completion_cache_prefetch = true\n")
+	if globalGroup != "" {
+		builder.WriteString("global_group = " + globalGroup + "\n")
+	}
+	builder.WriteString("\n")
+	for name, profile := range profiles {
+		profile = profile.complete()
+		builder.WriteString("[profile:" + name + "]\n")
+		builder.WriteString("server = " + profile.Server + "\n")
+		builder.WriteString("read_server = " + profile.ReadServer + "\n")
+		builder.WriteString("username = " + profile.Username + "\n")
+		builder.WriteString("password = " + profile.Password + "\n")
+		builder.WriteString("wapi_version = " + profile.WAPIVersion + "\n")
+		builder.WriteString("dns_view = " + profile.DNSView + "\n")
+		builder.WriteString("default_zone = " + profile.DefaultZone + "\n")
+		builder.WriteString("verify_ssl = " + fmt.Sprint(profile.VerifySSL) + "\n")
+		builder.WriteString("timeout = " + fmt.Sprint(profile.Timeout) + "\n\n")
+	}
+	if err := os.WriteFile(path, []byte(builder.String()), 0o600); err != nil {
+		t.Fatalf("write config %s: %v", path, err)
+	}
+}
+
+func assertFileMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	got := info.Mode().Perm()
+	if want&os.ModeSetgid != 0 {
+		got |= info.Mode() & os.ModeSetgid
+	}
+	if got != want {
+		t.Fatalf("mode %s = %#o, want %#o", path, got, want)
+	}
 }
 
 func TestExecutableIsGoTestBinary(t *testing.T) {
@@ -113,6 +172,173 @@ func TestProfileCompleteUsesDefaultTimeout(t *testing.T) {
 	if profile.Timeout != 15 {
 		t.Fatalf("timeout = %d, want 15", profile.Timeout)
 	}
+}
+
+func TestLoadConfigFallsBackToGlobalConfig(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, defaultProfileName, map[string]Profile{
+		defaultProfileName: {
+			Name:        defaultProfileName,
+			Server:      "https://global.example",
+			Username:    "global-user",
+			Password:    "global-secret",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			DefaultZone: "global.example",
+			VerifySSL:   true,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}, "ibusers")
+
+	profile, err := app.loadConfig(true)
+	if err != nil {
+		t.Fatalf("load global config: %v", err)
+	}
+	if profile.Server != "https://global.example" || profile.Username != "global-user" {
+		t.Fatalf("profile = %#v", profile)
+	}
+	if app.ConfigFile != app.GlobalConfigFile {
+		t.Fatalf("active config file = %q, want %q", app.ConfigFile, app.GlobalConfigFile)
+	}
+	if got := app.cachePath(); got != filepath.Join(app.GlobalConfigDir, cacheFileName) {
+		t.Fatalf("cache path = %q", got)
+	}
+}
+
+func TestLoadConfigPrefersLocalDefaultOverGlobal(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.LocalConfigFile, defaultProfileName, map[string]Profile{
+		defaultProfileName: {
+			Name:        defaultProfileName,
+			Server:      "https://local.example",
+			Username:    "local-user",
+			Password:    "local-secret",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			DefaultZone: "local.example",
+			VerifySSL:   true,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}, "")
+	writePlainTestConfig(t, app.GlobalConfigFile, defaultProfileName, map[string]Profile{
+		defaultProfileName: {
+			Name:        defaultProfileName,
+			Server:      "https://global.example",
+			Username:    "global-user",
+			Password:    "global-secret",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			DefaultZone: "global.example",
+			VerifySSL:   true,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}, "ibusers")
+
+	profile, err := app.loadConfig(true)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if profile.Server != "https://local.example" {
+		t.Fatalf("server = %q, want local", profile.Server)
+	}
+	if app.ConfigFile != app.LocalConfigFile {
+		t.Fatalf("active config file = %q, want %q", app.ConfigFile, app.LocalConfigFile)
+	}
+}
+
+func TestLoadConfigExplicitProfileFallsBackToGlobal(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.LocalConfigFile, "local", map[string]Profile{
+		"local": {
+			Name:        "local",
+			Server:      "https://local.example",
+			Username:    "local-user",
+			Password:    "local-secret",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			DefaultZone: "local.example",
+			VerifySSL:   true,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}, "")
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": {
+			Name:        "shared",
+			Server:      "https://global.example",
+			Username:    "global-user",
+			Password:    "global-secret",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			DefaultZone: "global.example",
+			VerifySSL:   true,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}, "ibusers")
+
+	profile, err := app.loadConfigProfile("shared", true)
+	if err != nil {
+		t.Fatalf("load shared profile: %v", err)
+	}
+	if profile.Name != "shared" || app.ConfigFile != app.GlobalConfigFile {
+		t.Fatalf("profile = %#v, active config = %q", profile, app.ConfigFile)
+	}
+}
+
+func TestWriteGlobalConfigPersistsGroupAndPermissions(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux file mode semantics only")
+	}
+	app := testApp(t)
+	app.useConfigLocation(app.globalConfigLocation())
+	oldLookup := lookupGlobalConfigGroupFunc
+	oldChown := chownPathGroupFunc
+	chowned := map[string]bool{}
+	lookupGlobalConfigGroupFunc = func(groupName string) (globalConfigGroupInfo, error) {
+		if groupName != "ibusers" {
+			return globalConfigGroupInfo{}, fmt.Errorf("unexpected group %q", groupName)
+		}
+		return globalConfigGroupInfo{Name: "ibusers", GID: os.Getgid()}, nil
+	}
+	chownPathGroupFunc = func(path string, group globalConfigGroupInfo) error {
+		chowned[path] = true
+		return nil
+	}
+	t.Cleanup(func() {
+		lookupGlobalConfigGroupFunc = oldLookup
+		chownPathGroupFunc = oldChown
+	})
+	profiles := map[string]Profile{
+		defaultProfileName: {
+			Name:        defaultProfileName,
+			Server:      "https://global.example",
+			Username:    "admin",
+			Password:    "secret-password",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			DefaultZone: "example.com",
+			VerifySSL:   true,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}
+
+	if err := app.writeConfigProfilesWithSettings(defaultProfileName, profiles, ConfigSettings{GlobalGroup: "ibusers"}); err != nil {
+		t.Fatalf("write global profiles: %v", err)
+	}
+	raw, err := os.ReadFile(app.GlobalConfigFile)
+	if err != nil {
+		t.Fatalf("read global config: %v", err)
+	}
+	if !strings.Contains(string(raw), "global_group = ibusers") {
+		t.Fatalf("global config missing group:\n%s", raw)
+	}
+	for _, path := range []string{app.GlobalConfigDir, app.GlobalConfigFile, app.GlobalConfigKeyFile} {
+		if !chowned[path] {
+			t.Fatalf("path %q was not group-owned; chowned=%#v", path, chowned)
+		}
+	}
+	assertFileMode(t, app.GlobalConfigDir, 0o770)
+	assertFileMode(t, app.GlobalConfigFile, 0o640)
+	assertFileMode(t, app.GlobalConfigKeyFile, 0o640)
 }
 
 func TestWriteConfigProfilesEncryptsPasswordAndReadsItBack(t *testing.T) {
@@ -424,8 +650,9 @@ func TestConfigOverviewWithProfilesShowsActionPanel(t *testing.T) {
 	for _, want := range []string{
 		"Infoblox Profiles (1)",
 		"Config Usage",
-		"Manage saved profiles, shell completion, and local cache data.",
+		"Manage saved profiles, shell completion, and cache data.",
 		"ib config new [PROFILE]",
+		"ib config new --global-config [PROFILE]",
 		"ib config edit [PROFILE]",
 		"ib config use PROFILE",
 		"ib config list",
