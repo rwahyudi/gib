@@ -159,8 +159,8 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 
 | Command | Description |
 | --- | --- |
-| `ib` | Print the current profile, DNS view, and DNS zone context. |
-| `ib -v`, `ib --version` | Print the version number and build date. |
+| `ib` | Print top-level usage and end with the current profile, DNS view, and DNS zone context. |
+| `ib -v`, `ib --version` | Print the version number and AEST build date. |
 
 ### Config
 

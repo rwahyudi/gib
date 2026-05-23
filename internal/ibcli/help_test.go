@@ -41,7 +41,7 @@ func TestRootHelpUsesModules(t *testing.T) {
 	}
 }
 
-func TestRootWithoutArgsPrintsCurrentContext(t *testing.T) {
+func TestRootWithoutArgsPrintsUsageThenCurrentContext(t *testing.T) {
 	app := testApp(t)
 	writePlainTestConfig(t, app.ConfigFile, "demo", map[string]Profile{
 		"demo": plainTestProfile("demo", "https://infoblox.example"),
@@ -55,13 +55,18 @@ func TestRootWithoutArgsPrintsCurrentContext(t *testing.T) {
 		t.Fatalf("root command: %v", err)
 	}
 	output := stdout.String()
-	for _, want := range []string{"Current Context:", "Profile:", "demo", "View:", "default", "Zone:", "demo.example"} {
+	for _, want := range []string{"Usage", "ib [flags]", "Modules", "config  Manage Infoblox configuration", "Current Context:", "Profile:", "demo", "View:", "default", "Zone:", "demo.example"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("root output missing %q:\n%s", want, output)
 		}
 	}
-	if strings.Contains(output, "Usage:") {
-		t.Fatalf("root output should not print help usage:\n%s", output)
+	contextIndex := strings.LastIndex(output, "Current Context:")
+	usageIndex := strings.Index(output, "Usage")
+	if contextIndex < 0 || usageIndex < 0 || contextIndex < usageIndex {
+		t.Fatalf("root output should print current context after usage:\n%s", output)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(output), "Current Context: Profile: demo | View: default | Zone: demo.example (configured default)") {
+		t.Fatalf("root output should end with current context:\n%s", output)
 	}
 }
 
@@ -83,11 +88,30 @@ func TestRootVersionFlagPrintsVersionAndBuildDate(t *testing.T) {
 		t.Fatalf("version flag: %v", err)
 	}
 	output := stdout.String()
-	if want := "ib 1.2.3 (built 2026-05-23T10:20:30Z)"; !strings.Contains(output, want) {
+	if want := "ib 1.2.3 (built 2026-05-23T20:20:30+10:00 AEST)"; !strings.Contains(output, want) {
 		t.Fatalf("version output missing %q:\n%s", want, output)
 	}
 	if strings.Contains(output, "Current Context:") {
 		t.Fatalf("version output should not print current context:\n%s", output)
+	}
+}
+
+func TestFormatBuildDateAESTHandlesCommonReleaseFormats(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "rfc3339 utc", raw: "2026-05-23T10:20:30Z", want: "2026-05-23T20:20:30+10:00 AEST"},
+		{name: "rfc3339 offset", raw: "2026-05-23T10:20:30+08:00", want: "2026-05-23T12:20:30+10:00 AEST"},
+		{name: "unknown format", raw: "build-time", want: "build-time"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := formatBuildDateAEST(test.raw); got != test.want {
+				t.Fatalf("formatBuildDateAEST(%q) = %q, want %q", test.raw, got, test.want)
+			}
+		})
 	}
 }
 

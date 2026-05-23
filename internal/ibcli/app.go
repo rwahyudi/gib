@@ -68,6 +68,10 @@ var (
 	BuildDate = ""
 )
 
+// Version output intentionally uses fixed AEST (UTC+10), not local daylight
+// saving time.
+var aestLocation = time.FixedZone("AEST", 10*60*60)
+
 type App struct {
 	ConfigDir           string
 	ConfigFile          string
@@ -179,6 +183,7 @@ func (a *App) RootCommand() *cobra.Command {
 				a.PrintVersion()
 				return nil
 			}
+			fmt.Fprint(cmd.OutOrStdout(), a.renderHelp(cmd))
 			a.PrintContext()
 			return nil
 		},
@@ -209,7 +214,7 @@ Common usage:
 		"version",
 		"v",
 		false,
-		"print version and build date",
+		"print version and AEST build date",
 	)
 	root.PersistentFlags().StringVarP(
 		&a.Output,
@@ -447,14 +452,35 @@ func VersionString() string {
 func effectiveBuildDate() string {
 	buildDate := strings.TrimSpace(BuildDate)
 	if buildDate != "" && buildDate != "unknown" {
-		return buildDate
+		return formatBuildDateAEST(buildDate)
 	}
 	if executable, err := os.Executable(); err == nil {
 		if info, err := os.Stat(executable); err == nil {
-			return info.ModTime().UTC().Format(time.RFC3339)
+			return formatBuildTimeAEST(info.ModTime())
 		}
 	}
 	return "unknown"
+}
+
+func formatBuildDateAEST(buildDate string) string {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05-0700",
+		"2006-01-02 15:04:05 MST",
+		"2006-01-02 15:04:05 -0700",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	} {
+		if parsed, err := time.Parse(layout, buildDate); err == nil {
+			return formatBuildTimeAEST(parsed)
+		}
+	}
+	return buildDate
+}
+
+func formatBuildTimeAEST(buildTime time.Time) string {
+	return buildTime.In(aestLocation).Format("2006-01-02T15:04:05-07:00 MST")
 }
 
 func renderContextPair(label, value string, valueStyle lipgloss.Style) string {
