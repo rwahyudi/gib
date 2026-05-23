@@ -137,7 +137,7 @@ func TestCacheStatusStatisticsFooterAndMachineReadableOutput(t *testing.T) {
 		t.Fatalf("cache status table: %v", err)
 	}
 	tableOutput := stdout.String()
-	for _, want := range []string{"cache status", "Cache entries 4", "Cached records 6", "Fresh 2", "SWR stale 1", "Expired 1", "Refreshing 1"} {
+	for _, want := range []string{"Cache Status", "Cache entries 4", "Cached records 6", "Fresh 2", "SWR stale 1", "Expired 1", "Refreshing 1"} {
 		if !strings.Contains(tableOutput, want) {
 			t.Fatalf("table output missing %q:\n%s", want, tableOutput)
 		}

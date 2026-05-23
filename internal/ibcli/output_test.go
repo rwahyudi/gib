@@ -29,6 +29,12 @@ func TestRenderTableRightAlignsIntegerColumns(t *testing.T) {
 		{"short", "1"},
 		{"longer", "300"},
 	})
+	if !strings.Contains(output, "name") || !strings.Contains(output, "ttl") {
+		t.Fatalf("table headers are not lowercase:\n%s", output)
+	}
+	if strings.Contains(output, "Name") || strings.Contains(output, "Ttl") {
+		t.Fatalf("table headers still use title case:\n%s", output)
+	}
 
 	shortLine := tableLineContaining(t, output, "short")
 	longerLine := tableLineContaining(t, output, "longer")
@@ -54,6 +60,19 @@ func TestRenderTableRightAlignsNumericFieldValues(t *testing.T) {
 
 	if serialEnd != refreshEnd {
 		t.Fatalf("numeric detail values are not right aligned:\n%s", output)
+	}
+}
+
+func TestRenderTablePreservesTitleCase(t *testing.T) {
+	output := renderTable("DNS Records", []string{"Type", "Name"}, [][]string{{"A", "app.example.com"}})
+	if !strings.Contains(output, "DNS Records") {
+		t.Fatalf("table title was not preserved:\n%s", output)
+	}
+	if strings.Contains(output, "dns records") {
+		t.Fatalf("table title was lowercased:\n%s", output)
+	}
+	if !strings.Contains(output, "type") || !strings.Contains(output, "name") {
+		t.Fatalf("table headers were not lowercased:\n%s", output)
 	}
 }
 

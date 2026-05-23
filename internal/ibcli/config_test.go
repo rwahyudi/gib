@@ -495,7 +495,7 @@ func TestConfigListShowsMetadataTable(t *testing.T) {
 	}
 	output := stdout.String()
 	for _, want := range []string{
-		"config metadata",
+		"Config Metadata",
 		"metadata_source",
 		"local",
 		"config_file",
@@ -900,7 +900,7 @@ func TestConfigOverviewWithProfilesShowsActionPanel(t *testing.T) {
 	}
 	output := stdout.String()
 	for _, want := range []string{
-		"infoblox profiles (1)",
+		"Infoblox Profiles (1)",
 		"Config Usage",
 		"Manage saved profiles, shell completion, and cache data.",
 		"ib config new [PROFILE]",

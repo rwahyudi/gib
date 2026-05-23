@@ -1004,7 +1004,7 @@ func TestDNSSearchNoRecordsSkipsTableOutput(t *testing.T) {
 	if err := app.Execute([]string{"dns", "search", "missing"}); err != nil {
 		t.Fatalf("dns search: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
-	if strings.Contains(stdout.String(), "dns records") {
+	if strings.Contains(stdout.String(), "DNS Records") {
 		t.Fatalf("empty search rendered record table:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "Current Context:") {
@@ -1132,7 +1132,7 @@ func TestDNSNextIPTablePrintsContextAndRows(t *testing.T) {
 		t.Fatalf("dns next-ip table: %v\nstdout:\n%s", err, stdout.String())
 	}
 	output := stdout.String()
-	for _, want := range []string{"Current Context:", "next available ips", "Network", "Network View", "Ip", "192.0.2.0/24", "default", "192.0.2.20"} {
+	for _, want := range []string{"Current Context:", "Next Available IPs", "network", "network view", "ip", "192.0.2.0/24", "default", "192.0.2.20"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("table output missing %q:\n%s", want, output)
 		}

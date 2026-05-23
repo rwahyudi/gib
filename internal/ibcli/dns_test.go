@@ -749,12 +749,12 @@ func TestEmitRecordsWithSelectedColumns(t *testing.T) {
 			t.Fatalf("emit records: %v", err)
 		}
 		output := stdout.String()
-		for _, want := range []string{"Name", "Value", "app1.example.com", "192.0.2.1"} {
+		for _, want := range []string{"name", "value", "app1.example.com", "192.0.2.1"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("table output missing %q:\n%s", want, output)
 			}
 		}
-		for _, unwanted := range []string{"Type", "Zone", "Comment"} {
+		for _, unwanted := range []string{"type", "zone", "comment"} {
 			if strings.Contains(output, unwanted) {
 				t.Fatalf("table output included unselected %q:\n%s", unwanted, output)
 			}
@@ -769,12 +769,12 @@ func TestEmitRecordsTablePrintsTotalOnlyAboveFive(t *testing.T) {
 		t.Fatalf("emit records: %v", err)
 	}
 	output := stdout.String()
-	for _, want := range []string{"dns records", "Total records: 6"} {
+	for _, want := range []string{"DNS Records", "Total records: 6"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("table output missing %q:\n%s", want, output)
 		}
 	}
-	if strings.Contains(output, "dns records (6)") {
+	if strings.Contains(output, "DNS Records (6)") {
 		t.Fatalf("table title still contains record count:\n%s", output)
 	}
 
@@ -786,7 +786,7 @@ func TestEmitRecordsTablePrintsTotalOnlyAboveFive(t *testing.T) {
 	if strings.Contains(output, "Total records:") {
 		t.Fatalf("table output contains total for five records:\n%s", output)
 	}
-	if strings.Contains(output, "dns records (5)") {
+	if strings.Contains(output, "DNS Records (5)") {
 		t.Fatalf("table title still contains record count:\n%s", output)
 	}
 }
@@ -822,7 +822,7 @@ func TestEmitRecordsTablePrintsContextBeforeTotal(t *testing.T) {
 			break
 		}
 	}
-	tableIndex := strings.Index(output, "dns records")
+	tableIndex := strings.Index(output, "DNS Records")
 	contextIndex := strings.Index(output, "Current Context:")
 	totalIndex := strings.Index(output, "Total records: 6")
 	if tableIndex < 0 || contextIndex < 0 || totalIndex < 0 {
@@ -922,12 +922,12 @@ func TestEmitZonesTablePrintsTotalOnlyAboveFive(t *testing.T) {
 		t.Fatalf("emit zones: %v", err)
 	}
 	output := stdout.String()
-	for _, want := range []string{"dns zones", "Total zones: 6"} {
+	for _, want := range []string{"DNS Zones", "Total zones: 6"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("table output missing %q:\n%s", want, output)
 		}
 	}
-	if strings.Contains(output, "dns zones (6)") {
+	if strings.Contains(output, "DNS Zones (6)") {
 		t.Fatalf("table title still contains zone count:\n%s", output)
 	}
 
@@ -939,7 +939,7 @@ func TestEmitZonesTablePrintsTotalOnlyAboveFive(t *testing.T) {
 	if strings.Contains(output, "Total zones:") {
 		t.Fatalf("table output contains total for five zones:\n%s", output)
 	}
-	if strings.Contains(output, "dns zones (5)") {
+	if strings.Contains(output, "DNS Zones (5)") {
 		t.Fatalf("table title still contains zone count:\n%s", output)
 	}
 }
@@ -954,7 +954,7 @@ func TestEmitZonesJSONDoesNotPrintTableTotal(t *testing.T) {
 	if strings.Contains(output, "Total zones:") {
 		t.Fatalf("json output contains table total footer: %s", output)
 	}
-	if strings.Contains(output, "dns zones") {
+	if strings.Contains(output, "DNS Zones") {
 		t.Fatalf("json output contains table title: %s", output)
 	}
 }
@@ -1057,9 +1057,9 @@ func TestRunZoneInfoTablePrintsFieldsAsRows(t *testing.T) {
 	for _, want := range []string{
 		"Current Context:",
 		"View: default",
-		"dns zone: example.com",
-		"Field",
-		"Value",
+		"DNS Zone: example.com",
+		"field",
+		"value",
 		"Zone",
 		"example.com",
 		"Serial Number",

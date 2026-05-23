@@ -24,6 +24,7 @@ func renderTable(title string, headers []string, rows [][]string) string {
 }
 
 func renderTableWithRowStyles(title string, headers []string, rows [][]string, rowStyles map[int]lipgloss.Style) string {
+	headers = lowerTableHeaders(headers)
 	numericColumns := numericTableColumns(headers)
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
@@ -55,7 +56,15 @@ func renderTableWithRowStyles(title string, headers []string, rows [][]string, r
 	if title == "" {
 		return t.String()
 	}
-	return tableTitleStyle.Render(strings.ToLower(title)) + "\n" + t.String()
+	return tableTitleStyle.Render(title) + "\n" + t.String()
+}
+
+func lowerTableHeaders(headers []string) []string {
+	lowered := make([]string, 0, len(headers))
+	for _, header := range headers {
+		lowered = append(lowered, strings.ToLower(header))
+	}
+	return lowered
 }
 
 func numericTableColumns(headers []string) map[int]bool {
