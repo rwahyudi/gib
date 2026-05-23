@@ -1016,13 +1016,28 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	if username == "" || password == "" {
 		return cliError("username and password are required")
 	}
-	a.printConfigureStep(step, "WAPI and TLS", "Confirm the WAPI version and certificate verification before testing the connection.")
+	a.printConfigureStep(step, "WAPI and TLS", "Confirm certificate verification and the WAPI version before testing the connection.")
 	step++
-	wapiVersion, err := a.gum.Input("WAPI version", firstNonEmpty(current.WAPIVersion, defaultWAPIVersion), false)
+	verifySSL, err := a.gum.Confirm("Verify SSL certificates", current.VerifySSL)
 	if err != nil {
 		return err
 	}
-	verifySSL, err := a.gum.Confirm("Verify SSL certificates", current.VerifySSL)
+	wapiDefault := firstNonEmpty(current.WAPIVersion, defaultWAPIVersion)
+	versionProbe := Profile{
+		Name:      selected,
+		Server:    server,
+		Username:  username,
+		Password:  password,
+		VerifySSL: verifySSL,
+		Timeout:   firstNonZero(current.Timeout, defaultTimeoutSeconds),
+	}.complete()
+	if detected, err := a.detectWAPIVersion(versionProbe); err == nil {
+		wapiDefault = detected
+		a.printConfigureInfo("INFO: detected WAPI version " + detected + ".")
+	} else {
+		a.printConfigureInfo("INFO: could not auto-detect WAPI version; using " + wapiDefault + " as the default: " + err.Error())
+	}
+	wapiVersion, err := a.gum.Input("WAPI version", wapiDefault, false)
 	if err != nil {
 		return err
 	}
@@ -1171,6 +1186,115 @@ func (a *App) testConnection(profile Profile) error {
 		return &connectionTestError{err: err}
 	}
 	return nil
+}
+
+func (a *App) detectWAPIVersion(profile Profile) (string, error) {
+	// Schema discovery is available from old WAPI versions and returns the
+	// server's supported_versions list, so probe v1.0 before asking the user
+	// which final version to store.
+	probe := profile.complete()
+	probe.WAPIVersion = "v1.0"
+	client := a.newClient(probe)
+	response, err := client.Request(http.MethodGet, "", url.Values{"_schema": []string{"1"}}, nil)
+	if err != nil {
+		return "", err
+	}
+	if version, ok := highestWAPIVersionFromSchema(response); ok {
+		return version, nil
+	}
+	return "", cliError("schema response did not include supported WAPI versions")
+}
+
+func highestWAPIVersionFromSchema(response any) (string, bool) {
+	payload, ok := response.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	return highestWAPIVersion(versionStrings(payload["supported_versions"]))
+}
+
+func versionStrings(value any) []string {
+	switch typed := value.(type) {
+	case []any:
+		versions := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if version := strings.TrimSpace(fmt.Sprint(item)); version != "" && version != "<nil>" {
+				versions = append(versions, version)
+			}
+		}
+		return versions
+	case []string:
+		return typed
+	case string:
+		return strings.FieldsFunc(typed, func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\n' || r == '\t'
+		})
+	default:
+		return nil
+	}
+}
+
+func highestWAPIVersion(versions []string) (string, bool) {
+	var best string
+	var bestParts []int
+	for _, version := range versions {
+		normalized, parts, ok := parseWAPIVersion(version)
+		if !ok {
+			continue
+		}
+		if best == "" || compareWAPIVersionParts(parts, bestParts) > 0 {
+			best = normalized
+			bestParts = parts
+		}
+	}
+	return best, best != ""
+}
+
+func parseWAPIVersion(version string) (string, []int, bool) {
+	cleaned := strings.TrimSpace(version)
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	cleaned = strings.TrimPrefix(cleaned, "v")
+	cleaned = strings.TrimPrefix(cleaned, "V")
+	if cleaned == "" {
+		return "", nil, false
+	}
+	pieces := strings.Split(cleaned, ".")
+	parts := make([]int, 0, len(pieces))
+	for _, piece := range pieces {
+		if piece == "" {
+			return "", nil, false
+		}
+		part, err := strconv.Atoi(piece)
+		if err != nil || part < 0 {
+			return "", nil, false
+		}
+		parts = append(parts, part)
+	}
+	return "v" + cleaned, parts, true
+}
+
+func compareWAPIVersionParts(left, right []int) int {
+	maxLen := len(left)
+	if len(right) > maxLen {
+		maxLen = len(right)
+	}
+	for i := 0; i < maxLen; i++ {
+		leftPart := 0
+		if i < len(left) {
+			leftPart = left[i]
+		}
+		rightPart := 0
+		if i < len(right) {
+			rightPart = right[i]
+		}
+		if leftPart > rightPart {
+			return 1
+		}
+		if leftPart < rightPart {
+			return -1
+		}
+	}
+	return 0
 }
 
 func (a *App) promptReadServer(profile Profile, _ string) (string, bool) {

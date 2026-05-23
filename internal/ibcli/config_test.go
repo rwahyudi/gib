@@ -605,8 +605,8 @@ func TestConfigureNewProfileNamePromptStartsBlankAndDefaultsOnEnter(t *testing.T
 		server.URL,
 		"admin",
 		"secret",
-		"",
 		"n",
+		"",
 		"",
 		"",
 	}, "\n") + "\n")
@@ -648,6 +648,106 @@ func TestConfigureNewProfileNamePromptStartsBlankAndDefaultsOnEnter(t *testing.T
 	}
 	if _, ok := profiles[defaultProfileName]; !ok {
 		t.Fatalf("default profile was not created: %#v", profiles)
+	}
+}
+
+func TestConfigureNewDefaultsWAPIVersionFromSchema(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.URL.Path == "/wapi/v1.0/":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"supported_versions": []string{"1.0", "2.9", "2.12", "2.12.4"},
+			})
+		case strings.HasSuffix(r.URL.Path, "/grid"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "grid"}})
+		case strings.HasSuffix(r.URL.Path, "/member"),
+			strings.HasSuffix(r.URL.Path, "/view"),
+			strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		server.URL,
+		"admin",
+		"secret",
+		"n",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if got := profiles["demo"].WAPIVersion; got != "v2.12.4" {
+		t.Fatalf("WAPI version = %q, want v2.12.4", got)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "INFO: detected WAPI version v2.12.4.") {
+		t.Fatalf("configure output missing detected version message:\n%s", output)
+	}
+	joined := strings.Join(requests, ",")
+	for _, want := range []string{"GET /wapi/v1.0/", "GET /wapi/v2.12.4/grid"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("requests missing %q: %#v", want, requests)
+		}
+	}
+}
+
+func TestConfigureNewFallsBackWhenWAPIVersionDetectionFails(t *testing.T) {
+	server := newConfigSuccessServer(t)
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		server.URL,
+		"admin",
+		"secret",
+		"n",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if got := profiles["demo"].WAPIVersion; got != defaultWAPIVersion {
+		t.Fatalf("WAPI version = %q, want %q", got, defaultWAPIVersion)
+	}
+	if !strings.Contains(stdout.String(), "INFO: could not auto-detect WAPI version; using "+defaultWAPIVersion+" as the default") {
+		t.Fatalf("configure output missing fallback message:\n%s", stdout.String())
+	}
+}
+
+func TestHighestWAPIVersionComparesNumerically(t *testing.T) {
+	got, ok := highestWAPIVersion([]string{"2.9", "v2.12", "2.12.3", "invalid", "2.12.4"})
+	if !ok {
+		t.Fatal("highest WAPI version was not found")
+	}
+	if got != "v2.12.4" {
+		t.Fatalf("highest WAPI version = %q, want v2.12.4", got)
 	}
 }
 
@@ -694,8 +794,8 @@ func TestConfigureNewAutoSavesGCMReadServer(t *testing.T) {
 		primary.URL,
 		"admin",
 		"secret",
-		"",
 		"n",
+		"",
 		"",
 		"",
 	}, "\n") + "\n")
@@ -733,8 +833,8 @@ func TestConfigureAutoSelectsSingleDNSViewAndZone(t *testing.T) {
 		server.URL,
 		"admin",
 		"secret",
-		"",
 		"n",
+		"",
 	}, "\n") + "\n")
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 
@@ -797,8 +897,8 @@ func TestConfigureEditClearsOldReadServerWhenNoUsableGCM(t *testing.T) {
 		"",
 		"",
 		"",
-		"",
 		"n",
+		"",
 		"",
 		"",
 	}, "\n") + "\n")
@@ -828,8 +928,8 @@ func TestConfigNewCanRetryDetailsAfterValidationError(t *testing.T) {
 		server.URL,
 		"admin",
 		"secret",
-		"",
 		"n",
+		"",
 		"",
 		"",
 	}, "\n") + "\n")
@@ -871,14 +971,14 @@ func TestConfigureNewConnectionFailureShowsRetryPopup(t *testing.T) {
 		failServer.URL,
 		"admin",
 		"secret",
-		"",
 		"n",
+		"",
 		"y",
 		successServer.URL,
 		"admin",
 		"secret",
-		"",
 		"n",
+		"",
 		"",
 		"",
 	}, "\n") + "\n")
@@ -926,8 +1026,8 @@ func TestConfigureEditConnectionFailureShowsRetryPopup(t *testing.T) {
 		"",
 		"",
 		"",
-		"",
 		"n",
+		"",
 		"n",
 	}, "\n") + "\n")
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
@@ -961,8 +1061,8 @@ func TestConfigureViewAndZonePromptsAreIndentedAndSequenced(t *testing.T) {
 		server.URL,
 		"admin",
 		"secret",
-		"",
 		"n",
+		"",
 		"",
 		"",
 	}, "\n") + "\n")
