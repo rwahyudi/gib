@@ -58,6 +58,8 @@ completion_cache_prefetch = true
 
 `ib config new` and `ib config edit` validate the entered server before asking for credentials. Unreachable servers print a warning and return to the server prompt. Trusted HTTPS certificates continue with `verify_ssl = true`; untrusted HTTPS certificates print certificate subject, issuer, validity, and SHA256 fingerprint before asking whether to trust the certificate for the profile. Accepting saves `verify_ssl = false`.
 
+After username and password entry, `ib config new` and `ib config edit` validate credentials with a small WAPI `grid` read before WAPI version setup. Authentication and authorization failures are summarized and return to the credential prompts without printing raw server response bodies.
+
 `ib config new` and `ib config edit` Step 05 (`Read Endpoint`) automatically discovers Grid Master Candidates from the primary Grid Master. Candidates with Read-Only API disabled are reported with an indented green `INFO:` line and are not saved. Candidates with Read-Only API enabled must also pass a direct WAPI GET probe before being saved as `read_server`. If no candidate exists or no candidate passes the probe, `read_server` is left blank so both reads and writes use the primary server.
 
 When `read_server` is set, the WAPI client routes GET requests to the GCM read endpoint and keeps POST, PUT, and DELETE requests on the primary server.

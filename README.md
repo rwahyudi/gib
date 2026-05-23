@@ -99,7 +99,7 @@ ib config edit
 ib config list
 ```
 
-Profiles store the primary server, auto-detected WAPI version, auto-detected GCM read endpoint when available, credentials, DNS view, and default zone. Config validates server reachability before asking for credentials. Trusted HTTPS certificates are verified; untrusted HTTPS certificates show certificate details and require confirmation before `verify_ssl = false` is saved. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Unix builds use a local `~/.ib/key`; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles. Do not commit `~/.ib/config`, `~/.ib/key`, or cache data.
+Profiles store the primary server, auto-detected WAPI version, auto-detected GCM read endpoint when available, credentials, DNS view, and default zone. Config validates server reachability before asking for credentials, then validates the username and password before WAPI setup. Trusted HTTPS certificates are verified; untrusted HTTPS certificates show certificate details and require confirmation before `verify_ssl = false` is saved. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Unix builds use a local `~/.ib/key`; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles. Do not commit `~/.ib/config`, `~/.ib/key`, or cache data.
 
 ## DNS 
 
@@ -156,7 +156,7 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | Command | Description |
 | --- | --- |
 | `ib config` | Show profile overview and short usage. |
-| `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust and primary access, auto-detects WAPI version and a usable GCM read endpoint, and selects single DNS view/zone choices automatically. |
+| `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust, credentials, and primary access, auto-detects WAPI version and a usable GCM read endpoint, and selects single DNS view/zone choices automatically. |
 | `ib config edit [PROFILE]` | Edit an existing profile; server reachability/TLS trust is rechecked, leaving the password blank keeps the current encrypted password, and WAPI version detection updates the prompt default when available. |
 | `ib config list` | List configured profiles and their default/read endpoint context. |
 | `ib config use PROFILE` | Set the default profile. |

@@ -930,6 +930,122 @@ func TestConfigureNewPlainHTTPDisablesSSLVerification(t *testing.T) {
 	}
 }
 
+func TestConfigureNewRetriesBadCredentialsWithSummary(t *testing.T) {
+	server := newConfigCredentialServer(t, http.StatusUnauthorized)
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		server.URL,
+		"bad",
+		"wrong",
+		"admin",
+		"secret",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "WARNING: login failed: Infoblox rejected the username or password (HTTP 401).") {
+		t.Fatalf("configure output missing summarized login failure:\n%s", output)
+	}
+	if strings.Contains(output, "raw server credential failure") || strings.Contains(output, "abc123") {
+		t.Fatalf("configure output exposed raw server credential response:\n%s", output)
+	}
+	if !strings.Contains(output, "Username [bad]:") {
+		t.Fatalf("credentials were not re-prompted after login failure:\n%s", output)
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if profiles["demo"].Username != "admin" {
+		t.Fatalf("username = %q, want admin", profiles["demo"].Username)
+	}
+}
+
+func TestConfigureNewRetriesForbiddenCredentialsWithSummary(t *testing.T) {
+	server := newConfigCredentialServer(t, http.StatusForbidden)
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		server.URL,
+		"limited",
+		"secret",
+		"admin",
+		"secret",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "WARNING: login failed: Infoblox authenticated the user but denied access (HTTP 403).") {
+		t.Fatalf("configure output missing summarized authorization failure:\n%s", output)
+	}
+	if strings.Contains(output, "raw server credential failure") || strings.Contains(output, "abc123") {
+		t.Fatalf("configure output exposed raw server credential response:\n%s", output)
+	}
+}
+
+func TestConfigureEditBlankPasswordKeepsCurrentPasswordForValidation(t *testing.T) {
+	server := newConfigCredentialServer(t, http.StatusUnauthorized)
+	app := testApp(t)
+	profiles := map[string]Profile{
+		defaultProfileName: {
+			Name:        defaultProfileName,
+			Server:      server.URL,
+			Username:    "admin",
+			Password:    "secret",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "default",
+			VerifySSL:   false,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}
+	if err := app.writeConfigProfiles(defaultProfileName, profiles); err != nil {
+		t.Fatalf("write profiles: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "edit"}); err != nil {
+		t.Fatalf("configure edit: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "INFO: Infoblox login succeeded.") {
+		t.Fatalf("configure output missing login success:\n%s", stdout.String())
+	}
+	_, savedProfiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if savedProfiles[defaultProfileName].Password != "secret" {
+		t.Fatalf("password changed unexpectedly")
+	}
+}
+
 func TestHighestWAPIVersionComparesNumerically(t *testing.T) {
 	got, ok := highestWAPIVersion([]string{"2.9", "v2.12", "2.12.3", "invalid", "2.12.4"})
 	if !ok {
@@ -1156,7 +1272,6 @@ func TestConfigureNewConnectionFailureShowsRetryPopup(t *testing.T) {
 		failServer.URL,
 		"admin",
 		"secret",
-		"",
 		"y",
 		successServer.URL,
 		"admin",
@@ -1206,7 +1321,6 @@ func TestConfigureEditConnectionFailureShowsRetryPopup(t *testing.T) {
 	app.Stdout = &stdout
 	app.Stderr = &stderr
 	app.Stdin = strings.NewReader(strings.Join([]string{
-		"",
 		"",
 		"",
 		"",
@@ -1584,6 +1698,24 @@ func newConfigTLSSuccessServer(t *testing.T) *httptest.Server {
 	return server
 }
 
+func newConfigCredentialServer(t *testing.T, failureStatus int) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username, password, ok := r.BasicAuth()
+		if !ok || username != "admin" || password != "secret" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(failureStatus)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"text": "raw server credential failure token=abc123 username=" + username,
+			})
+			return
+		}
+		configSuccessHandler().ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
 func configSuccessHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -1660,7 +1792,7 @@ func newConfigFailureServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/grid") {
-			http.Error(w, "bad credentials", http.StatusUnauthorized)
+			http.Error(w, "temporary grid failure", http.StatusInternalServerError)
 			return
 		}
 		http.NotFound(w, r)

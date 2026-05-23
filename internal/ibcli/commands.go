@@ -993,24 +993,17 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	}
 	a.printConfigureStep(step, "Credentials", "Username and password are required; the password is encrypted before it is written.")
 	step++
-	username, err := a.gum.Input("Username", current.Username, false)
+	credentialProbe := Profile{
+		Name:        selected,
+		Server:      server,
+		WAPIVersion: firstNonEmpty(current.WAPIVersion, defaultWAPIVersion),
+		DNSView:     firstNonEmpty(current.DNSView, "default"),
+		VerifySSL:   verifySSL,
+		Timeout:     firstNonZero(current.Timeout, defaultTimeoutSeconds),
+	}.complete()
+	username, password, err := a.promptValidatedCredentials(credentialProbe, current)
 	if err != nil {
 		return err
-	}
-	passwordLabel := "Password"
-	allowPasswordBlank := current.Password != ""
-	if allowPasswordBlank {
-		passwordLabel = "Password (leave blank to keep current)"
-	}
-	password, err := a.gum.Input(passwordLabel, "", true)
-	if err != nil {
-		return err
-	}
-	if password == "" && allowPasswordBlank {
-		password = current.Password
-	}
-	if username == "" || password == "" {
-		return cliError("username and password are required")
 	}
 	a.printConfigureStep(step, "WAPI", "Confirm the auto-detected WAPI version before testing the connection.")
 	step++
@@ -1168,6 +1161,68 @@ func firstNonZero(values ...int) int {
 		}
 	}
 	return 0
+}
+
+func (a *App) promptValidatedCredentials(base Profile, current Profile) (string, string, error) {
+	usernameDefault := current.Username
+	passwordLabel := "Password"
+	allowPasswordBlank := current.Password != ""
+	if allowPasswordBlank {
+		passwordLabel = "Password (leave blank to keep current)"
+	}
+	for {
+		username, err := a.gum.Input("Username", usernameDefault, false)
+		if err != nil {
+			return "", "", err
+		}
+		password, err := a.gum.Input(passwordLabel, "", true)
+		if err != nil {
+			return "", "", err
+		}
+		if password == "" && allowPasswordBlank {
+			password = current.Password
+		}
+		if username == "" || password == "" {
+			a.printConfigureWarning("WARNING: username and password are required.")
+			usernameDefault = username
+			continue
+		}
+		probe := base
+		probe.Username = username
+		probe.Password = password
+		if err := a.validateCredentials(probe); err != nil {
+			if summary, ok := credentialValidationSummary(err); ok {
+				a.printConfigureWarning("WARNING: login failed: " + summary + ".")
+				usernameDefault = username
+				continue
+			}
+			return "", "", &connectionTestError{err: err}
+		}
+		a.printConfigureInfo("INFO: Infoblox login succeeded.")
+		return username, password, nil
+	}
+}
+
+func (a *App) validateCredentials(profile Profile) error {
+	client := a.newClient(profile)
+	params := url.Values{"_return_fields": []string{"name"}, "_max_results": []string{"1"}}
+	_, err := client.Request(http.MethodGet, gridObject, params, nil)
+	return err
+}
+
+func credentialValidationSummary(err error) (string, bool) {
+	var wapiErr *WapiError
+	if !errors.As(err, &wapiErr) {
+		return "", false
+	}
+	switch wapiErr.Status {
+	case http.StatusUnauthorized:
+		return "Infoblox rejected the username or password (HTTP 401)", true
+	case http.StatusForbidden:
+		return "Infoblox authenticated the user but denied access (HTTP 403)", true
+	default:
+		return "", false
+	}
 }
 
 func (a *App) testConnection(profile Profile) error {
