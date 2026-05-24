@@ -121,7 +121,10 @@ effects, and config profile create/edit/delete actions are logged. Read, list,
 search, cache, and completion operations are not logged. Linux supports file and
 syslog sinks; Windows supports Windows Event Log and file sinks. File logs use
 one JSON object per line and redact password, key, credential, token, and secret
-fields. Audit sink failures print a warning and do not fail the completed write.
+fields. Selecting the file sink warns about writable log-file risk, allows
+returning to method selection, and tests that the path can be opened for
+writing before saving. Audit sink failures print a warning and do not fail the
+completed write.
 .SH ENVIRONMENT
 .TP
 .B IB_SEARCH_DEBUG=1

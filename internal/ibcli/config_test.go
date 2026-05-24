@@ -843,6 +843,145 @@ audit_log_file =
 	}
 }
 
+func TestPromptAuditLoggingFileMethodCanBackOutToSelection(t *testing.T) {
+	syslogChoice, ok := auditMethodChoiceNumber(auditLogMethodSyslog)
+	if !ok {
+		t.Skip("syslog audit method is not supported on this platform")
+	}
+	fileChoice, ok := auditMethodChoiceNumber(auditLogMethodFile)
+	if !ok {
+		t.Skip("file audit method is not supported on this platform")
+	}
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		"y",
+		fileChoice,
+		"n",
+		syslogChoice,
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	settings, err := app.promptAuditLoggingSettings(defaultConfigSettings())
+	if err != nil {
+		t.Fatalf("prompt audit logging settings: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if !settings.AuditLoggingEnabled {
+		t.Fatal("audit logging enabled = false, want true")
+	}
+	if settings.AuditLogMethod != auditLogMethodSyslog {
+		t.Fatalf("audit method = %q, want %q", settings.AuditLogMethod, auditLogMethodSyslog)
+	}
+	output := stdout.String()
+	if strings.Count(output, gumPromptIndent+"Audit logging method") < 2 {
+		t.Fatalf("audit method prompt should be indented and shown twice after backing out:\n%s", output)
+	}
+	if !strings.Contains(output, "file audit logging uses a writable log file") {
+		t.Fatalf("file audit warning missing:\n%s", output)
+	}
+	if strings.Contains(output, "Audit log file") {
+		t.Fatalf("audit file path should not be requested after backing out:\n%s", output)
+	}
+}
+
+func TestPromptAuditLoggingFileMethodWriteTestsPath(t *testing.T) {
+	fileChoice, ok := auditMethodChoiceNumber(auditLogMethodFile)
+	if !ok {
+		t.Skip("file audit method is not supported on this platform")
+	}
+	app := testApp(t)
+	logPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		"y",
+		fileChoice,
+		"y",
+		logPath,
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	settings, err := app.promptAuditLoggingSettings(defaultConfigSettings())
+	if err != nil {
+		t.Fatalf("prompt audit logging settings: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if settings.AuditLogMethod != auditLogMethodFile {
+		t.Fatalf("audit method = %q, want %q", settings.AuditLogMethod, auditLogMethodFile)
+	}
+	if settings.AuditLogFile != logPath {
+		t.Fatalf("audit log file = %q, want %q", settings.AuditLogFile, logPath)
+	}
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("audit log write test did not create/open file: %v", err)
+	}
+	if info.IsDir() {
+		t.Fatalf("audit log path is a directory: %s", logPath)
+	}
+	if !strings.Contains(stdout.String(), "Continue with file audit logging?") {
+		t.Fatalf("file warning confirmation missing:\n%s", stdout.String())
+	}
+}
+
+func TestPromptAuditLoggingFileMethodCanBackOutAfterWriteTestFailure(t *testing.T) {
+	syslogChoice, ok := auditMethodChoiceNumber(auditLogMethodSyslog)
+	if !ok {
+		t.Skip("syslog audit method is not supported on this platform")
+	}
+	fileChoice, ok := auditMethodChoiceNumber(auditLogMethodFile)
+	if !ok {
+		t.Skip("file audit method is not supported on this platform")
+	}
+	app := testApp(t)
+	blockingFile := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blockingFile, []byte("blocked"), 0o600); err != nil {
+		t.Fatalf("write blocking file: %v", err)
+	}
+	badPath := filepath.Join(blockingFile, "audit.jsonl")
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		"y",
+		fileChoice,
+		"y",
+		badPath,
+		"n",
+		syslogChoice,
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	settings, err := app.promptAuditLoggingSettings(defaultConfigSettings())
+	if err != nil {
+		t.Fatalf("prompt audit logging settings: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if settings.AuditLogMethod != auditLogMethodSyslog {
+		t.Fatalf("audit method = %q, want %q", settings.AuditLogMethod, auditLogMethodSyslog)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"WARNING: audit log file is not writable:",
+		"Choose a different audit log file?",
+		gumPromptIndent + "Audit logging method",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("audit prompt output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func auditMethodChoiceNumber(method string) (string, bool) {
+	for index, choice := range supportedAuditLogMethods() {
+		if choice == method {
+			return fmt.Sprint(index + 1), true
+		}
+	}
+	return "", false
+}
+
 func TestDNSContextLineUsesCompactColonFormat(t *testing.T) {
 	app := testApp(t)
 	profiles := map[string]Profile{

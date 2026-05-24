@@ -1252,23 +1252,106 @@ func (a *App) promptAuditLoggingSettings(settings ConfigSettings) (ConfigSetting
 	if !containsString(methodChoices, method) {
 		method = defaultAuditLogMethod()
 	}
-	selectedMethod, err := a.gum.Choose("Audit logging method", methodChoices, method)
-	if err != nil {
-		return settings, err
-	}
-	settings.AuditLogMethod = selectedMethod
-	if selectedMethod == auditLogMethodFile {
-		defaultPath := settings.AuditLogFile
-		if strings.TrimSpace(defaultPath) == "" {
-			defaultPath = a.defaultAuditLogFile()
-		}
-		path, err := a.gum.Input("Audit log file", defaultPath, false)
+	for {
+		selectedMethod, err := a.promptAuditLoggingMethod(methodChoices, method)
 		if err != nil {
 			return settings, err
 		}
-		settings.AuditLogFile = strings.TrimSpace(path)
+		settings.AuditLogMethod = selectedMethod
+		if selectedMethod != auditLogMethodFile {
+			return settings, nil
+		}
+		path, backToMethod, err := a.promptAuditLogFile(settings.AuditLogFile)
+		if err != nil {
+			return settings, err
+		}
+		if backToMethod {
+			method = selectedMethod
+			continue
+		}
+		settings.AuditLogFile = path
+		return settings, nil
 	}
-	return settings, nil
+}
+
+func (a *App) promptAuditLoggingMethod(choices []string, defaultValue string) (string, error) {
+	if len(choices) == 0 {
+		return "", cliError("no audit logging methods available")
+	}
+	selected := defaultValue
+	if !containsString(choices, selected) {
+		selected = choices[0]
+	}
+	if a.gum != nil && a.gum.interactive() {
+		options := make([]huh.Option[string], 0, len(choices))
+		for _, choice := range choices {
+			option := huh.NewOption(choice, choice)
+			if choice == selected {
+				option = option.Selected(true)
+			}
+			options = append(options, option)
+		}
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title(gumPromptIndent + "Audit logging method").
+					Options(options...).
+					Value(&selected).
+					Height(len(options) + 2),
+			),
+		).
+			WithInput(a.Stdin).
+			WithOutput(a.Stdout)
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return "", cliError("input canceled")
+			}
+			return "", err
+		}
+		return selected, nil
+	}
+	if a.gum == nil {
+		return "", cliError("audit logging method prompt is unavailable")
+	}
+	return a.gum.fallbackChoose(gumPromptIndent+"Audit logging method", choices, selected)
+}
+
+func (a *App) promptAuditLogFile(currentPath string) (string, bool, error) {
+	a.printConfigureWarning("WARNING: file audit logging uses a writable log file. Users with write access can modify or remove entries; syslog or Windows Event Log is usually stronger for audit trails.")
+	continueWithFile, err := a.gum.Confirm("Continue with file audit logging?", false)
+	if err != nil {
+		return "", false, err
+	}
+	if !continueWithFile {
+		return "", true, nil
+	}
+	defaultPath := strings.TrimSpace(currentPath)
+	if defaultPath == "" {
+		defaultPath = a.defaultAuditLogFile()
+	}
+	for {
+		path, err := a.gum.Input("Audit log file", defaultPath, false)
+		if err != nil {
+			return "", false, err
+		}
+		path = strings.TrimSpace(path)
+		if path == "" {
+			path = defaultPath
+		}
+		if err := a.testAuditLogFileWritable(path); err != nil {
+			a.printConfigureWarning("WARNING: audit log file is not writable: " + err.Error())
+			retry, retryErr := a.gum.Confirm("Choose a different audit log file?", true)
+			if retryErr != nil {
+				return "", false, retryErr
+			}
+			if retry {
+				defaultPath = path
+				continue
+			}
+			return "", true, nil
+		}
+		return path, false, nil
+	}
 }
 
 func (a *App) promptGlobalConfigGroup(currentGroup string) (string, error) {

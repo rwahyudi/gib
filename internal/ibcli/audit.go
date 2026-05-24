@@ -185,6 +185,49 @@ func (a *App) writeAuditFile(path string, line []byte) error {
 	return nil
 }
 
+func (a *App) testAuditLogFileWritable(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return cliError("audit log file is required")
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(nil); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	testFile, err := os.CreateTemp(dir, "."+filepath.Base(path)+".write-test-*")
+	if err != nil {
+		return err
+	}
+	testPath := testFile.Name()
+	if _, err := testFile.Write([]byte("test\n")); err != nil {
+		_ = testFile.Close()
+		_ = os.Remove(testPath)
+		return err
+	}
+	if err := testFile.Close(); err != nil {
+		_ = os.Remove(testPath)
+		return err
+	}
+	if err := os.Remove(testPath); err != nil {
+		return err
+	}
+	if a.activeConfigIsGlobal() {
+		return a.protectAuditLogFile(path)
+	}
+	return nil
+}
+
 func (a *App) protectAuditLogFile(path string) error {
 	group, err := a.activeGlobalConfigGroup()
 	if err != nil {
