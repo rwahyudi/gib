@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" role="img" aria-labelledby="title desc">
+  <title id="title">ib CLI preview</title>
+  <desc id="desc">Terminal-style preview of the current ib command help, DNS create syntax, and IPAM network output.</desc>
+  <defs>
+    <linearGradient id="terminal" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#101820"/>
+      <stop offset="1" stop-color="#17202a"/>
+    </linearGradient>
+    <style>
+      text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+      .prompt { fill: #a7f3d0; font-size: 16px; font-weight: 700; }
+      .cmd { fill: #f8fafc; font-size: 16px; }
+      .label { fill: #38bdf8; font-size: 15px; font-weight: 700; }
+      .text { fill: #d8dee9; font-size: 15px; }
+      .muted { fill: #94a3b8; font-size: 14px; }
+      .green { fill: #22c55e; font-size: 15px; font-weight: 700; }
+      .amber { fill: #fbbf24; font-size: 15px; font-weight: 700; }
+      .cyan { fill: #38bdf8; font-size: 15px; font-weight: 700; }
+      .line { stroke: #334155; stroke-width: 1; }
+      .panel { fill: #0b1220; stroke: #2563eb; stroke-width: 1.4; }
+      .header { fill: #111827; stroke: #2563eb; stroke-width: 1.4; }
+    </style>
+  </defs>
+  <rect width="960" height="600" rx="0" fill="#0f172a"/>
+  <rect x="24" y="24" width="912" height="572" rx="8" fill="url(#terminal)" stroke="#1e293b"/>
+  <circle cx="51" cy="48" r="6" fill="#ef4444"/>
+  <circle cx="73" cy="48" r="6" fill="#f59e0b"/>
+  <circle cx="95" cy="48" r="6" fill="#22c55e"/>
+
+  <text x="48" y="88" class="prompt">rwahyudi@vm5</text>
+  <text x="170" y="88" class="cmd">$ ib --help</text>
+  <text x="48" y="118" class="text">ib - Infoblox DNS and IPAM command line client</text>
+  <text x="48" y="144" class="label">Workflow</text>
+  <text x="150" y="144" class="text">ib config new --default  -&gt;  ib dns zone use example.com  -&gt;  ib dns list</text>
+  <text x="48" y="170" class="label">Modules</text>
+  <text x="150" y="170" class="green">config</text>
+  <text x="234" y="170" class="text">Manage Infoblox configuration</text>
+  <text x="150" y="196" class="cyan">dns</text>
+  <text x="234" y="196" class="text">Manage Infoblox DNS records</text>
+  <text x="150" y="222" class="amber">net</text>
+  <text x="234" y="222" class="text">Manage Infoblox IPAM networks</text>
+
+  <text x="48" y="268" class="prompt">rwahyudi@vm5</text>
+  <text x="170" y="268" class="cmd">$ ib dns create --help</text>
+  <rect x="48" y="292" width="864" height="102" rx="6" class="panel"/>
+  <text x="68" y="320" class="label">ib dns create</text>
+  <text x="196" y="320" class="text">Create a DNS record</text>
+  <text x="68" y="348" class="muted">Usage</text>
+  <text x="196" y="348" class="text">ib dns create TYPE NAME VALUE [flags]</text>
+  <text x="68" y="374" class="muted">ptr</text>
+  <text x="196" y="374" class="text">ib dns create ptr &lt;ip-address&gt; &lt;ptr-target&gt;; reverse zone is auto-detected</text>
+
+  <text x="48" y="432" class="prompt">rwahyudi@vm5</text>
+  <text x="170" y="432" class="cmd">$ ib net list prod</text>
+  <rect x="48" y="455" width="864" height="36" class="header"/>
+  <text x="70" y="478" class="label">Network</text>
+  <text x="290" y="478" class="label">Type</text>
+  <text x="438" y="478" class="label">Comment</text>
+  <line x1="48" y1="491" x2="912" y2="491" class="line"/>
+  <text x="70" y="517" class="cyan">10.128.48.0/23</text>
+  <text x="290" y="517" class="amber">CONTAINER</text>
+  <text x="438" y="517" class="text">Production subnet container</text>
+  <text x="70" y="545" class="green">10.128.48.0/24</text>
+  <text x="290" y="545" class="green">NETWORK</text>
+  <text x="438" y="545" class="text">Application VLAN</text>
+  <text x="70" y="573" class="green">10.128.49.0/24</text>
+  <text x="290" y="573" class="green">NETWORK</text>
+  <text x="438" y="573" class="text">Database VLAN</text>
+  <text x="48" y="594" class="muted">Current Context: Profile: prod | Rows: 3</text>
+</svg>

@@ -79,7 +79,7 @@
   <rect class="panel" x="35" y="40" width="910" height="475" rx="5" />
 
   <text class="text" x="65" y="80">ib DNS Search, Cache, and Infoblox Routing</text>
-  <text class="small" x="65" y="106">Search preloads local cache rows before workers. GET can use GCM. Writes stay on the primary Grid Master.</text>
+  <text class="small" x="65" y="106">Search preloads selected cache rows before workers. GET can use GCM. Writes stay on the primary Grid Master.</text>
 
   <rect class="worker node" x="70" y="120" width="140" height="50" rx="4" />
   <text class="text" x="100" y="150">Worker 1</text>

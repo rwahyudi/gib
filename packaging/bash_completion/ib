@@ -1,5 +1,9 @@
 # bash completion loader for packaged ib installs
 
-if [[ -n ${BASH_VERSION:-} && -x /usr/local/bin/ib ]]; then
-  source <(/usr/local/bin/ib config completion bash 2>/dev/null)
+if [[ -n ${BASH_VERSION:-} ]]; then
+  _ib_binary=$(command -v ib 2>/dev/null || true)
+  if [[ -n ${_ib_binary:-} && -x ${_ib_binary:-} ]]; then
+    source <("${_ib_binary}" config completion bash 2>/dev/null)
+  fi
+  unset _ib_binary
 fi

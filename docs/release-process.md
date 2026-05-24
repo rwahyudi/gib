@@ -165,8 +165,8 @@ Avoid leaving a partial release marked as latest.
 Check the live release metadata and asset names:
 
 ```bash
-gh release view v0.3.5 --json tagName,isLatest,assets
-gh release view --json tagName,isLatest,assets
+gh release view v0.3.5 --json tagName,isDraft,isPrerelease,publishedAt,url,assets
+gh release view --json tagName,isDraft,isPrerelease,publishedAt,url,assets
 ```
 
 Confirm the latest stable URLs resolve:

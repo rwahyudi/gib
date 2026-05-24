@@ -48,6 +48,10 @@ ib --help
 ib config completion bash
 ```
 
+The RPM installs `ib` under `/usr/bin/ib`. The packaged Bash completion loader
+resolves `ib` from `PATH` so the same loader also works for GoReleaser RPM/DEB
+packages that install `/usr/local/bin/ib`.
+
 Optional output-control smoke checks after configuring a test profile:
 
 ```bash
