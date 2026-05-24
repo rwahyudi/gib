@@ -875,8 +875,10 @@ func (a *App) listProfiles() error {
 	rows := make([]map[string]any, 0, len(names))
 	for _, name := range names {
 		profile := merged.Profiles[name]
+		location := merged.ProfileLocations[name]
 		rows = append(rows, map[string]any{
 			"profile":      name,
+			"scope":        string(location.Scope),
 			"default":      name == merged.DefaultProfile,
 			"username":     profile.Username,
 			"server":       profile.Server,
@@ -899,7 +901,7 @@ func (a *App) listProfiles() error {
 }
 
 func configProfileFields() []string {
-	return []string{"profile", "default", "username", "server", "read_server", "wapi_version", "verify_ssl", "dns_view", "default_zone"}
+	return []string{"profile", "scope", "default", "username", "server", "read_server", "wapi_version", "verify_ssl", "dns_view", "default_zone"}
 }
 
 func (a *App) emitConfigProfileRows(title string, fields []string, rows []map[string]any) error {

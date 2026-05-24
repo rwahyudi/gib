@@ -771,11 +771,32 @@ func isProfileNotFound(err error) bool {
 }
 
 func (a *App) defaultConfigValues() Profile {
+	profile, _ := a.defaultConfigProfileAndScope()
+	return profile
+}
+
+func (a *App) defaultConfigProfileAndScope() (Profile, configScope) {
 	merged, err := a.readMergedConfig(false)
 	if err == nil && len(merged.Profiles) > 0 {
-		return merged.Profiles[merged.DefaultProfile].complete()
+		profile := merged.Profiles[merged.DefaultProfile].complete()
+		scope := localConfigScope
+		if location, ok := merged.ProfileLocations[merged.DefaultProfile]; ok {
+			scope = location.Scope
+		}
+		return profile, scope
 	}
-	return Profile{Name: defaultProfileName}
+	return Profile{Name: defaultProfileName}, localConfigScope
+}
+
+func profileContextName(profileName string, scope configScope) string {
+	profileName = strings.TrimSpace(profileName)
+	if profileName == "" {
+		profileName = defaultProfileName
+	}
+	if scope == globalConfigScope {
+		return profileName + " (global)"
+	}
+	return profileName
 }
 
 const sessionParentPIDEnv = "IB_SHELL_PID"
@@ -929,7 +950,7 @@ func (a *App) resolveDNSZone(profile Profile, explicit string) (string, error) {
 }
 
 func (a *App) dnsContextLine() string {
-	profile := a.defaultConfigValues()
+	profile, scope := a.defaultConfigProfileAndScope()
 	profileName := profile.Name
 	if profileName == "" {
 		profileName = defaultProfileName
@@ -954,7 +975,7 @@ func (a *App) dnsContextLine() string {
 		source = "not set"
 	}
 	return contextTitleStyle.Render("Current Context:") + " " + strings.Join([]string{
-		renderContextPair("Profile", profileName, contextProfileValueStyle),
+		renderContextPair("Profile", profileContextName(profileName, scope), contextProfileValueStyle),
 		renderContextPair("View", view, contextViewValueStyle),
 		renderContextPair("Zone", zone, contextZoneValueStyle) + " " + contextSourceStyle.Render("("+source+")"),
 	}, " | ")

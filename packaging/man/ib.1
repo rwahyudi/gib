@@ -47,6 +47,10 @@ Create a default Infoblox profile and optionally enable audit logging.
 Set the local default profile override. PROFILE may be local or a merged Linux
 global profile from /etc/ib/config.
 .TP
+.B ib config list
+List merged local and global profiles. The scope column shows whether each
+profile comes from local config or /etc/ib/config.
+.TP
 .B sudo ib config new --global-config shared
 Create a Linux global profile under /etc/ib for a shared group. Global profile
 creation requires root.
@@ -55,8 +59,9 @@ creation requires root.
 Edit a Linux global profile under /etc/ib. Global profile edits require root.
 .TP
 .B ib dns list
-List records in the current DNS context. Larger IPv4 reverse CIDR scopes can
-include matching child reverse zones.
+List records in the current DNS context. Current-context footers mark global
+profiles as "(global)". Larger IPv4 reverse CIDR scopes can include matching
+child reverse zones.
 .TP
 .B ib dns search app
 Search records by name, value, or comment.

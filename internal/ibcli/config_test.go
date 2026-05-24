@@ -506,17 +506,27 @@ func TestConfigListShowsMergedProfiles(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	var localRow map[string]any
+	var sharedRow map[string]any
 	for _, row := range rows {
 		name := fmt.Sprint(row["profile"])
 		seen[name] = true
 		if name == "local" {
 			localRow = row
 		}
+		if name == "shared" {
+			sharedRow = row
+		}
 	}
 	for _, name := range []string{"local", "shared"} {
 		if !seen[name] {
 			t.Fatalf("config list missing %q: %#v", name, rows)
 		}
+	}
+	if got := fmt.Sprint(localRow["scope"]); got != "local" {
+		t.Fatalf("local scope = %q, want local: %#v", got, localRow)
+	}
+	if got := fmt.Sprint(sharedRow["scope"]); got != "global" {
+		t.Fatalf("shared scope = %q, want global: %#v", got, sharedRow)
 	}
 	if got := fmt.Sprint(localRow["username"]); got != "local-user" {
 		t.Fatalf("local username = %q, want local-user: %#v", got, localRow)
@@ -1100,6 +1110,31 @@ func TestDNSContextLineUsesCompactColonFormat(t *testing.T) {
 		if strings.Contains(line, unwanted) {
 			t.Fatalf("context line contains old format %q:\n%s", unwanted, line)
 		}
+	}
+}
+
+func TestDNSContextLineMarksGlobalProfile(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": {
+			Name:        "shared",
+			Server:      "https://infoblox.example",
+			Username:    "admin",
+			Password:    "secret-password",
+			WAPIVersion: defaultWAPIVersion,
+			DNSView:     "DNS Zone View",
+			DefaultZone: "example.com",
+			VerifySSL:   true,
+			Timeout:     defaultTimeoutSeconds,
+		},
+	}, "ibusers")
+
+	line := app.dnsContextLine()
+	if !strings.Contains(line, "Profile: shared (global)") {
+		t.Fatalf("context line should mark global profile:\n%s", line)
+	}
+	if !strings.Contains(line, "View: DNS Zone View") || !strings.Contains(line, "Zone: example.com") {
+		t.Fatalf("context line missing DNS context:\n%s", line)
 	}
 }
 

@@ -53,6 +53,20 @@ func TestNetViewList(t *testing.T) {
 	}
 }
 
+func TestNetContextLineMarksGlobalProfile(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": plainTestProfile("shared", "https://shared.example"),
+	}, "ibusers")
+
+	line := app.netContextLine(3)
+	for _, want := range []string{"Current Context:", "Profile: shared (global)", "Rows: 3"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("net context line missing %q:\n%s", want, line)
+		}
+	}
+}
+
 func TestNetListSearchesSortsAndSelectsColumns(t *testing.T) {
 	var networkView string
 	var containerView string

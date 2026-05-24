@@ -109,6 +109,8 @@ Profiles store the primary server, auto-detected WAPI version, auto-detected GCM
 
 By default, profiles live under `~/.ib/`. On Linux, `ib config new --global-config [PROFILE]` writes a shared profile under `/etc/ib/` and asks which Linux group should have access. `ib config new --global-config` and `ib config edit --global-config` must be run as root, for example with `sudo`, because they write `/etc/ib/config` and `/etc/ib/key`. Users in the configured group can read `/etc/ib/config` and `/etc/ib/key`, and can read/write the shared `/etc/ib/cache.sqlite3`. Normal commands merge `/etc/ib/config` with `~/.ib/config`; local profiles and local metadata override matching global names, while global-only profiles remain available. If `/etc/ib/config` is missing or not readable, commands continue silently with local config only. Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, or cache data.
 
+`ib config list` includes a `scope` column so local and global profiles are visible in one merged table. Current-context footers mark a selected global profile as `Profile: NAME (global)`.
+
 Audit logging is disabled by default. When enabled during `ib config new` or `ib config edit`, only successful write actions are logged: DNS record create/edit/delete, DNS zone create/delete, PTR side effects from A/AAAA workflows, and config profile create/edit/delete. Read, list, search, cache, and completion operations are not logged. Linux can log to JSON Lines files or syslog; Windows can log to Windows Event Log or a JSON Lines file. File logging defaults to `~/.ib/audit.jsonl` for local profiles, `/etc/ib/audit.jsonl` for Linux global profiles, and the current config directory on Windows. The file option warns that writable logs are weaker audit evidence, lets you return to method selection, and tests that the chosen path can be opened for writing before saving. Audit failures print a warning but do not fail the completed write action. Secret-looking fields such as passwords, keys, credentials, tokens, and secrets are redacted.
 
 ## DNS 
@@ -177,7 +179,7 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | `ib config` | Show profile overview and short usage. |
 | `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust, credentials, and primary access, auto-detects WAPI version and a usable GCM read endpoint, selects single DNS view/zone choices automatically, and can enable audit logging. Add `--global-config` on Linux as root to create the profile under `/etc/ib/`. |
 | `ib config edit [PROFILE]` | Edit an existing profile; server reachability/TLS trust is rechecked, leaving the password blank keeps the current encrypted password, WAPI version detection updates the prompt default when available, and audit logging can be changed. Add `--global-config` on Linux as root to edit the profile under `/etc/ib/`. |
-| `ib config list` | List configured profiles with username, WAPI, SSL, DNS context, and merged config metadata in table output. |
+| `ib config list` | List configured profiles with local/global scope, username, WAPI, SSL, DNS context, and merged config metadata in table output. |
 | `ib config use PROFILE` | Set the local default profile override. The profile may be local or a merged Linux global profile from `/etc/ib/config`. |
 | `ib config delete PROFILE` | Delete a non-default local profile and clear its cache rows. |
 | `ib config completion [bash\|zsh\|fish\|windows]` | Generate or install dynamic shell completion. |

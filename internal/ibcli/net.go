@@ -807,13 +807,13 @@ func (a *App) printNetTableFooter(count int) {
 }
 
 func (a *App) netContextLine(count int) string {
-	profile := a.defaultConfigValues()
+	profile, scope := a.defaultConfigProfileAndScope()
 	profileName := profile.Name
 	if profileName == "" {
 		profileName = defaultProfileName
 	}
 	return contextTitleStyle.Render("Current Context:") + " " + strings.Join([]string{
-		renderContextPair("Profile", profileName, contextProfileValueStyle),
+		renderContextPair("Profile", profileContextName(profileName, scope), contextProfileValueStyle),
 		renderContextPair("Rows", fmt.Sprint(count), contextViewValueStyle),
 	}, " | ")
 }
