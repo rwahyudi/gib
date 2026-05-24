@@ -412,10 +412,17 @@ func (a *App) readConfigProfiles(decrypt bool) (string, map[string]Profile, bool
 		if err != nil {
 			return "", nil, false, err
 		}
-		if _, ok := profiles[defaultProfile]; !ok {
-			return "", nil, false, cliError("default profile %q does not exist in %s", defaultProfile, a.ConfigFile)
-		}
 		return defaultProfile, profiles, false, nil
+	}
+
+	if meta, ok := sections["meta"]; ok {
+		if rawDefault := strings.TrimSpace(meta["default_profile"]); rawDefault != "" {
+			defaultProfile, err := normalizeProfileName(rawDefault)
+			if err != nil {
+				return "", nil, false, err
+			}
+			return defaultProfile, profiles, false, nil
+		}
 	}
 
 	if values, ok := sections["default"]; ok {
@@ -526,11 +533,26 @@ func (a *App) writeConfigProfiles(defaultProfile string, profiles map[string]Pro
 }
 
 func (a *App) writeConfigProfilesWithSettings(defaultProfile string, profiles map[string]Profile, settings ConfigSettings) error {
+	return a.writeConfigProfilesWithSettingsMode(defaultProfile, profiles, settings, false)
+}
+
+func (a *App) writeConfigProfilesWithExternalDefault(defaultProfile string, profiles map[string]Profile, settings ConfigSettings) error {
+	return a.writeConfigProfilesWithSettingsMode(defaultProfile, profiles, settings, true)
+}
+
+func (a *App) writeConfigProfilesPreservingDefault(defaultProfile string, profiles map[string]Profile, settings ConfigSettings) error {
+	if _, ok := profiles[defaultProfile]; ok {
+		return a.writeConfigProfilesWithSettings(defaultProfile, profiles, settings)
+	}
+	return a.writeConfigProfilesWithExternalDefault(defaultProfile, profiles, settings)
+}
+
+func (a *App) writeConfigProfilesWithSettingsMode(defaultProfile string, profiles map[string]Profile, settings ConfigSettings, allowExternalDefault bool) error {
 	defaultProfile, err := normalizeProfileName(defaultProfile)
 	if err != nil {
 		return err
 	}
-	if _, ok := profiles[defaultProfile]; !ok {
+	if _, ok := profiles[defaultProfile]; !ok && !allowExternalDefault {
 		return cliError("default profile %q does not exist", defaultProfile)
 	}
 	settings = settings.complete()
@@ -658,7 +680,7 @@ func (a *App) loadConfigProfile(profileName string, required bool) (Profile, err
 		if data.Legacy {
 			rewriteProfiles = map[string]Profile{data.DefaultProfile: profile}
 		}
-		if err := a.writeConfigProfilesWithSettings(data.DefaultProfile, rewriteProfiles, data.Settings); err != nil {
+		if err := a.writeConfigProfilesPreservingDefault(data.DefaultProfile, rewriteProfiles, data.Settings); err != nil {
 			a.useConfigLocation(original)
 			a.globalConfigGroup = originalGroup
 			return Profile{}, err
@@ -707,7 +729,7 @@ func (a *App) loadConfigProfileActive(profileName string, required bool) (Profil
 		if legacy {
 			rewriteProfiles = map[string]Profile{defaultProfile: profile}
 		}
-		if err := a.writeConfigProfilesWithSettings(defaultProfile, rewriteProfiles, settings); err != nil {
+		if err := a.writeConfigProfilesPreservingDefault(defaultProfile, rewriteProfiles, settings); err != nil {
 			return Profile{}, err
 		}
 	}

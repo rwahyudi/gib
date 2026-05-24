@@ -341,6 +341,89 @@ func TestMergedConfigAddsGlobalProfilesAndLocalOverrides(t *testing.T) {
 	}
 }
 
+func TestConfigUseCanSelectGlobalOnlyProfile(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"ipamdev": plainTestProfile("ipamdev", "https://ipamdev.example"),
+		"shared":  plainTestProfile("shared", "https://shared.example"),
+	}, "ibusers")
+	writePlainTestConfig(t, app.LocalConfigFile, "local", map[string]Profile{
+		"local": plainTestProfile("local", "https://local.example"),
+	}, "")
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "use", "ipamdev"}); err != nil {
+		t.Fatalf("config use global profile: %v", err)
+	}
+	localDefault, localProfiles, _, err := app.withLocalConfigProfiles()
+	if err != nil {
+		t.Fatalf("read local profiles: %v", err)
+	}
+	if localDefault != "ipamdev" {
+		t.Fatalf("local default = %q, want ipamdev", localDefault)
+	}
+	if _, ok := localProfiles["ipamdev"]; ok {
+		t.Fatalf("global profile was copied into local config: %#v", localProfiles)
+	}
+	profile, err := app.loadConfig(true)
+	if err != nil {
+		t.Fatalf("load selected global profile: %v", err)
+	}
+	if profile.Name != "ipamdev" || profile.Server != "https://ipamdev.example" {
+		t.Fatalf("loaded profile = %#v", profile)
+	}
+	if app.ConfigFile != app.GlobalConfigFile {
+		t.Fatalf("active config file = %q, want global %q", app.ConfigFile, app.GlobalConfigFile)
+	}
+}
+
+func TestConfigUseGlobalProfileCreatesLocalMetadataOverride(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": plainTestProfile("shared", "https://shared.example"),
+	}, "ibusers")
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "use", "shared"}); err != nil {
+		t.Fatalf("config use global-only profile: %v", err)
+	}
+	raw, err := os.ReadFile(app.LocalConfigFile)
+	if err != nil {
+		t.Fatalf("read local override config: %v", err)
+	}
+	if !strings.Contains(string(raw), "default_profile = shared") {
+		t.Fatalf("local override missing shared default:\n%s", raw)
+	}
+	if strings.Contains(string(raw), "[profile:shared]") {
+		t.Fatalf("global profile should not be copied into metadata override:\n%s", raw)
+	}
+	profile, err := app.loadConfig(true)
+	if err != nil {
+		t.Fatalf("load selected global profile: %v", err)
+	}
+	if profile.Name != "shared" || app.ConfigFile != app.GlobalConfigFile {
+		t.Fatalf("profile = %#v, active config = %q", profile, app.ConfigFile)
+	}
+}
+
+func (a *App) withLocalConfigProfiles() (string, map[string]Profile, bool, error) {
+	var defaultProfile string
+	var profiles map[string]Profile
+	var legacy bool
+	err := a.withConfigLocation(a.localConfigLocation(), func() error {
+		var err error
+		defaultProfile, profiles, legacy, err = a.readConfigProfiles(false)
+		return err
+	})
+	return defaultProfile, profiles, legacy, err
+}
+
 func TestMergedConfigSkipsUnreadableGlobalConfig(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Unix file permission semantics only")

@@ -167,8 +167,8 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		})
 	case "ib config use":
 		return sectionWithRows("Select Default Profile", [][]string{
-			{"effect", "updates the persistent default_profile in the config file"},
-			{"scope", "future ib commands use this profile unless another profile is selected later"},
+			{"effect", "updates the local default_profile override"},
+			{"scope", "can select local profiles or global profiles merged from /etc/ib/config"},
 			{"completion", "PROFILE completes from configured profile names"},
 			{"example", "ib config use prod"},
 		})

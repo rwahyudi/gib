@@ -178,7 +178,7 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust, credentials, and primary access, auto-detects WAPI version and a usable GCM read endpoint, selects single DNS view/zone choices automatically, and can enable audit logging. Add `--global-config` on Linux as root to create the profile under `/etc/ib/`. |
 | `ib config edit [PROFILE]` | Edit an existing profile; server reachability/TLS trust is rechecked, leaving the password blank keeps the current encrypted password, WAPI version detection updates the prompt default when available, and audit logging can be changed. Add `--global-config` on Linux as root to edit the profile under `/etc/ib/`. |
 | `ib config list` | List configured profiles with username, WAPI, SSL, DNS context, and merged config metadata in table output. |
-| `ib config use PROFILE` | Set the default profile. |
+| `ib config use PROFILE` | Set the local default profile override. The profile may be local or a merged Linux global profile from `/etc/ib/config`. |
 | `ib config delete PROFILE` | Delete a non-default local profile and clear its cache rows. |
 | `ib config completion [bash\|zsh\|fish\|windows]` | Generate or install dynamic shell completion. |
 | `ib config cache status` | Show SQLite cache entries with table statistics, or structured statistics with `-o json`. |

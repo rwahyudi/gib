@@ -43,6 +43,10 @@ Print the version number and AEST build date.
 .B ib config new --default
 Create a default Infoblox profile and optionally enable audit logging.
 .TP
+.B ib config use PROFILE
+Set the local default profile override. PROFILE may be local or a merged Linux
+global profile from /etc/ib/config.
+.TP
 .B sudo ib config new --global-config shared
 Create a Linux global profile under /etc/ib for a shared group. Global profile
 creation requires root.

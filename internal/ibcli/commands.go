@@ -949,20 +949,36 @@ func profileRowIsActive(row map[string]any) bool {
 }
 
 func (a *App) useProfile(profileName string) error {
-	a.useConfigLocation(a.localConfigLocation())
 	selected, err := normalizeProfileName(profileName)
 	if err != nil {
 		return err
 	}
-	_, profiles, _, err := a.readConfigProfiles(false)
+	merged, err := a.readMergedConfig(false)
 	if err != nil {
 		return err
 	}
-	if _, ok := profiles[selected]; !ok {
+	location, ok := merged.ProfileLocations[selected]
+	if !ok {
 		return cliError("profile %q does not exist", selected)
 	}
-	if err := a.writeConfigProfiles(selected, profiles); err != nil {
+	a.useConfigLocation(a.localConfigLocation())
+	defaultProfile, profiles, settings, err := a.readLocalConfigForUse()
+	if err != nil {
 		return err
+	}
+	if location.Scope == localConfigScope {
+		if _, ok := profiles[selected]; !ok {
+			return cliError("profile %q does not exist in local config %s", selected, a.LocalConfigFile)
+		}
+		defaultProfile = selected
+		if err := a.writeConfigProfilesWithSettings(defaultProfile, profiles, settings); err != nil {
+			return err
+		}
+	} else {
+		defaultProfile = selected
+		if err := a.writeConfigProfilesWithExternalDefault(defaultProfile, profiles, settings); err != nil {
+			return err
+		}
 	}
 	if !a.isTableOutput() {
 		return a.emitObject("Action", []string{"status", "action", "profile", "default", "message"}, map[string]any{
@@ -971,6 +987,30 @@ func (a *App) useProfile(profileName string) error {
 	}
 	a.PrintSuccess("SUCCESS: default profile set to '" + selected + "'.")
 	return nil
+}
+
+func (a *App) readLocalConfigForUse() (string, map[string]Profile, ConfigSettings, error) {
+	settings := defaultConfigSettings()
+	defaultProfile := defaultProfileName
+	profiles := map[string]Profile{}
+	if _, err := os.Stat(a.ConfigFile); err != nil {
+		if os.IsNotExist(err) {
+			return defaultProfile, profiles, settings, nil
+		}
+		return "", nil, ConfigSettings{}, err
+	}
+	loadedDefault, loadedProfiles, _, err := a.readConfigProfiles(false)
+	if err != nil {
+		return "", nil, ConfigSettings{}, err
+	}
+	loadedSettings, _, err := a.readConfigSettings()
+	if err != nil {
+		return "", nil, ConfigSettings{}, err
+	}
+	if len(loadedProfiles) > 0 {
+		profiles = loadedProfiles
+	}
+	return loadedDefault, profiles, loadedSettings, nil
 }
 
 func (a *App) deleteProfile(profileName string) error {
@@ -996,7 +1036,7 @@ func (a *App) deleteProfile(profileName string) error {
 		return cliError("cannot delete default profile %q. Run: ib config use OTHER_PROFILE", selected)
 	}
 	delete(profiles, selected)
-	if err := a.writeConfigProfiles(defaultProfile, profiles); err != nil {
+	if err := a.writeConfigProfilesPreservingDefault(defaultProfile, profiles, settings); err != nil {
 		return err
 	}
 	if err := a.clearProfileCache(selected); err != nil {
@@ -1217,7 +1257,7 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	if makeDefault || len(profiles) == 1 {
 		defaultProfile = selected
 	}
-	if err := a.writeConfigProfilesWithSettings(defaultProfile, profiles, settings); err != nil {
+	if err := a.writeConfigProfilesPreservingDefault(defaultProfile, profiles, settings); err != nil {
 		return err
 	}
 	if profileExists {

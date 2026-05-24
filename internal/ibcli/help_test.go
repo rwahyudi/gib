@@ -514,7 +514,8 @@ func TestConfigSubcommandHelpCoversGuidedPrompts(t *testing.T) {
 			args: []string{"config", "use", "--help"},
 			want: []string{
 				"Select Default Profile",
-				"updates the persistent default_profile",
+				"updates the local default_profile override",
+				"can select local profiles or global profiles",
 				"PROFILE completes from configured profile names",
 			},
 		},
