@@ -30,6 +30,8 @@ responsive.
   worker-limited global search, and stale-while-revalidate refreshes.
 - Dynamic shell completion for profiles, views, zones, records, flags, record
   types, and output formats from the live `ib` binary.
+- Optional JSON Lines audit logging for successful create, edit, and delete
+  actions, with file/syslog support on Linux and Windows Event Log support on Windows.
 - Compact operator output with colorful tables, current-context footers,
   JSON/CSV output, and progress display for larger searches.
 
@@ -103,9 +105,11 @@ ib config edit
 ib config list
 ```
 
-Profiles store the primary server, auto-detected WAPI version, auto-detected GCM read endpoint when available, credentials, DNS view, and default zone. Config validates server reachability before asking for credentials, then validates the username and password before WAPI setup. Trusted HTTPS certificates are verified; untrusted HTTPS certificates show certificate details and require confirmation before `verify_ssl = false` is saved. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Unix builds use a key file; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles.
+Profiles store the primary server, auto-detected WAPI version, auto-detected GCM read endpoint when available, credentials, DNS view, default zone, and optional audit logging settings. Config validates server reachability before asking for credentials, then validates the username and password before WAPI setup. Trusted HTTPS certificates are verified; untrusted HTTPS certificates show certificate details and require confirmation before `verify_ssl = false` is saved. If Infoblox returns only one DNS view or one eligible primary forward zone, config selects it automatically. Passwords are encrypted at rest. Unix builds use a key file; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles.
 
 By default, profiles live under `~/.ib/`. On Linux, `ib config new --global-config [PROFILE]` writes a shared profile under `/etc/ib/` and asks which Linux group should have access. `ib config new --global-config` and `ib config edit --global-config` must be run as root, for example with `sudo`, because they write `/etc/ib/config` and `/etc/ib/key`. Users in the configured group can read `/etc/ib/config` and `/etc/ib/key`, and can read/write the shared `/etc/ib/cache.sqlite3`. Normal commands merge `/etc/ib/config` with `~/.ib/config`; local profiles and local metadata override matching global names, while global-only profiles remain available. If `/etc/ib/config` is missing or not readable, commands continue silently with local config only. Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, or cache data.
+
+Audit logging is disabled by default. When enabled during `ib config new` or `ib config edit`, only successful write actions are logged: DNS record create/edit/delete, DNS zone create/delete, PTR side effects from A/AAAA workflows, and config profile create/edit/delete. Read, list, search, cache, and completion operations are not logged. Linux can log to JSON Lines files or syslog; Windows can log to Windows Event Log or a JSON Lines file. File logging defaults to `~/.ib/audit.jsonl` for local profiles, `/etc/ib/audit.jsonl` for Linux global profiles, and the current config directory on Windows. Audit failures print a warning but do not fail the completed write action. Secret-looking fields such as passwords, keys, credentials, tokens, and secrets are redacted.
 
 ## DNS 
 
@@ -151,6 +155,8 @@ ib dns --view "DNS Zone View" search app
 
 DNS listing/search and IPAM read workflows prefer SQLite cache rows from the selected local or global config scope. Freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` are returned immediately while one detached refresh process updates the cache. DNS records revalidate with the zone serial before refreshing `/allrecords`; IPAM cache refreshes skip serial checks and re-download the relevant WAPI object.
 
+Audit events are emitted only after successful write operations and use one JSON object per event for Splunk/Sentinel-style ingestion. Each event includes UTC time, local time, timezone, host, OS user, profile, action, operation, target, result, and redacted data.
+
 For source builds, development checks, and packaging notes, see
 [Build From Source](docs/build-from-source.md). For cache diagrams and worker
 behavior, see [Performance & Caching](docs/performance-caching.md).
@@ -169,8 +175,8 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | Command | Description |
 | --- | --- |
 | `ib config` | Show profile overview and short usage. |
-| `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust, credentials, and primary access, auto-detects WAPI version and a usable GCM read endpoint, and selects single DNS view/zone choices automatically. Add `--global-config` on Linux as root to create the profile under `/etc/ib/`. |
-| `ib config edit [PROFILE]` | Edit an existing profile; server reachability/TLS trust is rechecked, leaving the password blank keeps the current encrypted password, and WAPI version detection updates the prompt default when available. Add `--global-config` on Linux as root to edit the profile under `/etc/ib/`. |
+| `ib config new [PROFILE]` | Create a profile; validates server reachability/TLS trust, credentials, and primary access, auto-detects WAPI version and a usable GCM read endpoint, selects single DNS view/zone choices automatically, and can enable audit logging. Add `--global-config` on Linux as root to create the profile under `/etc/ib/`. |
+| `ib config edit [PROFILE]` | Edit an existing profile; server reachability/TLS trust is rechecked, leaving the password blank keeps the current encrypted password, WAPI version detection updates the prompt default when available, and audit logging can be changed. Add `--global-config` on Linux as root to edit the profile under `/etc/ib/`. |
 | `ib config list` | List configured profiles with username, WAPI, SSL, DNS context, and merged config metadata in table output. |
 | `ib config use PROFILE` | Set the default profile. |
 | `ib config delete PROFILE` | Delete a non-default local profile and clear its cache rows. |

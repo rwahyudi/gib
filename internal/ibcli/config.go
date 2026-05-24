@@ -26,6 +26,9 @@ const (
 	configMaxBackgroundWorkerWaitKey      = "max_background_worker_wait"
 	configCompletionCachePrefetchKey      = "completion_cache_prefetch"
 	configGlobalGroupKey                  = "global_group"
+	configAuditLoggingEnabledKey          = "audit_logging_enabled"
+	configAuditLoggingMethodKey           = "audit_logging_method"
+	configAuditLogFileKey                 = "audit_log_file"
 )
 
 type Profile struct {
@@ -49,6 +52,10 @@ type ConfigSettings struct {
 	CompletionCachePrefetch        bool
 	completionCachePrefetchSet     bool
 	GlobalGroup                    string
+	AuditLoggingEnabled            bool
+	auditLoggingEnabledSet         bool
+	AuditLogMethod                 string
+	AuditLogFile                   string
 }
 
 func defaultConfigSettings() ConfigSettings {
@@ -59,6 +66,9 @@ func defaultConfigSettings() ConfigSettings {
 		MaxBackgroundWorkerWaitSeconds: defaultMaxBackgroundWorkerWaitSeconds,
 		CompletionCachePrefetch:        true,
 		completionCachePrefetchSet:     true,
+		AuditLoggingEnabled:            false,
+		auditLoggingEnabledSet:         true,
+		AuditLogMethod:                 defaultAuditLogMethod(),
 	}
 }
 
@@ -80,6 +90,14 @@ func (s ConfigSettings) complete() ConfigSettings {
 		s.CompletionCachePrefetch = defaults.CompletionCachePrefetch
 		s.completionCachePrefetchSet = true
 	}
+	if !s.auditLoggingEnabledSet {
+		s.AuditLoggingEnabled = defaults.AuditLoggingEnabled
+		s.auditLoggingEnabledSet = true
+	}
+	s.AuditLogMethod = normalizeAuditLogMethod(s.AuditLogMethod)
+	if s.AuditLogMethod == "" {
+		s.AuditLogMethod = defaults.AuditLogMethod
+	}
 	return s
 }
 
@@ -96,6 +114,20 @@ func configSettingsFromSections(sections map[string]map[string]string) (ConfigSe
 	settings.MaxBackgroundWorkerWaitSeconds, missing = positiveIntSetting(meta, configMaxBackgroundWorkerWaitKey, settings.MaxBackgroundWorkerWaitSeconds, missing)
 	settings.CompletionCachePrefetch, settings.completionCachePrefetchSet, missing = boolSetting(meta, configCompletionCachePrefetchKey, settings.CompletionCachePrefetch, missing)
 	settings.GlobalGroup = strings.TrimSpace(meta[configGlobalGroupKey])
+	settings.AuditLoggingEnabled, settings.auditLoggingEnabledSet, missing = boolSetting(meta, configAuditLoggingEnabledKey, settings.AuditLoggingEnabled, missing)
+	if raw, ok := meta[configAuditLoggingMethodKey]; ok && strings.TrimSpace(raw) != "" {
+		settings.AuditLogMethod = normalizeAuditLogMethod(raw)
+		if settings.AuditLogMethod == "" {
+			missing = true
+		}
+	} else {
+		missing = true
+	}
+	if raw, ok := meta[configAuditLogFileKey]; ok {
+		settings.AuditLogFile = strings.TrimSpace(raw)
+	} else {
+		missing = true
+	}
 	return settings.complete(), missing
 }
 
@@ -528,6 +560,9 @@ func (a *App) writeConfigProfilesWithSettings(defaultProfile string, profiles ma
 	builder.WriteString(configRecordsCacheSWRKey + " = " + strconv.Itoa(settings.RecordsCacheSWRSeconds) + "\n")
 	builder.WriteString(configMaxBackgroundWorkerWaitKey + " = " + strconv.Itoa(settings.MaxBackgroundWorkerWaitSeconds) + "\n")
 	builder.WriteString(configCompletionCachePrefetchKey + " = " + strconv.FormatBool(settings.CompletionCachePrefetch) + "\n")
+	builder.WriteString(configAuditLoggingEnabledKey + " = " + strconv.FormatBool(settings.AuditLoggingEnabled) + "\n")
+	builder.WriteString(configAuditLoggingMethodKey + " = " + settings.AuditLogMethod + "\n")
+	builder.WriteString(configAuditLogFileKey + " = " + settings.AuditLogFile + "\n")
 	if a.activeConfigIsGlobal() {
 		builder.WriteString(configGlobalGroupKey + " = " + settings.GlobalGroup + "\n")
 	}

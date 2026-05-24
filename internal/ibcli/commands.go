@@ -933,6 +933,9 @@ func configMetadataTableRows(merged mergedConfigData) [][]string {
 		{configRecordsCacheSWRKey, strconv.Itoa(settings.RecordsCacheSWRSeconds)},
 		{configMaxBackgroundWorkerWaitKey, strconv.Itoa(settings.MaxBackgroundWorkerWaitSeconds)},
 		{configCompletionCachePrefetchKey, strconv.FormatBool(settings.CompletionCachePrefetch)},
+		{configAuditLoggingEnabledKey, strconv.FormatBool(settings.AuditLoggingEnabled)},
+		{configAuditLoggingMethodKey, settings.AuditLogMethod},
+		{configAuditLogFileKey, settings.AuditLogFile},
 	}
 	if settings.GlobalGroup != "" {
 		rows = append(rows, []string{configGlobalGroupKey, settings.GlobalGroup})
@@ -983,6 +986,12 @@ func (a *App) deleteProfile(profileName string) error {
 	if _, ok := profiles[selected]; !ok {
 		return cliError("profile %q does not exist", selected)
 	}
+	deletedProfile := profiles[selected]
+	settings, _, err := a.readConfigSettings()
+	if err != nil {
+		settings = defaultConfigSettings()
+	}
+	scope := a.activeConfigScopeName()
 	if selected == defaultProfile {
 		return cliError("cannot delete default profile %q. Run: ib config use OTHER_PROFILE", selected)
 	}
@@ -993,6 +1002,7 @@ func (a *App) deleteProfile(profileName string) error {
 	if err := a.clearProfileCache(selected); err != nil {
 		return err
 	}
+	a.auditConfigProfileDelete(settings, deletedProfile, scope)
 	if !a.isTableOutput() {
 		return a.emitObject("Action", []string{"status", "action", "profile", "default", "message"}, map[string]any{
 			"status": "success", "action": "delete", "profile": selected, "default": false, "message": "profile deleted and cache cleared",
@@ -1183,6 +1193,14 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	step++
 	defaultZone := a.promptDefaultZone(probe, current.DefaultZone)
 
+	a.printConfigureStep(step, "Audit Logging", "Choose whether successful create, edit, and delete actions are logged.")
+	step++
+	settings, err = a.promptAuditLoggingSettings(settings)
+	if err != nil {
+		return err
+	}
+
+	oldProfile, profileExists := profiles[selected]
 	savedProfile := Profile{
 		Name:        selected,
 		Server:      server,
@@ -1202,6 +1220,11 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	if err := a.writeConfigProfilesWithSettings(defaultProfile, profiles, settings); err != nil {
 		return err
 	}
+	if profileExists {
+		a.auditConfigProfileEdit(settings, oldProfile, savedProfile)
+	} else {
+		a.auditConfigProfileCreate(settings, savedProfile, a.activeConfigScopeName())
+	}
 	isDefault := defaultProfile == selected
 	if a.isTableOutput() {
 		a.printConfigureSummary(savedProfile, isDefault)
@@ -1211,6 +1234,41 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 		a.PrintSuccess("SUCCESS: profile '" + selected + "' saved.")
 	}
 	return nil
+}
+
+func (a *App) promptAuditLoggingSettings(settings ConfigSettings) (ConfigSettings, error) {
+	settings = settings.complete()
+	enabled, err := a.gum.Confirm("Enable audit logging?", settings.AuditLoggingEnabled)
+	if err != nil {
+		return settings, err
+	}
+	settings.AuditLoggingEnabled = enabled
+	settings.auditLoggingEnabledSet = true
+	if !enabled {
+		return settings, nil
+	}
+	methodChoices := supportedAuditLogMethods()
+	method := settings.AuditLogMethod
+	if !containsString(methodChoices, method) {
+		method = defaultAuditLogMethod()
+	}
+	selectedMethod, err := a.gum.Choose("Audit logging method", methodChoices, method)
+	if err != nil {
+		return settings, err
+	}
+	settings.AuditLogMethod = selectedMethod
+	if selectedMethod == auditLogMethodFile {
+		defaultPath := settings.AuditLogFile
+		if strings.TrimSpace(defaultPath) == "" {
+			defaultPath = a.defaultAuditLogFile()
+		}
+		path, err := a.gum.Input("Audit log file", defaultPath, false)
+		if err != nil {
+			return settings, err
+		}
+		settings.AuditLogFile = strings.TrimSpace(path)
+	}
+	return settings, nil
 }
 
 func (a *App) promptGlobalConfigGroup(currentGroup string) (string, error) {
@@ -1636,6 +1694,11 @@ func (a *App) runZoneCreate(zoneName, zoneFormat, comment, nsGroup string) error
 	if err != nil {
 		return err
 	}
+	a.emitAuditEvent(profile.Name, "create", "dns.zone.create", "DNS_ZONE", zone, map[string]any{
+		"view":       client.View,
+		"ref":        ref,
+		"new_values": payload,
+	})
 	a.queueZoneCacheRefresh(profile)
 	a.queueRecordCacheRefreshAfterWrite(profile, zone)
 	if !a.isTableOutput() {
@@ -1806,6 +1869,10 @@ func (a *App) runZoneDelete(zoneName string) error {
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return err
 	}
+	a.emitAuditEvent(profile.Name, "delete", "dns.zone.delete", "DNS_ZONE", target, map[string]any{
+		"view":           client.View,
+		"deleted_values": matches[0],
+	})
 	a.queueZoneCacheRefresh(profile)
 	a.invalidateRecordCache(profile, target)
 	if !a.isTableOutput() {
@@ -1848,16 +1915,17 @@ func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr 
 			return err
 		}
 	}
-	if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
-		return err
-	}
-	a.queueRecordCacheRefreshAfterWrite(profile, resolvedZone)
-	if noptr && recordType != "a" && recordType != "aaaa" {
-		a.PrintWarning("WARNING: --noptr only applies to A/AAAA workflows and was ignored.")
-	}
 	targetName := cleanString(payload["name"])
 	if targetName == "" {
 		targetName = name
+	}
+	if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
+		return err
+	}
+	a.auditDNSRecordCreate(profile, client, recordType, targetName, resolvedZone, payload)
+	a.queueRecordCacheRefreshAfterWrite(profile, resolvedZone)
+	if noptr && recordType != "a" && recordType != "aaaa" {
+		a.PrintWarning("WARNING: --noptr only applies to A/AAAA workflows and was ignored.")
 	}
 	if syncPTR {
 		if _, err := a.syncPTRForAddress(profile, client, ptrAddress, targetName, ttl, comment); err != nil {
@@ -1895,6 +1963,7 @@ func (a *App) runDNSCreatePTR(profile Profile, client *WapiClient, name, value, 
 	if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
 		return err
 	}
+	a.auditDNSRecordCreate(profile, client, "ptr", address.String(), reverseZone, payload)
 	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 	if noptr {
 		a.PrintWarning("WARNING: --noptr only applies to A/AAAA workflows and was ignored.")
@@ -1992,6 +2061,7 @@ func (a *App) runDNSEdit(recordNameValue, requestedType string, value *string, z
 	if _, err := client.Request(http.MethodPut, ref, nil, payload); err != nil {
 		return err
 	}
+	a.auditDNSRecordEdit(profile, client, record, payload)
 	a.queueRecordCacheRefreshAfterWrite(profile, cleanString(record.Item["zone"]))
 	if noptr && record.Type != "a" && record.Type != "aaaa" {
 		a.PrintWarning("WARNING: --noptr only applies to A/AAAA workflows and was ignored.")
@@ -2087,6 +2157,7 @@ func (a *App) syncPTRForAddress(profile Profile, client *WapiClient, address net
 		if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
 			return "", err
 		}
+		a.auditDNSPTRSideEffect(profile, client, "create", address, ptrdname, reverseZone, nil)
 		a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 		return reverseZone, nil
 	}
@@ -2101,6 +2172,7 @@ func (a *App) syncPTRForAddress(profile Profile, client *WapiClient, address net
 	if _, err := client.Request(http.MethodPut, ref, nil, payload); err != nil {
 		return "", err
 	}
+	a.auditDNSPTRSideEffect(profile, client, "edit", address, ptrdname, reverseZone, &matches[0])
 	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 	return reverseZone, nil
 }
@@ -2139,6 +2211,7 @@ func (a *App) deleteManagedPTRForAddress(profile Profile, client *WapiClient, ad
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return "", err
 	}
+	a.auditDNSPTRSideEffect(profile, client, "delete", address, ptrdname, reverseZone, &targetMatches[0])
 	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 	return reverseZone, nil
 }
@@ -2218,6 +2291,7 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return err
 	}
+	a.auditDNSRecordDelete(profile, client, record, target)
 	a.queueRecordCacheRefreshAfterWrite(profile, cleanString(record.Item["zone"]))
 	a.queueManagedPTRCacheRefreshAfterDelete(profile, client, record)
 	if !a.isTableOutput() {
@@ -2452,6 +2526,7 @@ func (a *App) runDNSDeletePTR(ipValue string, skipConfirm bool) error {
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return err
 	}
+	a.auditDNSRecordDelete(profile, client, matches[0], address.String())
 	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 	if !a.isTableOutput() {
 		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", "PTR", address.String(), reverseZone, client.View, "deleted PTR record"))

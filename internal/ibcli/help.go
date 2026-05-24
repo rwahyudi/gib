@@ -126,7 +126,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 				{"cache", "ib config cache status|clear"},
 			}),
 			sectionWithRows("Profile Details", [][]string{
-				{"prompts", "server reachability/TLS trust, validated credentials, auto WAPI version, auto GCM read endpoint, DNS view, default zone"},
+				{"prompts", "server reachability/TLS trust, validated credentials, auto WAPI version, auto GCM read endpoint, DNS view, default zone, audit logging"},
 				{"storage", storage},
 				{"key", key},
 				{"password", credentialProtectionDescription()},
@@ -140,7 +140,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib config new":
 		return sectionWithRows("Create Profile", [][]string{
 			{"profile", "optional argument; blank prompt creates profile 'default'"},
-			{"prompts", "endpoint reachability, TLS trust, credential validation, auto WAPI, auto GCM, DNS defaults"},
+			{"prompts", "endpoint reachability, TLS trust, credential validation, auto WAPI, auto GCM, DNS defaults, audit logging"},
 			{"test", "connection test must pass before saving"},
 			{"retry", "failed connection test shows a retry prompt"},
 			{"default", "--default makes this profile the selected default"},
@@ -151,6 +151,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		return sectionWithRows("Edit Profile", [][]string{
 			{"profile", "optional argument; omit to edit the current default profile"},
 			{"password", "leave blank to keep the existing encrypted password"},
+			{"audit", "adjust JSON Lines, syslog, or Windows Event Log audit logging"},
 			{"test", "connection test must pass before saving changes"},
 			{"retry", "failed connection test shows a retry prompt"},
 			{"default", "--default makes this profile the selected default"},

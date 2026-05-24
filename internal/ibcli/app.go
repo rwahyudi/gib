@@ -95,6 +95,7 @@ type App struct {
 	backgroundNetRefresher      func(Profile, string, string, string) error
 	dnsDeleteRecordSelector     func(string, []TypedRecord) (TypedRecord, bool, error)
 	dnsDeleteConfirmer          func(string, TypedRecord) (bool, error)
+	auditSink                   func(ConfigSettings, []byte) error
 	tlsRootCAs                  *x509.CertPool
 	configScope                 configScope
 	globalConfigGroup           string

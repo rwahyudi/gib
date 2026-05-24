@@ -9,7 +9,7 @@ ib \- operator-focused Infoblox DNS CLI
 is a command line interface for managing Infoblox DNS and IPAM records from the shell.
 It supports profile setup, encrypted credentials, DNS view and zone context,
 record workflows, IPAM network lookup, cache inspection, next available IP
-lookup, and shell completion.
+lookup, optional write-action audit logging, and shell completion.
 .SH COMMANDS
 .TP
 .B ib config
@@ -41,7 +41,7 @@ context.
 Print the version number and AEST build date.
 .TP
 .B ib config new --default
-Create a default Infoblox profile.
+Create a default Infoblox profile and optionally enable audit logging.
 .TP
 .B sudo ib config new --global-config shared
 Create a Linux global profile under /etc/ib for a shared group. Global profile
@@ -95,6 +95,9 @@ builds write new password tokens with user-scope DPAPI instead.
 .I ~/.ib/cache.sqlite3
 Local DNS/IPAM cache database.
 .TP
+.I ~/.ib/audit.jsonl
+Default local JSON Lines audit log file when file audit logging is enabled.
+.TP
 .I /etc/ib/config
 Linux global profile configuration. Normal commands merge this file with local
 config; local profiles and metadata override matching global names. Missing or
@@ -105,6 +108,20 @@ Linux global key file for shared encrypted profile password tokens.
 .TP
 .I /etc/ib/cache.sqlite3
 Linux global DNS/IPAM cache database.
+.TP
+.I /etc/ib/audit.jsonl
+Default Linux global JSON Lines audit log file when file audit logging is enabled.
+.SH AUDIT LOGGING
+Audit logging is disabled by default and can be enabled during
+.B ib config new
+or
+.B ib config edit .
+Successful DNS record create/edit/delete, DNS zone create/delete, PTR side
+effects, and config profile create/edit/delete actions are logged. Read, list,
+search, cache, and completion operations are not logged. Linux supports file and
+syslog sinks; Windows supports Windows Event Log and file sinks. File logs use
+one JSON object per line and redact password, key, credential, token, and secret
+fields. Audit sink failures print a warning and do not fail the completed write.
 .SH ENVIRONMENT
 .TP
 .B IB_SEARCH_DEBUG=1

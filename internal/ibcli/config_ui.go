@@ -49,11 +49,12 @@ func (a *App) printConfigEmptyState() {
 	fmt.Fprintln(a.Stdout, renderConfigPanel(
 		"Config Usage",
 		"Create a profile first; credentials are encrypted.",
-			[][]string{
-				{"Create profile", "ib config new [PROFILE]"},
-				{"Global profile", "ib config new --global-config [PROFILE]"},
-				{"Questions", "server/TLS, username, password, WAPI"},
+		[][]string{
+			{"Create profile", "ib config new [PROFILE]"},
+			{"Global profile", "ib config new --global-config [PROFILE]"},
+			{"Questions", "server/TLS, username, password, WAPI"},
 			{"DNS defaults", "auto GCM read endpoint, DNS view, default zone"},
+			{"Audit logging", "optional create/edit/delete JSON Lines, syslog, or Event Log"},
 			{"Connection test", "runs before saving; retry on failure"},
 			{"Shell completion", "ib config completion [SHELL]"},
 			{"Cache tools", "ib config cache status|clear"},
@@ -71,10 +72,10 @@ func (a *App) printConfigActions() {
 	fmt.Fprintln(a.Stdout)
 	fmt.Fprintln(a.Stdout, renderConfigPanel(
 		"Config Usage",
-			"Manage saved profiles, shell completion, and cache data.",
-			[][]string{
-				{"Create", "ib config new [PROFILE]"},
-				{"Create global", "ib config new --global-config [PROFILE]"},
+		"Manage saved profiles, audit logging, shell completion, and cache data.",
+		[][]string{
+			{"Create", "ib config new [PROFILE]"},
+			{"Create global", "ib config new --global-config [PROFILE]"},
 			{"Edit", "ib config edit [PROFILE]"},
 			{"Use", "ib config use PROFILE"},
 			{"List", "ib config list"},

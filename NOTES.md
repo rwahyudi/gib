@@ -40,6 +40,9 @@ dns_search_worker_limit = 16
 records_cache_swr_ttl = 259200
 max_background_worker_wait = 3
 completion_cache_prefetch = true
+audit_logging_enabled = false
+audit_logging_method = file
+audit_log_file =
 global_group = ibusers
 ```
 
@@ -53,6 +56,10 @@ global_group = ibusers
 
 `completion_cache_prefetch` controls whether shell completion can start background cache refresh helpers. The default is `true`; accepted values include `true`/`false`, `enabled`/`disabled`, `yes`/`no`, and `on`/`off`. When enabled, most DNS completion checks the active DNS view and current zone, and network CIDR completion checks the selected IPAM network view, then starts lease-protected zone-list, current-zone record, network-list, or container-list refresh helpers if those cache rows are missing or stale. PTR delete completion skips the current forward-zone record refresh and reads cached reverse-zone PTR rows. When disabled, completion only reads whatever is already in the selected cache: stale cached zone names, record names, or network CIDRs can still be offered, missing cache returns no dynamic candidates for that attempt, and completion does not start detached refresh subprocesses.
 
+`audit_logging_enabled` controls write-action audit logging. The default is `false`. When enabled, `ib` emits JSON Lines events only after successful create, edit, and delete actions for DNS records, DNS zones, PTR side effects, and config profiles. Read, list, search, cache, completion, and failed/cancelled actions are not audited. Each event includes UTC `ts`, `local_time`, `timezone`, app, event type, host, OS user, profile, action, operation, target type, target, result, and redacted data.
+
+`audit_logging_method` selects the audit sink. Linux supports `file` and `syslog`; Windows supports `windows_eventlog` and `file`; other platforms support `file`. File logging writes one JSON object per line to `audit_log_file`, defaulting to `~/.ib/audit.jsonl` for local profiles and `/etc/ib/audit.jsonl` for Linux global profiles. Audit sink failures print a warning and do not fail the already-completed write action.
+
 `global_group` is written only for Linux global profiles created with `ib config new --global-config`. It records the group used to protect `/etc/ib/config`, `/etc/ib/key`, and `/etc/ib/cache.sqlite3`.
 
 ## Config Profiles
@@ -64,6 +71,8 @@ On Linux, `ib config new --global-config [PROFILE]` writes the profile to `/etc/
 `ib config new` and `ib config edit` validate the entered server before asking for credentials. Unreachable servers print a warning and return to the server prompt. Trusted HTTPS certificates continue with `verify_ssl = true`; untrusted HTTPS certificates print certificate subject, issuer, validity, and SHA256 fingerprint before asking whether to trust the certificate for the profile. Accepting saves `verify_ssl = false`.
 
 After username and password entry, `ib config new` and `ib config edit` validate credentials with a small WAPI `grid` read before WAPI version setup. Authentication and authorization failures are summarized and return to the credential prompts without printing raw server response bodies.
+
+`ib config new` and `ib config edit` ask whether audit logging should be enabled after DNS view and default-zone selection. Existing configs default to the saved audit settings; new profiles default to disabled. Config profile create/edit/delete audit data redacts password values and any key, credential, token, or secret-looking fields.
 
 `ib config new` and `ib config edit` Step 05 (`Read Endpoint`) automatically discovers Grid Master Candidates from the primary Grid Master. Candidates with Read-Only API disabled are reported with an indented green `INFO:` line and are not saved. Candidates with Read-Only API enabled must also pass a direct WAPI GET probe before being saved as `read_server`. If no candidate exists or no candidate passes the probe, `read_server` is left blank so both reads and writes use the primary server.
 

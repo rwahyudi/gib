@@ -60,6 +60,9 @@ func writePlainTestConfig(t *testing.T, path string, defaultProfile string, prof
 	builder.WriteString("records_cache_swr_ttl = 259200\n")
 	builder.WriteString("max_background_worker_wait = 3\n")
 	builder.WriteString("completion_cache_prefetch = true\n")
+	builder.WriteString("audit_logging_enabled = false\n")
+	builder.WriteString("audit_logging_method = " + defaultAuditLogMethod() + "\n")
+	builder.WriteString("audit_log_file = \n")
 	if globalGroup != "" {
 		builder.WriteString("global_group = " + globalGroup + "\n")
 	}
@@ -484,6 +487,10 @@ func TestConfigListShowsMetadataTable(t *testing.T) {
 		MaxBackgroundWorkerWaitSeconds: 7,
 		CompletionCachePrefetch:        false,
 		completionCachePrefetchSet:     true,
+		AuditLoggingEnabled:            true,
+		auditLoggingEnabledSet:         true,
+		AuditLogMethod:                 auditLogMethodFile,
+		AuditLogFile:                   filepath.Join(app.ConfigDir, "audit.jsonl"),
 	})
 	var stdout bytes.Buffer
 	app.Stdout = &stdout
@@ -512,6 +519,12 @@ func TestConfigListShowsMetadataTable(t *testing.T) {
 		"7",
 		"completion_cache_prefetch",
 		"false",
+		"audit_logging_enabled",
+		"true",
+		"audit_logging_method",
+		"file",
+		"audit_log_file",
+		filepath.Join(app.ConfigDir, "audit.jsonl"),
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("config list metadata missing %q:\n%s", want, output)
@@ -655,6 +668,9 @@ func TestWriteConfigProfilesEncryptsPasswordAndReadsItBack(t *testing.T) {
 		"records_cache_swr_ttl = 259200",
 		"max_background_worker_wait = 3",
 		"completion_cache_prefetch = true",
+		"audit_logging_enabled = false",
+		"audit_logging_method = " + defaultAuditLogMethod(),
+		"audit_log_file = ",
 	} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("config missing %q:\n%s", want, raw)
@@ -739,6 +755,9 @@ timeout = 30
 		"records_cache_swr_ttl = 259200",
 		"max_background_worker_wait = 3",
 		"completion_cache_prefetch = true",
+		"audit_logging_enabled = false",
+		"audit_logging_method = " + defaultAuditLogMethod(),
+		"audit_log_file = ",
 	} {
 		if !strings.Contains(string(updated), want) {
 			t.Fatalf("updated config missing %q:\n%s", want, updated)
@@ -758,6 +777,8 @@ dns_search_worker_limit = -5
 records_cache_swr_ttl = 0
 max_background_worker_wait = nope
 completion_cache_prefetch = maybe
+audit_logging_enabled = maybe
+audit_logging_method = nowhere
 `
 	if err := os.WriteFile(app.ConfigFile, []byte(raw), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -785,6 +806,12 @@ completion_cache_prefetch = maybe
 	if !settings.CompletionCachePrefetch {
 		t.Fatalf("completion cache prefetch = false, want true fallback")
 	}
+	if settings.AuditLoggingEnabled {
+		t.Fatalf("audit logging enabled = true, want false fallback")
+	}
+	if settings.AuditLogMethod != defaultAuditLogMethod() {
+		t.Fatalf("audit log method = %q, want %q", settings.AuditLogMethod, defaultAuditLogMethod())
+	}
 }
 
 func TestReadConfigSettingsAllowsDisabledCompletionPrefetch(t *testing.T) {
@@ -796,6 +823,9 @@ dns_search_worker_limit = 8
 records_cache_swr_ttl = 1200
 max_background_worker_wait = 5
 completion_cache_prefetch = disabled
+audit_logging_enabled = false
+audit_logging_method = file
+audit_log_file =
 `
 	if err := os.WriteFile(app.ConfigFile, []byte(raw), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -867,6 +897,7 @@ func TestConfigOverviewWithoutProfilesUsesSetupPanel(t *testing.T) {
 		"Create a profile first; credentials are encrypted.",
 		"ib config new [PROFILE]",
 		"server/TLS, username, password, WAPI",
+		"Audit logging",
 		"auto GCM read endpoint",
 		"runs before saving; retry on failure",
 		"ib config completion [SHELL]",
@@ -933,7 +964,7 @@ func TestConfigOverviewWithProfilesShowsActionPanel(t *testing.T) {
 	for _, want := range []string{
 		"Infoblox Profiles (1)",
 		"Config Usage",
-		"Manage saved profiles, shell completion, and cache data.",
+		"Manage saved profiles, audit logging, shell completion",
 		"ib config new [PROFILE]",
 		"ib config new --global-config [PROFILE]",
 		"ib config edit [PROFILE]",
@@ -1146,6 +1177,7 @@ func TestConfigureNewProfileNamePromptStartsBlankAndDefaultsOnEnter(t *testing.T
 		"\n   Checking Infoblox credentials and WAPI access...",
 		"\n   SUCCESS: Infoblox connection test passed.",
 		"07 Default DNS Zone",
+		"08 Audit Logging",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("configure status line missing indentation %q:\n%s", want, output)
