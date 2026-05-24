@@ -7,7 +7,7 @@
 `ib` is a fast, lightweight, operator-focused CLI for managing Infoblox DNS and
 IPAM work from the shell.
 
-![ib cli preview](docs/assets/ib-cli-preview.svg)
+![ib cli preview](docs/assets/go-record1.gif)
 
 Read-heavy workflows can use a validated Grid Master Candidate, and large
 record/IPAM searches use SQLite caching plus bounded workers to stay
