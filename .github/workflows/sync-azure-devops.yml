@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AZURE_DEVOPS_REPOSITORY_URL: ${{ vars.AZURE_DEVOPS_UNIX_GIB_URL || 'https://dev.azure.com/rwahyudi/unix/_git/gib' }}
+  AZURE_DEVOPS_REPOSITORY_URL: ${{ vars.AZURE_DEVOPS_UNIX_GIB_URL || 'https://rwahyudi@dev.azure.com/rwahyudi/unix/_git/gib' }}
 
 jobs:
   sync:
