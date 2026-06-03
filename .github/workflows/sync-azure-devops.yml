@@ -1,0 +1,47 @@
+name: Sync Azure DevOps
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-azure-devops
+  cancel-in-progress: false
+
+env:
+  AZURE_DEVOPS_REPOSITORY_URL: ${{ vars.AZURE_DEVOPS_UNIX_GIB_URL || 'https://dev.azure.com/rwahyudi/unix/_git/gib' }}
+
+jobs:
+  sync:
+    name: Mirror Git refs to Azure DevOps
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Push branches and tags
+        env:
+          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_UNIX_GIB_PAT }}
+        run: |
+          if [ -z "${AZURE_DEVOPS_PAT}" ]; then
+            echo "AZURE_DEVOPS_UNIX_GIB_PAT is not configured" >&2
+            exit 1
+          fi
+
+          auth_header="$(printf ':%s' "${AZURE_DEVOPS_PAT}" | base64 -w0)"
+          git remote add azure "${AZURE_DEVOPS_REPOSITORY_URL}"
+          git -c "http.extraheader=AUTHORIZATION: basic ${auth_header}" \
+            push --prune azure \
+            '+refs/heads/*:refs/heads/*' \
+            '+refs/tags/*:refs/tags/*'
