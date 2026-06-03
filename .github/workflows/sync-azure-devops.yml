@@ -39,9 +39,9 @@ jobs:
             exit 1
           fi
 
-          auth_header="$(printf ':%s' "${AZURE_DEVOPS_PAT}" | base64 -w0)"
+          auth_header="$(printf 'git:%s' "${AZURE_DEVOPS_PAT}" | base64 -w0)"
           git remote add azure "${AZURE_DEVOPS_REPOSITORY_URL}"
-          git -c "http.extraheader=AUTHORIZATION: basic ${auth_header}" \
+          git -c "http.extraheader=Authorization: Basic ${auth_header}" \
             push --prune azure \
             '+refs/heads/*:refs/heads/*' \
             '+refs/tags/*:refs/tags/*'
