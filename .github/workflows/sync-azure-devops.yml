@@ -39,9 +39,19 @@ jobs:
             exit 1
           fi
 
-          auth_header="$(printf 'git:%s' "${AZURE_DEVOPS_PAT}" | base64 -w0)"
+          askpass="$(mktemp)"
+          cat >"${askpass}" <<'EOF'
+          #!/usr/bin/env sh
+          case "$1" in
+            *Username*) printf '%s\n' git ;;
+            *Password*) printf '%s\n' "${AZURE_DEVOPS_PAT}" ;;
+            *) printf '\n' ;;
+          esac
+          EOF
+          chmod 700 "${askpass}"
+
           git remote add azure "${AZURE_DEVOPS_REPOSITORY_URL}"
-          git -c "http.extraheader=Authorization: Basic ${auth_header}" \
+          GIT_ASKPASS="${askpass}" GIT_TERMINAL_PROMPT=0 git \
             push --prune azure \
             '+refs/heads/*:refs/heads/*' \
             '+refs/tags/*:refs/tags/*'
