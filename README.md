@@ -32,8 +32,9 @@ responsive.
   types, and output formats from the live `ib` binary.
 - Optional JSON Lines audit logging for successful create, edit, and delete
   actions, with file/syslog support on Linux and Windows Event Log support on Windows.
-- Compact operator output with colorful tables, current-context footers,
-  JSON/CSV output, and progress display for larger searches.
+- Compact operator output with colorful tables for humans, CSV/JSON output for
+  scripts, spreadsheets, `jq` pipelines, and automation, plus progress display
+  for larger searches.
 
 ## Install
 
