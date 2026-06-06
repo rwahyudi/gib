@@ -86,10 +86,18 @@ $archive = "$env:TEMP\ib_windows_amd64.zip"
 Invoke-WebRequest "https://github.com/rwahyudi/gib/releases/latest/download/ib_windows_amd64.zip" -OutFile $archive
 Expand-Archive $archive "$HOME\bin\ib-latest" -Force
 Copy-Item "$HOME\bin\ib-latest\ib.exe" "$HOME\bin\ib.exe" -Force
+$binPath = Join-Path $HOME "bin"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if (($userPath -split ';') -notcontains $binPath) {
+    [Environment]::SetEnvironmentVariable("Path", (($userPath, $binPath | Where-Object { $_ }) -join ';'), "User")
+}
+if (($env:Path -split ';') -notcontains $binPath) {
+    $env:Path = (($env:Path, $binPath | Where-Object { $_ }) -join ';')
+}
 ```
 
-Add `$HOME\bin` to the user `PATH` if needed, open a new PowerShell window, and
-run `ib config completion windows`. For source builds, see
+Open a new PowerShell window so the user `PATH` change is loaded, then run
+`ib config completion windows`. For source builds, see
 [Build From Source](docs/build-from-source.md). For publishing, see
 [Release Process](docs/release-process.md).
 
