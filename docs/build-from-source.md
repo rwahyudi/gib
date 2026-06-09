@@ -1,7 +1,7 @@
 # Build From Source
 
 Use these instructions when a packaged release is not available for your
-platform, or when validating changes before a release.
+platform, or when validating source changes before a release.
 
 ## Requirements
 
@@ -30,6 +30,10 @@ env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go build -buildvcs=false -o ib 
 sudo install -m 0755 ib /usr/local/bin/ib
 ib --help
 ```
+
+This local build links against the glibc and C toolchain on the build host. To
+validate the published Linux release binary's RHEL8 glibc compatibility, use the
+GoReleaser snapshot and `readelf` checks in [Release Process](release-process.md).
 
 Optional Bash completion:
 

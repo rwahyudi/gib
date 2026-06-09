@@ -8,6 +8,8 @@ builds:
     binary: ib
     env:
       - CGO_ENABLED=1
+      - CC=zig cc -target x86_64-linux-gnu.2.28
+      - CXX=zig c++ -target x86_64-linux-gnu.2.28
     goos:
       - linux
     goarch:

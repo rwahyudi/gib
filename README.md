@@ -38,8 +38,8 @@ responsive.
 
 ## Install
 
-For Fedora or EPEL, Copr is the shortest path. The package is named `gib` and
-installs the command as `/usr/bin/ib`.
+For Fedora or EPEL, Copr is the shortest path when you want a distro-built
+package. The package is named `gib` and installs the command as `/usr/bin/ib`.
 
 ```bash
 sudo dnf install dnf-plugins-core
@@ -48,7 +48,9 @@ sudo dnf install gib
 ```
 
 GitHub release assets use stable filenames, so `/releases/latest/download/...`
-always points at the newest published version.
+always points at the newest published version. Use these assets on RHEL8 or
+other older glibc systems if a locally built binary reports a missing
+`GLIBC_*` version.
 
 Linux tarball:
 
