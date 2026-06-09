@@ -146,7 +146,6 @@ func executableIsGoTestBinary(executable string) bool {
 }
 
 func (a *App) Execute(args []string) error {
-	a.startCompletionCachePrefetch(args)
 	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeNetSortValue(args) || a.completeZoneListFlagNames(args) {
 		return nil
 	}

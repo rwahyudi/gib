@@ -1134,6 +1134,11 @@ func (a *App) startCompletionCachePrefetch(args []string) {
 	if !a.completionCachePrefetchEnabled() {
 		return
 	}
+	prefetchZones := completionShouldPrefetchZoneCache(args)
+	prefetchRecords := completionShouldPrefetchRecordCache(args)
+	if !prefetchZones && !prefetchRecords {
+		return
+	}
 	profile, err := a.completionProfile()
 	if err != nil {
 		return
@@ -1142,8 +1147,10 @@ func (a *App) startCompletionCachePrefetch(args []string) {
 		profile.DNSView = view
 	}
 
-	a.prefetchZoneCacheForCompletion(profile)
-	if completionRequestsDNSDeletePTR(args) {
+	if prefetchZones {
+		a.prefetchZoneCacheForCompletion(profile)
+	}
+	if !prefetchRecords || completionRequestsDNSDeletePTR(args) {
 		// PTR delete completion spans cached reverse zones. Avoid refreshing the
 		// active forward zone or fanning out reverse record refreshes from a tab.
 		return
@@ -1154,6 +1161,86 @@ func (a *App) startCompletionCachePrefetch(args []string) {
 		return
 	}
 	a.prefetchRecordCacheForCompletion(profile, zone)
+}
+
+func completionShouldPrefetchZoneCache(args []string) bool {
+	args = completionCommandArgs(args)
+	subcommand, afterSubcommand, ok := completionDNSSubcommand(args)
+	if !ok {
+		return false
+	}
+	switch subcommand {
+	case "list", "zone":
+		return true
+	case "delete":
+		return completionArgsContainValue(afterSubcommand, "ptr")
+	}
+	return false
+}
+
+func completionShouldPrefetchRecordCache(args []string) bool {
+	args = completionCommandArgs(args)
+	subcommand, afterSubcommand, ok := completionDNSSubcommand(args)
+	if !ok {
+		return false
+	}
+	switch subcommand {
+	case "delete":
+		return !completionArgsContainValue(afterSubcommand, "ptr")
+	case "edit":
+		return true
+	}
+	return false
+}
+
+func completionDNSSubcommand(args []string) (string, []string, bool) {
+	sawDNS := false
+	for index, arg := range args {
+		if !sawDNS {
+			if arg == "dns" {
+				sawDNS = true
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, "-") || completionArgLooksLikeFlagValue(args, index) {
+			continue
+		}
+		return arg, args[index+1:], true
+	}
+	return "", nil, false
+}
+
+func completionArgLooksLikeFlagValue(args []string, index int) bool {
+	if index == 0 {
+		return false
+	}
+	previous := args[index-1]
+	switch previous {
+	case "--view", "-v", "--zone", "-z", "--output", "-o", "--profile", "-p", "--sort", "-s", "--columns", "-C", "--type", "-t", "--network-view":
+		return true
+	default:
+		return false
+	}
+}
+
+func completionArgsContainValue(args []string, value string) bool {
+	for _, arg := range args {
+		if strings.EqualFold(arg, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func completionCommandArgs(args []string) []string {
+	if len(args) <= 1 {
+		return nil
+	}
+	args = args[1:]
+	if len(args) > 0 {
+		args = args[:len(args)-1]
+	}
+	return args
 }
 
 func (a *App) completionProfile() (Profile, error) {

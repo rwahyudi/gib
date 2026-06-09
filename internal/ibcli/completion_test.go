@@ -192,6 +192,13 @@ func TestCompletionPrefetchQueuesMissingContextCaches(t *testing.T) {
 	}
 	select {
 	case target := <-recordRefreshes:
+		t.Fatalf("record refresh queued for zone-list completion: %s", target)
+	default:
+	}
+
+	app.startCompletionCachePrefetch([]string{"__complete", "dns", "delete", "a", ""})
+	select {
+	case target := <-recordRefreshes:
 		if target != "default|example.com" {
 			t.Fatalf("record refresh target = %q", target)
 		}
@@ -273,6 +280,38 @@ func TestCompletionPrefetchCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestCompletionPrefetchSkipsCheapCompletions(t *testing.T) {
+	app := testApp(t)
+	writeCompletionProfile(t, app, "https://infoblox.invalid")
+	zoneRefreshes := make(chan Profile, 2)
+	recordRefreshes := make(chan string, 2)
+	app.backgroundZoneRefresher = func(profile Profile) error {
+		zoneRefreshes <- profile
+		return nil
+	}
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		recordRefreshes <- profile.DNSView + "|" + zone
+		return nil
+	}
+
+	for _, args := range [][]string{
+		{"__complete", ""},
+		{"__complete", "config", "use", ""},
+		{"__complete", "dns", "create", ""},
+		{"__complete", "dns", "search", "app", "-"},
+	} {
+		app.startCompletionCachePrefetch(args)
+	}
+
+	select {
+	case profile := <-zoneRefreshes:
+		t.Fatalf("zone refresh queued for cheap completion: %#v", profile)
+	case target := <-recordRefreshes:
+		t.Fatalf("record refresh queued for cheap completion: %s", target)
+	default:
+	}
+}
+
 func TestCompletionPrefetchUsesViewAndZoneOverrides(t *testing.T) {
 	app := testApp(t)
 	writeCompletionProfile(t, app, "https://infoblox.invalid")
@@ -282,7 +321,7 @@ func TestCompletionPrefetchUsesViewAndZoneOverrides(t *testing.T) {
 		return nil
 	}
 
-	app.startCompletionCachePrefetch([]string{"__complete", "dns", "--view", "DNS Zone View", "list", "--zone", "other.example.com", ""})
+	app.startCompletionCachePrefetch([]string{"__complete", "dns", "--view", "DNS Zone View", "edit", "a", "--zone", "other.example.com", ""})
 
 	select {
 	case target := <-recordRefreshes:

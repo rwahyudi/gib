@@ -27,7 +27,7 @@ Default tuning in the profile config `[meta]` section:
 | `records_cache_swr_ttl` | `259200` seconds | How long expired record and IPAM rows can be served stale while revalidating. |
 | `dns_search_worker_limit` | `16` | Maximum parallel zone workers during multi-zone search. |
 | `max_background_worker_wait` | `3` seconds | Maximum wait for an active same-zone refresh before foreground WAPI work. |
-| `completion_cache_prefetch` | `true` | Whether shell completion starts background refresh helpers for missing or stale DNS/IPAM context caches. |
+| `completion_cache_prefetch` | `true` | Whether cache-backed shell completion starts background refresh helpers for missing or stale DNS/IPAM context caches. |
 | refresh lease TTL | `300` seconds | Local lock lifetime that prevents duplicate refresh subprocesses. |
 
 ## Cache Decision Flow
@@ -56,13 +56,14 @@ already present in the selected cache.
 
 Shell completion never performs a foreground Infoblox refresh for zone names,
 record names, or IPAM network CIDRs. With `completion_cache_prefetch = true`,
-most DNS completion checks the current DNS view and zone, and network CIDR
-completion checks the selected IPAM network view, then starts detached zone-list,
-current-zone record, network-list, or container-list refresh helpers when those
-cache rows are missing or stale. PTR delete completion reads cached PTR records
-from cached reverse zones and completes owner IPs instead of forward-zone names.
-With `completion_cache_prefetch = false`, completion only reads selected cache rows
-and does not start background refresh helpers.
+cache-backed completion starts only the matching detached refresh helper when
+the selected zone-list, record, network-list, or container-list cache row is
+missing or stale. Cheap completions for commands, flags, output formats,
+columns, sorts, and record types skip SQLite entirely. PTR delete completion
+reads cached PTR records from cached reverse zones and completes owner IPs
+instead of forward-zone names. With `completion_cache_prefetch = false`,
+completion only reads selected cache rows and does not start background refresh
+helpers.
 
 ## Read, Write, And Worker Flow
 
