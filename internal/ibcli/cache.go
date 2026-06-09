@@ -101,13 +101,11 @@ func (a *App) openCacheDB() (*badger.DB, error) {
 	}
 	a.cacheDBMu.Lock()
 	defer a.cacheDBMu.Unlock()
-	if a.cacheDB != nil && a.cacheDBPath == path {
-		return a.cacheDB, nil
+	if a.cacheDBs == nil {
+		a.cacheDBs = map[string]*badger.DB{}
 	}
-	if a.cacheDB != nil {
-		_ = a.cacheDB.Close()
-		a.cacheDB = nil
-		a.cacheDBPath = ""
+	if db := a.cacheDBs[path]; db != nil {
+		return db, nil
 	}
 	options := badger.DefaultOptions(path).WithLogger(nil)
 	deadline := time.Now().Add(5 * time.Second)
@@ -118,8 +116,7 @@ func (a *App) openCacheDB() (*badger.DB, error) {
 				_ = db.Close()
 				return nil, err
 			}
-			a.cacheDB = db
-			a.cacheDBPath = path
+			a.cacheDBs[path] = db
 			return db, nil
 		}
 		if !badgerOpenLockError(err) || time.Now().After(deadline) {

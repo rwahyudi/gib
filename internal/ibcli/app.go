@@ -105,8 +105,7 @@ type App struct {
 	configScope                      configScope
 	globalConfigGroup                string
 	cacheDBMu                        sync.Mutex
-	cacheDB                          *badger.DB
-	cacheDBPath                      string
+	cacheDBs                         map[string]*badger.DB
 }
 
 func NewDefaultApp() (*App, error) {
