@@ -319,13 +319,16 @@ ib config cache status
 ib config cache clear
 ```
 
-To see whether search used cache or WAPI, run with persistent cache-source diagnostics:
+To see what a command is doing and how long each step takes, add `--debug`.
+Debug output is written to stderr, so JSON and CSV stdout stay script-friendly:
 
 ```bash
-IB_SEARCH_DEBUG=1 ib dns search app --global
+ib dns list --debug -o csv > records.csv
+ib dns search app --global --debug
 ```
 
-PowerShell:
+For older scripts, `IB_SEARCH_DEBUG=1` still prints per-zone DNS search cache
+sources to stderr:
 
 ```powershell
 $env:IB_SEARCH_DEBUG = "1"; ib dns search app --global

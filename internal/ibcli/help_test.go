@@ -24,6 +24,7 @@ func TestRootHelpUsesModules(t *testing.T) {
 		"config  Manage Infoblox configuration",
 		"dns     Manage Infoblox DNS records",
 		"net     Manage Infoblox IPAM networks",
+		"--debug",
 		`Use "ib <module> --help" for more detail.`,
 	} {
 		if !strings.Contains(output, want) {

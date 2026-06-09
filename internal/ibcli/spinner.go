@@ -20,15 +20,17 @@ type spinner struct {
 }
 
 func (a *App) withSpinner(message string, fn func() error) error {
+	done := a.debugPhase("phase", df("name", message))
 	stop := a.startSpinner(message)
 	err := fn()
 	stop()
+	done(err)
 	return err
 }
 
 func (a *App) startSpinner(message string) func() {
 	message = strings.TrimSpace(message)
-	if message == "" || !a.spinnerEnabled() {
+	if message == "" || !a.spinnerEnabled() || a.debugEnabled() {
 		return func() {}
 	}
 	s := &spinner{

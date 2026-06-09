@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -33,6 +34,7 @@ type WapiClient struct {
 	Password    string
 	View        string
 	httpClient  *http.Client
+	debug       func(string, ...debugField)
 }
 
 const minWAPIIdleConns = 32
@@ -72,6 +74,7 @@ func (a *App) newClient(profile Profile) *WapiClient {
 			Timeout:   time.Duration(timeout) * time.Second,
 			Transport: transport,
 		},
+		debug: a.debugEvent,
 	}
 }
 
@@ -132,7 +135,13 @@ func (c *WapiClient) Request(method, objectPath string, params url.Values, paylo
 	if method == http.MethodGet && c.ReadServer != "" {
 		base = c.ReadServer
 	}
+	target := "primary"
+	if method == http.MethodGet && c.ReadServer != "" && base == c.ReadServer {
+		target = "read"
+	}
 	endpoint := c.endpoint(base, objectPath, params)
+	started := time.Now()
+	c.debugEvent("wapi start", df("method", method), df("object", objectPath), df("target", target), df("params", safeWAPIParamSummary(params)), df("payload", payload != nil))
 
 	var body io.Reader
 	if payload != nil {
@@ -154,24 +163,38 @@ func (c *WapiClient) Request(method, objectPath string, params url.Values, paylo
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, cliError("cannot reach Infoblox: %v", err)
+		wrapped := cliError("cannot reach Infoblox: %v", err)
+		c.debugEvent("wapi error", df("method", method), df("object", objectPath), df("target", target), df("duration", time.Since(started)), df("error", wrapped.Error()))
+		return nil, wrapped
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.debugEvent("wapi error", df("method", method), df("object", objectPath), df("target", target), df("status", resp.StatusCode), df("duration", time.Since(started)), df("error", err.Error()))
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, &WapiError{Status: resp.StatusCode, Text: formatWapiError(raw)}
+		wapiErr := &WapiError{Status: resp.StatusCode, Text: formatWapiError(raw)}
+		c.debugEvent("wapi error", df("method", method), df("object", objectPath), df("target", target), df("status", resp.StatusCode), df("bytes", len(raw)), df("duration", time.Since(started)), df("error", wapiErr.Error()))
+		return nil, wapiErr
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
+		c.debugEvent("wapi done", df("method", method), df("object", objectPath), df("target", target), df("status", resp.StatusCode), df("bytes", len(raw)), df("duration", time.Since(started)))
 		return nil, nil
 	}
 	var result any
 	if err := json.Unmarshal(raw, &result); err != nil {
+		c.debugEvent("wapi error", df("method", method), df("object", objectPath), df("target", target), df("status", resp.StatusCode), df("duration", time.Since(started)), df("error", err.Error()))
 		return nil, nonJSONWapiResponseError(method, objectPath, resp, raw)
 	}
+	c.debugEvent("wapi done", df("method", method), df("object", objectPath), df("target", target), df("status", resp.StatusCode), df("bytes", len(raw)), df("duration", time.Since(started)))
 	return result, nil
+}
+
+func (c *WapiClient) debugEvent(event string, fields ...debugField) {
+	if c != nil && c.debug != nil {
+		c.debug(event, fields...)
+	}
 }
 
 func (c *WapiClient) endpoint(base, objectPath string, params url.Values) string {
@@ -287,4 +310,27 @@ func cloneValues(values url.Values) url.Values {
 		}
 	}
 	return cloned
+}
+
+func safeWAPIParamSummary(params url.Values) string {
+	if len(params) == 0 {
+		return ""
+	}
+	safeKeys := []string{"_function", "_max_results", "_page_id", "_return_fields", "fqdn", "name", "network", "network_view", "view"}
+	var parts []string
+	for _, key := range safeKeys {
+		values := params[key]
+		if len(values) == 0 {
+			continue
+		}
+		parts = append(parts, key+"="+strings.Join(values, ","))
+	}
+	if len(parts) == 0 {
+		for key := range params {
+			parts = append(parts, key)
+		}
+		sort.Strings(parts)
+		return strings.Join(parts, ",")
+	}
+	return strings.Join(parts, ",")
 }

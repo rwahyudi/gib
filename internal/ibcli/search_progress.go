@@ -132,7 +132,7 @@ func (a *App) searchProgressEnabled() bool {
 }
 
 func (a *App) searchDebugEnabled() bool {
-	return envFlagEnabled("IB_SEARCH_DEBUG") || envFlagEnabled("IB_CACHE_DEBUG")
+	return a.debugEnabled() || envFlagEnabled("IB_SEARCH_DEBUG") || envFlagEnabled("IB_CACHE_DEBUG")
 }
 
 func envFlagEnabled(name string) bool {
@@ -146,6 +146,23 @@ func envFlagEnabled(name string) bool {
 
 func (a *App) writeSearchDebugEvent(event SearchProgressEvent) {
 	if a.Stderr == nil {
+		return
+	}
+	if a.debugEnabled() {
+		switch event.Kind {
+		case searchProgressStage:
+			a.debugEvent("search stage", df("stage", event.Stage), df("zones", event.TotalZones), df("matches", event.Matches))
+		case searchProgressWorkerStart:
+			a.debugEvent("search worker start", df("worker", event.WorkerID), df("zone", event.Zone), df("stage", event.Stage))
+		case searchProgressWorkerDone:
+			a.debugEvent("search worker done", df("worker", event.WorkerID), df("zone", event.Zone), df("source", event.Source), df("records", event.Records))
+		case searchProgressWorkerSkip:
+			a.debugEvent("search worker skip", df("worker", event.WorkerID), df("zone", event.Zone), df("stage", event.Stage))
+		case searchProgressWorkerError:
+			a.debugEvent("search worker error", df("worker", event.WorkerID), df("zone", event.Zone), df("error", event.Err))
+		case searchProgressZoneMatched:
+			a.debugEvent("search zone matched", df("zone", event.Zone), df("matches", event.Matches))
+		}
 		return
 	}
 	switch event.Kind {

@@ -31,6 +31,10 @@ Show command help.
 .TP
 .B \-o, \-\-output table|json|csv
 Select output format.
+.TP
+.B \-\-debug
+Print timestamped command, WAPI, and cache timing diagnostics to stderr.
+Stdout remains reserved for normal table, JSON, or CSV output.
 .SH EXAMPLES
 .TP
 .B ib
@@ -137,8 +141,10 @@ completed write.
 .SH ENVIRONMENT
 .TP
 .B IB_SEARCH_DEBUG=1
-Print persistent per-zone DNS search cache sources to stderr. Sources include
-fresh cache, stale cache, serial-valid cache, and allrecords.
+Print legacy per-zone DNS search cache sources to stderr. Prefer
+.B \-\-debug
+for broader command, WAPI, and cache timing diagnostics. Sources include fresh
+cache, stale cache, serial-valid cache, and allrecords.
 .SH SEE ALSO
 .B ib --help
 and

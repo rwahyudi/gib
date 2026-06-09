@@ -88,7 +88,7 @@ During `ib config new` and `ib config edit`, DNS View and Default DNS Zone are o
 
 For interactive table output, `ib dns search` uses a Bubble Tea progress view on stderr while the search is running. The view shows the search stage, configured worker count, completed zones, match count, and each worker's current zone/cache source. The final record table is still printed normally on stdout after the progress view exits.
 
-For persistent troubleshooting output, `IB_SEARCH_DEBUG=1` or `IB_CACHE_DEBUG=1` disables the transient progress view and prints per-zone search cache sources on stderr. Use this when checking Windows cache behavior after the table has rendered.
+For persistent troubleshooting output, `--debug` disables transient spinner/progress views and prints timestamped command, WAPI, cache, and search timing lines on stderr while leaving stdout reserved for table, JSON, or CSV output. `IB_SEARCH_DEBUG=1` and `IB_CACHE_DEBUG=1` remain as compatibility switches for per-zone search cache source lines.
 
 The worker state `Checking cache` covers the whole per-zone record load until the worker finishes. That includes opening the SQLite cache, reading and decoding cached JSON records, checking fresh/stale expiry, renewing stale rows from cached zone-list serials when available, acquiring the stale-while-revalidate refresh lease and launching the detached refresh subprocess when needed, and, for entries outside SWR, doing foreground serial or `/allrecords` refresh work.
 

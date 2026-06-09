@@ -1,6 +1,7 @@
 package ibcli
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -54,6 +55,54 @@ func TestWapiClientRoutesGETToReadServerAndWritesToPrimary(t *testing.T) {
 		primaryMethods[1] != http.MethodPut ||
 		primaryMethods[2] != http.MethodDelete {
 		t.Fatalf("primary methods = %#v", primaryMethods)
+	}
+}
+
+func TestWapiDebugTracesRequestWithoutCredentials(t *testing.T) {
+	var stderr bytes.Buffer
+	app := testApp(t)
+	app.Debug = true
+	app.Stderr = &stderr
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "default"}})
+	}))
+	defer server.Close()
+
+	client := app.newClient(Profile{
+		Server:      server.URL,
+		ReadServer:  server.URL,
+		Username:    "admin",
+		Password:    "top-secret",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		VerifySSL:   true,
+	})
+	client.httpClient = server.Client()
+
+	if _, err := client.Request(http.MethodGet, viewObject, url.Values{"view": []string{"default"}}, nil); err != nil {
+		t.Fatalf("debug GET: %v", err)
+	}
+	output := stderr.String()
+	for _, want := range []string{
+		"DEBUG ",
+		"wapi start",
+		"method=\"GET\"",
+		"object=\"view\"",
+		"target=\"read\"",
+		"params=\"view=default\"",
+		"wapi done",
+		"status=200",
+		"duration=",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug output missing %q:\n%s", want, output)
+		}
+	}
+	for _, unwanted := range []string{"top-secret", "admin:top-secret", "Authorization", "Basic "} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("debug output exposed credential detail %q:\n%s", unwanted, output)
+		}
 	}
 }
 

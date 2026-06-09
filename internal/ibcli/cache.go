@@ -539,10 +539,12 @@ func (a *App) cacheEntryFresh(entry cachedPayload, now time.Time) bool {
 }
 
 func (a *App) readCachedZones(profile Profile) (cachedPayload, error) {
+	started := time.Now()
 	profileName, view := cacheScope(profile)
 	key := cacheKey("zones", profileName, view)
 	db, err := a.openCacheDB()
 	if err != nil {
+		a.debugEvent("cache zones error", df("profile", profileName), df("view", view), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedPayload{}, err
 	}
 	defer db.Close()
@@ -551,19 +553,24 @@ func (a *App) readCachedZones(profile Profile) (cachedPayload, error) {
 	var cachedAt int64
 	err = db.QueryRow(`SELECT payload_json, cached_at FROM zone_cache WHERE cache_key = ?`, key).Scan(&raw, &cachedAt)
 	if err == sql.ErrNoRows {
+		a.debugEvent("cache zones miss", df("profile", profileName), df("view", view), df("duration", time.Since(started)))
 		return cachedPayload{}, nil
 	}
 	if err != nil {
+		a.debugEvent("cache zones error", df("profile", profileName), df("view", view), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedPayload{}, err
 	}
 	rows, err := rowsFromJSON(raw)
 	if err != nil {
+		a.debugEvent("cache zones error", df("profile", profileName), df("view", view), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedPayload{}, err
 	}
+	a.debugEvent("cache zones hit", df("profile", profileName), df("view", view), df("rows", len(rows)), df("fresh", a.cacheEntryFresh(cachedPayload{CachedAt: cachedAt}, time.Now())), df("duration", time.Since(started)))
 	return cachedPayload{Rows: rows, CachedAt: cachedAt, CacheFound: true}, nil
 }
 
 func (a *App) writeCachedZones(profile Profile, rows []map[string]any, now time.Time) error {
+	started := time.Now()
 	payload, err := json.Marshal(rows)
 	if err != nil {
 		return err
@@ -580,6 +587,11 @@ func (a *App) writeCachedZones(profile Profile, rows []map[string]any, now time.
 	_, err = db.Exec(`
 INSERT OR REPLACE INTO zone_cache (cache_key, profile, view, cached_at, payload_json)
 VALUES (?, ?, ?, ?, ?)`, key, profileName, view, cachedAt, string(payload))
+	if err != nil {
+		a.debugEvent("cache zones write error", df("profile", profileName), df("view", view), df("rows", len(rows)), df("duration", time.Since(started)), df("error", err.Error()))
+	} else {
+		a.debugEvent("cache zones write", df("profile", profileName), df("view", view), df("rows", len(rows)), df("duration", time.Since(started)))
+	}
 	return err
 }
 
@@ -784,11 +796,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, key, profileName, networkView, ip, cachedAt, stal
 }
 
 func (a *App) readCachedRecords(profile Profile, zone string) (cachedPayload, error) {
+	started := time.Now()
 	profileName, view := cacheScope(profile)
 	zone = normalizeCacheZone(zone)
 	key := cacheKey("records", profileName, view, zone)
 	db, err := a.openCacheDB()
 	if err != nil {
+		a.debugEvent("cache records error", df("profile", profileName), df("view", view), df("zone", zone), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedPayload{}, err
 	}
 	defer db.Close()
@@ -798,23 +812,28 @@ func (a *App) readCachedRecords(profile Profile, zone string) (cachedPayload, er
 	var cachedAt, staleExpiresAt int64
 	err = db.QueryRow(`SELECT payload_json, zone_serial, cached_at, stale_expires_at FROM record_cache WHERE cache_key = ?`, key).Scan(&raw, &serial, &cachedAt, &staleExpiresAt)
 	if err == sql.ErrNoRows {
+		a.debugEvent("cache records miss", df("profile", profileName), df("view", view), df("zone", zone), df("duration", time.Since(started)))
 		return cachedPayload{}, nil
 	}
 	if err != nil {
+		a.debugEvent("cache records error", df("profile", profileName), df("view", view), df("zone", zone), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedPayload{}, err
 	}
 	rows, err := rowsFromJSON(raw)
 	if err != nil {
+		a.debugEvent("cache records error", df("profile", profileName), df("view", view), df("zone", zone), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedPayload{}, err
 	}
 	entry := cachedPayload{Rows: rows, CachedAt: cachedAt, StaleExpiresAt: staleExpiresAt, CacheFound: true}
 	if serial.Valid {
 		entry.Serial = serial.String
 	}
+	a.debugEvent("cache records hit", df("profile", profileName), df("view", view), df("zone", zone), df("serial", entry.Serial), df("rows", len(rows)), df("fresh", a.cacheEntryFresh(entry, time.Now())), df("stale_valid", time.Now().Unix() < staleExpiresAt), df("duration", time.Since(started)))
 	return entry, nil
 }
 
 func (a *App) readCachedRecordsForZones(profile Profile, zones []string) map[string]cachedPayload {
+	started := time.Now()
 	entries := map[string]cachedPayload{}
 	profileName, view := cacheScope(profile)
 	normalizedZones := make([]string, 0, len(zones))
@@ -828,11 +847,13 @@ func (a *App) readCachedRecordsForZones(profile Profile, zones []string) map[str
 		normalizedZones = append(normalizedZones, zone)
 	}
 	if len(normalizedZones) == 0 {
+		a.debugEvent("cache records batch skip", df("profile", profileName), df("view", view), df("zones", 0), df("duration", time.Since(started)))
 		return entries
 	}
 
 	db, err := a.openCacheDB()
 	if err != nil {
+		a.debugEvent("cache records batch error", df("profile", profileName), df("view", view), df("zones", len(normalizedZones)), df("duration", time.Since(started)), df("error", err.Error()))
 		return entries
 	}
 	defer db.Close()
@@ -856,6 +877,7 @@ func (a *App) readCachedRecordsForZones(profile Profile, zones []string) map[str
 		}
 		entries[zone] = entry
 	}
+	a.debugEvent("cache records batch", df("profile", profileName), df("view", view), df("zones", len(normalizedZones)), df("hits", len(entries)), df("duration", time.Since(started)))
 	return entries
 }
 
@@ -867,6 +889,7 @@ func (a *App) writeCachedRecords(profile Profile, zone string, serial string, ro
 }
 
 func (a *App) writeCachedRecordsEntry(profile Profile, zone string, serial string, rows []map[string]any, cachedAt int64, staleExpiresAt int64) error {
+	started := time.Now()
 	payload, err := json.Marshal(rows)
 	if err != nil {
 		return err
@@ -884,10 +907,16 @@ func (a *App) writeCachedRecordsEntry(profile Profile, zone string, serial strin
 	_, err = db.Exec(`
 INSERT OR REPLACE INTO record_cache (cache_key, profile, view, zone, zone_serial, cached_at, stale_expires_at, payload_json)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, key, profileName, view, zone, nullString(serial), cachedAt, staleExpiresAt, string(payload))
+	if err != nil {
+		a.debugEvent("cache records write error", df("profile", profileName), df("view", view), df("zone", zone), df("rows", len(rows)), df("serial", serial), df("duration", time.Since(started)), df("error", err.Error()))
+	} else {
+		a.debugEvent("cache records write", df("profile", profileName), df("view", view), df("zone", zone), df("rows", len(rows)), df("serial", serial), df("duration", time.Since(started)))
+	}
 	return err
 }
 
 func (a *App) renewCachedRecordsAge(profile Profile, zone string, cachedAt time.Time, staleExpiresAt time.Time) error {
+	started := time.Now()
 	// A matching server serial means the payload is still current. Move cached_at
 	// forward so age and cache_ttl-based freshness reflect that validation.
 	profileName, view := cacheScope(profile)
@@ -899,6 +928,11 @@ func (a *App) renewCachedRecordsAge(profile Profile, zone string, cachedAt time.
 	}
 	defer db.Close()
 	_, err = db.Exec(`UPDATE record_cache SET cached_at = ?, stale_expires_at = ? WHERE cache_key = ?`, cachedAt.Unix(), staleExpiresAt.Unix(), key)
+	if err != nil {
+		a.debugEvent("cache records renew error", df("profile", profileName), df("view", view), df("zone", zone), df("duration", time.Since(started)), df("error", err.Error()))
+	} else {
+		a.debugEvent("cache records renew", df("profile", profileName), df("view", view), df("zone", zone), df("duration", time.Since(started)))
+	}
 	return err
 }
 

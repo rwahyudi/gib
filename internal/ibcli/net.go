@@ -399,9 +399,11 @@ func (a *App) cachedIPv4Addresses(profile Profile, client *WapiClient, ip string
 
 func (a *App) cachedNetRows(profile Profile, kind string, networkView string, ip string, read func() (cachedPayload, error), refresh func() ([]map[string]any, error), options netCacheOptions) ([]map[string]any, error) {
 	now := time.Now()
+	started := now
 	entry, err := read()
 	if err == nil && entry.CacheFound {
 		if !options.ForceRefresh && a.cacheEntryFresh(entry, now) {
+			a.debugEvent("cache ipam source", df("kind", kind), df("network_view", networkView), df("ip", ip), df("source", "fresh cache"), df("rows", len(entry.Rows)), df("duration", time.Since(started)))
 			return entry.Rows, nil
 		}
 		// IPAM has no cheap serial equivalent. List/search may choose latency over
@@ -410,6 +412,7 @@ func (a *App) cachedNetRows(profile Profile, kind string, networkView string, ip
 		if !options.ForceRefresh && (now.Unix() < entry.StaleExpiresAt || options.ServeExpired) {
 			a.startNetCacheRefreshAsync(profile, kind, networkView, ip)
 			options.notifyStaleServed()
+			a.debugEvent("cache ipam source", df("kind", kind), df("network_view", networkView), df("ip", ip), df("source", "stale cache"), df("rows", len(entry.Rows)), df("duration", time.Since(started)))
 			return entry.Rows, nil
 		}
 	}
@@ -420,17 +423,25 @@ func (a *App) cachedNetRows(profile Profile, kind string, networkView string, ip
 			entry, err = read()
 			if err == nil && entry.CacheFound {
 				if a.cacheEntryFresh(entry, now) {
+					a.debugEvent("cache ipam source", df("kind", kind), df("network_view", networkView), df("ip", ip), df("source", "fresh cache"), df("waited", true), df("rows", len(entry.Rows)), df("duration", time.Since(started)))
 					return entry.Rows, nil
 				}
 				if now.Unix() < entry.StaleExpiresAt || options.ServeExpired {
 					a.startNetCacheRefreshAsync(profile, kind, networkView, ip)
 					options.notifyStaleServed()
+					a.debugEvent("cache ipam source", df("kind", kind), df("network_view", networkView), df("ip", ip), df("source", "stale cache"), df("waited", true), df("rows", len(entry.Rows)), df("duration", time.Since(started)))
 					return entry.Rows, nil
 				}
 			}
 		}
 	}
-	return refresh()
+	rows, err := refresh()
+	if err != nil {
+		a.debugEvent("cache ipam source error", df("kind", kind), df("network_view", networkView), df("ip", ip), df("source", "wapi"), df("duration", time.Since(started)), df("error", err.Error()))
+		return nil, err
+	}
+	a.debugEvent("cache ipam source", df("kind", kind), df("network_view", networkView), df("ip", ip), df("source", "wapi"), df("rows", len(rows)), df("duration", time.Since(started)))
+	return rows, nil
 }
 
 func (a *App) refreshNetworkViewCache(profile Profile, client *WapiClient) ([]map[string]any, error) {
@@ -547,24 +558,33 @@ func (a *App) startNetCacheRefreshAsync(profile Profile, kind string, networkVie
 }
 
 func (a *App) startNetCacheRefresh(profile Profile, kind string, networkView string, ip string) error {
+	done := a.debugPhase("cache ipam refresh dispatch", df("profile", cacheProfileName(profile)), df("kind", kind), df("network_view", networkView), df("ip", ip))
 	acquired, err := a.tryAcquireNetRefreshLease(profile, kind, networkView, ip, time.Now(), recordRefreshLeaseTTL)
 	if err != nil || !acquired {
+		done(err)
+		if err == nil {
+			a.debugEvent("cache ipam refresh skipped", df("reason", "lease active"), df("kind", kind), df("network_view", networkView), df("ip", ip))
+		}
 		return err
 	}
 	if a.backgroundNetRefresher != nil {
 		if err := a.backgroundNetRefresher(profile, kind, networkView, ip); err != nil {
 			_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+			done(err)
 			return err
 		}
+		done(nil)
 		return nil
 	}
 	executable, ok, err := backgroundRefreshExecutable()
 	if err != nil {
 		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+		done(err)
 		return err
 	}
 	if !ok {
 		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+		done(nil)
 		return nil
 	}
 	args := []string{
@@ -582,11 +602,13 @@ func (a *App) startNetCacheRefresh(profile Profile, kind string, networkView str
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+		done(err)
 		return err
 	}
 	go func() {
 		_ = cmd.Wait()
 	}()
+	done(nil)
 	return nil
 }
 

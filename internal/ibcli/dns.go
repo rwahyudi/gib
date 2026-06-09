@@ -621,17 +621,23 @@ func nextAvailableIPResponseIPs(response any) ([]string, error) {
 
 func (a *App) cachedZones(profile Profile, client *WapiClient, search string) ([]map[string]any, error) {
 	now := time.Now()
+	started := now
 	entry, err := a.readCachedZones(profile)
 	if err == nil && entry.CacheFound && a.cacheEntryFresh(entry, now) {
-		return filterZones(entry.Rows, search), nil
+		rows := filterZones(entry.Rows, search)
+		a.debugEvent("cache zones source", df("source", "fresh cache"), df("rows", len(rows)), df("search", search), df("duration", time.Since(started)))
+		return rows, nil
 	}
 
 	zones, err := queryZones(client, "")
 	if err != nil {
+		a.debugEvent("cache zones source error", df("source", "wapi"), df("search", search), df("duration", time.Since(started)), df("error", err.Error()))
 		return nil, err
 	}
 	_ = a.writeCachedZones(profile, zones, now)
-	return filterZones(zones, search), nil
+	rows := filterZones(zones, search)
+	a.debugEvent("cache zones source", df("source", "wapi"), df("rows", len(rows)), df("search", search), df("duration", time.Since(started)))
+	return rows, nil
 }
 
 func (a *App) queueZoneCacheRefresh(profile Profile) {
@@ -644,24 +650,33 @@ func (a *App) startZoneCacheRefreshAsync(profile Profile) {
 }
 
 func (a *App) startZoneCacheRefresh(profile Profile) error {
+	done := a.debugPhase("cache zones refresh dispatch", df("profile", cacheProfileName(profile)), df("view", strings.TrimSpace(profile.DNSView)))
 	acquired, err := a.tryAcquireZoneRefreshLease(profile, time.Now(), recordRefreshLeaseTTL)
 	if err != nil || !acquired {
+		done(err)
+		if err == nil {
+			a.debugEvent("cache zones refresh skipped", df("reason", "lease active"), df("profile", cacheProfileName(profile)), df("view", strings.TrimSpace(profile.DNSView)))
+		}
 		return err
 	}
 	if a.backgroundZoneRefresher != nil {
 		if err := a.backgroundZoneRefresher(profile); err != nil {
 			_ = a.releaseZoneRefreshLease(profile)
+			done(err)
 			return err
 		}
+		done(nil)
 		return nil
 	}
 	executable, ok, err := backgroundRefreshExecutable()
 	if err != nil {
 		_ = a.releaseZoneRefreshLease(profile)
+		done(err)
 		return err
 	}
 	if !ok {
 		_ = a.releaseZoneRefreshLease(profile)
+		done(nil)
 		return nil
 	}
 	args := []string{
@@ -673,11 +688,13 @@ func (a *App) startZoneCacheRefresh(profile Profile) error {
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		_ = a.releaseZoneRefreshLease(profile)
+		done(err)
 		return err
 	}
 	go func() {
 		_ = cmd.Wait()
 	}()
+	done(nil)
 	return nil
 }
 
@@ -1893,9 +1910,11 @@ func (a *App) cachedRecordsForZoneWithPrefetchedResult(profile Profile, client *
 
 func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zoneName string, options cachedRecordLoadOptions) (cachedRecordLoadResult, error) {
 	now := time.Now()
+	started := now
 	entry, err := a.readCachedRecords(profile, zoneName)
 	if err == nil && entry.CacheFound {
 		if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, now, options); ok {
+			a.debugEvent("cache records source", df("zone", zoneName), df("source", result.Source), df("records", len(result.Records)), df("duration", time.Since(started)))
 			return result, nil
 		}
 	}
@@ -1907,6 +1926,7 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 		entry, err = a.readCachedRecords(profile, zoneName)
 		if err == nil && entry.CacheFound {
 			if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, now, options); ok {
+				a.debugEvent("cache records source", df("zone", zoneName), df("source", result.Source), df("records", len(result.Records)), df("waited", true), df("duration", time.Since(started)))
 				return result, nil
 			}
 		}
@@ -1916,10 +1936,12 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 	// than the configured stale window. A matching SOA serial lets us renew the
 	// cache without downloading /allrecords again.
 	if result, ok := a.cachedRecordLoadResultFromKnownSerial(profile, client, zoneName, entry, now, options); ok {
+		a.debugEvent("cache records source", df("zone", zoneName), df("source", result.Source), df("records", len(result.Records)), df("duration", time.Since(started)))
 		return result, nil
 	}
 	currentSerial, hasSerial, err := currentZoneSerial(client, zoneName)
 	if err != nil {
+		a.debugEvent("cache records source error", df("zone", zoneName), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedRecordLoadResult{}, err
 	}
 	if entry.CacheFound && hasSerial && entry.Serial != "" && entry.Serial == currentSerial {
@@ -1931,11 +1953,13 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 		} else {
 			_ = a.renewCachedRecordsAge(profile, zoneName, now, staleExpiresAt)
 		}
+		a.debugEvent("cache records source", df("zone", zoneName), df("source", source), df("records", len(entry.Rows)), df("serial", currentSerial), df("duration", time.Since(started)))
 		return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: source}, nil
 	}
 
 	rows, err := allRecordRowsForZone(client, zoneName, options.Enrich)
 	if err != nil {
+		a.debugEvent("cache records source error", df("zone", zoneName), df("source", recordCacheSourceAllRecords), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedRecordLoadResult{}, err
 	}
 	serial := ""
@@ -1943,6 +1967,7 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 		serial = currentSerial
 	}
 	_ = a.writeCachedRecords(profile, zoneName, serial, rows, now)
+	a.debugEvent("cache records source", df("zone", zoneName), df("source", recordCacheSourceAllRecords), df("records", len(rows)), df("serial", serial), df("duration", time.Since(started)))
 	return cachedRecordLoadResult{Records: recordsFromAllRecordRows(rows), Source: recordCacheSourceAllRecords}, nil
 }
 
@@ -1966,6 +1991,7 @@ func (a *App) cachedRecordLoadResultFromEntry(profile Profile, client *WapiClien
 		if options.DeferStaleRevalidation {
 			return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: recordCacheSourceStaleCache, RevalidateStale: true}, true
 		}
+		a.debugEvent("cache records revalidate queued", df("zone", zoneName))
 		a.startRecordCacheRevalidationAsync(profile, zoneName)
 		return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: recordCacheSourceStaleCache}, true
 	}
@@ -2026,24 +2052,33 @@ func normalizeUniqueZoneNames(zoneNames []string) []string {
 }
 
 func (a *App) startRecordCacheRevalidation(profile Profile, zoneName string) error {
+	done := a.debugPhase("cache records revalidate dispatch", df("profile", cacheProfileName(profile)), df("view", strings.TrimSpace(profile.DNSView)), df("zone", zoneName))
 	acquired, err := a.tryAcquireRecordRefreshLease(profile, zoneName, time.Now(), recordRefreshLeaseTTL)
 	if err != nil || !acquired {
+		done(err)
+		if err == nil {
+			a.debugEvent("cache records revalidate skipped", df("reason", "lease active"), df("zone", zoneName))
+		}
 		return err
 	}
 	if a.backgroundRecordRevalidator != nil {
 		if err := a.backgroundRecordRevalidator(profile, zoneName); err != nil {
 			_ = a.releaseRecordRefreshLease(profile, zoneName)
+			done(err)
 			return err
 		}
+		done(nil)
 		return nil
 	}
 	executable, ok, err := backgroundRefreshExecutable()
 	if err != nil {
 		_ = a.releaseRecordRefreshLease(profile, zoneName)
+		done(err)
 		return err
 	}
 	if !ok {
 		_ = a.releaseRecordRefreshLease(profile, zoneName)
+		done(nil)
 		return nil
 	}
 
@@ -2059,11 +2094,13 @@ func (a *App) startRecordCacheRevalidation(profile Profile, zoneName string) err
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		_ = a.releaseRecordRefreshLease(profile, zoneName)
+		done(err)
 		return err
 	}
 	go func() {
 		_ = cmd.Wait()
 	}()
+	done(nil)
 	return nil
 }
 
@@ -2072,11 +2109,13 @@ func (a *App) startRecordCacheRevalidationBatch(profile Profile, zoneNames []str
 	if len(zones) == 0 {
 		return nil
 	}
+	done := a.debugPhase("cache records revalidate batch dispatch", df("profile", cacheProfileName(profile)), df("view", strings.TrimSpace(profile.DNSView)), df("zones", len(zones)))
 	var acquired []string
 	now := time.Now()
 	for _, zoneName := range zones {
 		ok, err := a.tryAcquireRecordRefreshLease(profile, zoneName, now, recordRefreshLeaseTTL)
 		if err != nil {
+			done(err)
 			return err
 		}
 		if ok {
@@ -2084,6 +2123,8 @@ func (a *App) startRecordCacheRevalidationBatch(profile Profile, zoneNames []str
 		}
 	}
 	if len(acquired) == 0 {
+		done(nil)
+		a.debugEvent("cache records revalidate batch skipped", df("reason", "leases active"), df("zones", len(zones)))
 		return nil
 	}
 	if a.backgroundRecordBatchRevalidator != nil {
@@ -2091,8 +2132,10 @@ func (a *App) startRecordCacheRevalidationBatch(profile Profile, zoneNames []str
 			for _, zoneName := range acquired {
 				_ = a.releaseRecordRefreshLease(profile, zoneName)
 			}
+			done(err)
 			return err
 		}
+		done(nil)
 		return nil
 	}
 	executable, ok, err := backgroundRefreshExecutable()
@@ -2100,12 +2143,14 @@ func (a *App) startRecordCacheRevalidationBatch(profile Profile, zoneNames []str
 		for _, zoneName := range acquired {
 			_ = a.releaseRecordRefreshLease(profile, zoneName)
 		}
+		done(err)
 		return err
 	}
 	if !ok {
 		for _, zoneName := range acquired {
 			_ = a.releaseRecordRefreshLease(profile, zoneName)
 		}
+		done(nil)
 		return nil
 	}
 	args := []string{
@@ -2122,11 +2167,13 @@ func (a *App) startRecordCacheRevalidationBatch(profile Profile, zoneNames []str
 		for _, zoneName := range acquired {
 			_ = a.releaseRecordRefreshLease(profile, zoneName)
 		}
+		done(err)
 		return err
 	}
 	go func() {
 		_ = cmd.Wait()
 	}()
+	done(nil)
 	return nil
 }
 
@@ -2208,32 +2255,41 @@ func (a *App) runRecordCacheRevalidateBatch(profileName string, view string, zon
 
 func (a *App) revalidateRecordCache(profile Profile, client *WapiClient, zoneName string) error {
 	now := time.Now()
+	done := a.debugPhase("cache records revalidate", df("profile", cacheProfileName(profile)), df("view", strings.TrimSpace(profile.DNSView)), df("zone", zoneName))
 	entry, err := a.readCachedRecords(profile, zoneName)
 	if err != nil {
+		done(err)
 		return err
 	}
 	currentSerial, hasSerial, err := currentZoneSerial(client, zoneName)
 	if err != nil {
 		if isZoneNotFoundError(err) {
 			a.invalidateRecordCache(profile, zoneName)
+			done(nil)
 			return nil
 		}
+		done(err)
 		return err
 	}
 	if entry.CacheFound && hasSerial && entry.Serial != "" && entry.Serial == currentSerial {
 		// Nothing changed on Infoblox. Renew timestamps only; the cached payload
 		// remains valid and avoids another large /allrecords download.
-		return a.renewCachedRecordsAge(profile, zoneName, now, now.Add(a.recordsCacheSWRTTL()))
+		err := a.renewCachedRecordsAge(profile, zoneName, now, now.Add(a.recordsCacheSWRTTL()))
+		done(err)
+		return err
 	}
 	rows, err := allRecordRowsForZone(client, zoneName, false)
 	if err != nil {
+		done(err)
 		return err
 	}
 	serial := ""
 	if hasSerial {
 		serial = currentSerial
 	}
-	return a.writeCachedRecords(profile, zoneName, serial, rows, now)
+	err = a.writeCachedRecords(profile, zoneName, serial, rows, now)
+	done(err)
+	return err
 }
 
 type zoneNotFoundError struct {

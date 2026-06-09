@@ -83,6 +83,7 @@ type App struct {
 	GlobalConfigFile    string
 	GlobalConfigKeyFile string
 	Output              string
+	Debug               bool
 	Stdout              io.Writer
 	Stderr              io.Writer
 	Stdin               io.Reader
@@ -90,6 +91,7 @@ type App struct {
 
 	dnsZoneOverride                  string
 	dnsViewOverride                  string
+	debugStartedAt                   time.Time
 	backgroundRecordRevalidator      func(Profile, string) error
 	backgroundRecordBatchRevalidator func(Profile, []string) error
 	backgroundZoneRefresher          func(Profile) error
@@ -149,6 +151,11 @@ func (a *App) Execute(args []string) error {
 	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeNetSortValue(args) || a.completeZoneListFlagNames(args) {
 		return nil
 	}
+	if argsContainDebug(args) {
+		a.Debug = true
+		a.debugEnsureStart()
+		a.debugEvent("execute start")
+	}
 	root := a.RootCommand()
 	root.SetOut(a.Stdout)
 	root.SetErr(a.Stderr)
@@ -156,7 +163,21 @@ func (a *App) Execute(args []string) error {
 	root.SetArgs(normalizeSortArgs(args))
 	cmd, err := root.ExecuteC()
 	if err == nil {
+		if a.debugEnabled() {
+			path := ""
+			if cmd != nil {
+				path = cmd.CommandPath()
+			}
+			a.debugEvent("command done", df("path", path), df("status", "ok"), df("duration", time.Since(a.debugStartedAt)))
+		}
 		return nil
+	}
+	if a.debugEnabled() {
+		path := ""
+		if cmd != nil {
+			path = cmd.CommandPath()
+		}
+		a.debugEvent("command error", df("path", path), df("status", "error"), df("duration", time.Since(a.debugStartedAt)), df("error", err.Error()))
 	}
 	if errors.Is(err, errUsageDisplayed) {
 		return err
@@ -224,8 +245,18 @@ Common usage:
 		tableOutput,
 		"output format: table, json, or csv",
 	)
+	root.PersistentFlags().BoolVar(
+		&a.Debug,
+		"debug",
+		false,
+		"print debug trace with timestamps and elapsed durations to stderr",
+	)
 	_ = root.RegisterFlagCompletionFunc("output", outputFormatCompletion)
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if a.debugEnabled() {
+			a.debugEnsureStart()
+			a.debugEvent("command start", df("path", cmd.CommandPath()), df("output", a.Output))
+		}
 		a.Output = strings.ToLower(strings.TrimSpace(a.Output))
 		switch a.Output {
 		case "", tableOutput:

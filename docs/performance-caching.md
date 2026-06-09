@@ -130,6 +130,8 @@ ib config cache status
 ib config cache clear
 ```
 
-Use `IB_SEARCH_DEBUG=1 ib dns search KEYWORD --global` to keep per-zone cache
-source lines on stderr after the command finishes. Sources are `fresh cache`,
-`stale cache`, `serial-valid cache`, or `allrecords`.
+Use `ib dns search KEYWORD --global --debug` to print timestamped command,
+WAPI, and cache timing lines to stderr while keeping stdout unchanged. Cache
+sources include `fresh cache`, `stale cache`, `serial-valid cache`, and
+`allrecords`. `IB_SEARCH_DEBUG=1` remains available for the older per-zone
+search cache-source output.

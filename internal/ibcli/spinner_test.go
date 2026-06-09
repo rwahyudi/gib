@@ -38,6 +38,34 @@ func TestWithSpinnerReturnsFunctionErrorAndKeepsBufferedStderrClean(t *testing.T
 	}
 }
 
+func TestWithSpinnerDebugPrintsPhaseWithoutSpinnerFrames(t *testing.T) {
+	var stderr bytes.Buffer
+	app := testApp(t)
+	app.Debug = true
+	app.Stderr = &stderr
+
+	if err := app.withSpinner("Loading DNS records...", func() error {
+		return nil
+	}); err != nil {
+		t.Fatalf("withSpinner debug: %v", err)
+	}
+	output := stderr.String()
+	for _, want := range []string{
+		"DEBUG ",
+		"phase start",
+		"name=\"Loading DNS records...\"",
+		"phase done",
+		"duration=",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug spinner output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "\r") {
+		t.Fatalf("debug spinner output should not include spinner carriage returns:\n%s", output)
+	}
+}
+
 func TestSpinnerDisabledForBlankMessage(t *testing.T) {
 	var stderr bytes.Buffer
 	app := testApp(t)
