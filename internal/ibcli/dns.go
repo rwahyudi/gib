@@ -2934,6 +2934,7 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 	var wg sync.WaitGroup
 	for id := 1; id <= workerCount; id++ {
 		workerID := id
+		workerClient := searchWorkerClient(client, workerID, workerCount)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -2947,7 +2948,7 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 					}
 					reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressWorkerStart, WorkerID: workerID, Zone: job.zoneName, Stage: "Checking cache"})
 					entry, hasEntry := prefetchedRecords[normalizeCacheZone(job.zoneName)]
-					result, err := a.cachedRecordsForZoneWithPrefetchedResult(profile, client, job.zoneName, cachedRecordLoadOptions{Enrich: enrich, KnownSerial: job.serial, DeferStaleRevalidation: true}, entry, hasEntry)
+					result, err := a.cachedRecordsForZoneWithPrefetchedResult(profile, workerClient, job.zoneName, cachedRecordLoadOptions{Enrich: enrich, KnownSerial: job.serial, DeferStaleRevalidation: true}, entry, hasEntry)
 					if err != nil {
 						if isSecondaryZoneDataUnavailable(err) {
 							reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressWorkerSkip, WorkerID: workerID, Zone: job.zoneName, Stage: "Secondary zone data unavailable", Err: err})
@@ -3015,6 +3016,45 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 		batches = append(batches, *batch)
 	}
 	return batches, nil
+}
+
+func searchWorkerClient(client *WapiClient, workerID int, workerCount int) *WapiClient {
+	if client == nil || !searchWorkerUsesPrimaryReads(client, workerID, workerCount) {
+		return client
+	}
+	workerClient := client.clone()
+	workerClient.ForcePrimaryReads = true
+	return workerClient
+}
+
+func searchWorkerUsesPrimaryReads(client *WapiClient, workerID int, workerCount int) bool {
+	if client == nil || workerID <= 0 || workerCount <= 10 {
+		return false
+	}
+	if strings.TrimSpace(client.ReadServer) == "" || strings.TrimRight(client.ReadServer, "/") == strings.TrimRight(client.Server, "/") {
+		return false
+	}
+	primaryWorkers := primaryReadWorkerCount(workerCount)
+	if primaryWorkers == 0 {
+		return false
+	}
+	// Spread primary-read workers across the worker ID range instead of
+	// clustering them at the start, while selecting exactly primaryWorkers IDs.
+	return (workerID*primaryWorkers)/workerCount != ((workerID-1)*primaryWorkers)/workerCount
+}
+
+func primaryReadWorkerCount(workerCount int) int {
+	if workerCount <= 10 {
+		return 0
+	}
+	primaryWorkers := int(math.Round(float64(workerCount) * 0.20))
+	if primaryWorkers < 1 {
+		primaryWorkers = 1
+	}
+	if primaryWorkers > workerCount {
+		primaryWorkers = workerCount
+	}
+	return primaryWorkers
 }
 
 func isSecondaryZoneDataUnavailable(err error) bool {

@@ -27,14 +27,15 @@ func (e *WapiError) Error() string {
 }
 
 type WapiClient struct {
-	Server      string
-	ReadServer  string
-	WAPIVersion string
-	Username    string
-	Password    string
-	View        string
-	httpClient  *http.Client
-	debug       func(string, ...debugField)
+	Server            string
+	ReadServer        string
+	WAPIVersion       string
+	Username          string
+	Password          string
+	View              string
+	ForcePrimaryReads bool
+	httpClient        *http.Client
+	debug             func(string, ...debugField)
 }
 
 const minWAPIIdleConns = 32
@@ -94,6 +95,14 @@ func (a *App) tuneWAPITransport(transport *http.Transport) {
 	transport.MaxConnsPerHost = desiredIdleConns
 }
 
+func (c *WapiClient) clone() *WapiClient {
+	if c == nil {
+		return nil
+	}
+	cloned := *c
+	return &cloned
+}
+
 func normalizeServer(value string) (string, error) {
 	server := strings.TrimRight(strings.TrimSpace(value), "/")
 	if server == "" {
@@ -131,8 +140,10 @@ func (c *WapiClient) Request(method, objectPath string, params url.Values, paylo
 
 	// Only GET is allowed to use the read endpoint. All write verbs stay on the
 	// primary Grid Master because GCM read-only API support is not writable.
+	// High-parallel DNS search can force selected worker GETs back to primary
+	// while keeping the same pooled HTTP transport.
 	base := c.Server
-	if method == http.MethodGet && c.ReadServer != "" {
+	if method == http.MethodGet && c.ReadServer != "" && !c.ForcePrimaryReads {
 		base = c.ReadServer
 	}
 	target := "primary"

@@ -1782,6 +1782,144 @@ func TestSearchProgressReportsWorkerEvents(t *testing.T) {
 	}
 }
 
+func TestSearchWorkerPrimaryReadSplit(t *testing.T) {
+	client := &WapiClient{Server: "https://primary.example", ReadServer: "https://read.example"}
+	tests := []struct {
+		workerCount int
+		wantCount   int
+		wantIDs     []int
+	}{
+		{workerCount: 10, wantCount: 0, wantIDs: nil},
+		{workerCount: 11, wantCount: 2, wantIDs: []int{6, 11}},
+		{workerCount: 16, wantCount: 3, wantIDs: []int{6, 11, 16}},
+		{workerCount: 24, wantCount: 5, wantIDs: []int{5, 10, 15, 20, 24}},
+	}
+	for _, tt := range tests {
+		if got := primaryReadWorkerCount(tt.workerCount); got != tt.wantCount {
+			t.Fatalf("primaryReadWorkerCount(%d) = %d, want %d", tt.workerCount, got, tt.wantCount)
+		}
+		var gotIDs []int
+		for id := 1; id <= tt.workerCount; id++ {
+			if searchWorkerUsesPrimaryReads(client, id, tt.workerCount) {
+				gotIDs = append(gotIDs, id)
+			}
+		}
+		if fmt.Sprint(gotIDs) != fmt.Sprint(tt.wantIDs) {
+			t.Fatalf("primary worker IDs for %d workers = %v, want %v", tt.workerCount, gotIDs, tt.wantIDs)
+		}
+	}
+}
+
+func TestSearchWorkerPrimaryReadSplitRequiresRealReadServer(t *testing.T) {
+	for _, client := range []*WapiClient{
+		nil,
+		{Server: "https://primary.example"},
+		{Server: "https://primary.example", ReadServer: "https://primary.example"},
+		{Server: "https://primary.example/", ReadServer: "https://primary.example"},
+	} {
+		if searchWorkerUsesPrimaryReads(client, 11, 16) {
+			t.Fatalf("searchWorkerUsesPrimaryReads(%#v) = true, want false", client)
+		}
+	}
+}
+
+func TestSearchWorkerClientForPrimaryReadsSharesHTTPClient(t *testing.T) {
+	httpClient := &http.Client{}
+	client := &WapiClient{Server: "https://primary.example", ReadServer: "https://read.example", httpClient: httpClient}
+	workerClient := searchWorkerClient(client, 6, 16)
+	if workerClient == client {
+		t.Fatal("primary-read worker reused base client, want clone")
+	}
+	if !workerClient.ForcePrimaryReads {
+		t.Fatal("primary-read worker did not force primary reads")
+	}
+	if workerClient.httpClient != httpClient {
+		t.Fatal("primary-read worker did not share HTTP client")
+	}
+	readWorkerClient := searchWorkerClient(client, 1, 16)
+	if readWorkerClient != client {
+		t.Fatal("read worker cloned client, want base client")
+	}
+}
+
+func TestSearchZoneRecordBatchesSplitsWorkerGETsBetweenPrimaryAndReadServer(t *testing.T) {
+	var primaryGETs, readGETs int
+	var requestsMu sync.Mutex
+	handler := func(counter *int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				t.Fatalf("method = %s, want GET", r.Method)
+			}
+			requestsMu.Lock()
+			*counter = *counter + 1
+			requestsMu.Unlock()
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/zone_auth"):
+				zone := r.URL.Query().Get("fqdn")
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+					"fqdn":              zone,
+					"view":              "default",
+					"zone_format":       "FORWARD",
+					"primary_type":      "Grid",
+					"soa_serial_number": "2026061001",
+				}}})
+			case strings.HasSuffix(r.URL.Path, "/allrecords"):
+				zone := r.URL.Query().Get("zone")
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+					"type":    "HOST_IPV4ADDR",
+					"name":    "test." + zone,
+					"address": "192.0.2.10",
+					"zone":    zone,
+				}}})
+			default:
+				http.NotFound(w, r)
+			}
+		}
+	}
+
+	primary := httptest.NewServer(handler(&primaryGETs))
+	defer primary.Close()
+	read := httptest.NewServer(handler(&readGETs))
+	defer read.Close()
+
+	app := testApp(t)
+	writeConfigForSettings(t, app, ConfigSettings{DNSSearchWorkerLimit: 11})
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	client := &WapiClient{
+		Server:      primary.URL,
+		ReadServer:  read.URL,
+		WAPIVersion: defaultWAPIVersion,
+		View:        "default",
+		httpClient:  primary.Client(),
+	}
+
+	zones := make([]map[string]any, 0, 11)
+	for i := 1; i <= 11; i++ {
+		zones = append(zones, map[string]any{
+			"fqdn":              fmt.Sprintf("zone-%02d.example.com", i),
+			"view":              "default",
+			"zone_format":       "FORWARD",
+			"primary_type":      "Grid",
+			"soa_serial_number": "2026061001",
+		})
+	}
+	batches, err := app.searchZoneRecordBatches(profile, client, zones, false, nil)
+	if err != nil {
+		t.Fatalf("search zone batches: %v", err)
+	}
+	if len(batches) != len(zones) {
+		t.Fatalf("batches = %d, want %d", len(batches), len(zones))
+	}
+	requestsMu.Lock()
+	defer requestsMu.Unlock()
+	if primaryGETs != 4 {
+		t.Fatalf("primary GETs = %d, want 4", primaryGETs)
+	}
+	if readGETs != 18 {
+		t.Fatalf("read GETs = %d, want 18", readGETs)
+	}
+}
+
 func TestSearchAcrossZonesUsesFreshPrefetchedRecordCache(t *testing.T) {
 	zones := []map[string]any{
 		{"fqdn": "one.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},

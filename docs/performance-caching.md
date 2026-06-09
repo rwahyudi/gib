@@ -14,7 +14,7 @@ worker pool.
 | Stale window | Record and targeted IPAM rows can be served stale until `stale_expires_at`; IPAM list/search can serve older cached rows by default. |
 | Revalidation | Stale rows return immediately; DNS rows renew locally when cached zone serials match, otherwise background refresh starts are lease-protected and batched for multi-zone search. |
 | IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. |
-| Read endpoint | GET requests use `read_server` when configured. |
+| Read endpoint | GET requests use `read_server` when configured; high-parallel DNS search spreads a small share back to primary. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
 | Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`. |
 | Connections | The WAPI HTTP client keeps an idle connection pool sized from `dns_search_worker_limit` for better TLS reuse. |
@@ -72,6 +72,11 @@ helpers.
 Read-only traffic can use a Grid Master Candidate when `ib config new/edit`
 finds one that supports read-only WAPI access. Writes never use that endpoint:
 create, edit, delete, and zone mutation commands stay on the primary Grid Master.
+When `dns_search_worker_limit` is greater than 10 and `read_server` is distinct
+from the primary server, global DNS search assigns about 20% of record-loading
+workers to primary GETs and leaves the other workers on the read server. Worker
+clients share the same pooled HTTP transport, so keep-alive reuse remains sized
+from `dns_search_worker_limit` across both endpoints.
 
 ## What The Workers Do
 

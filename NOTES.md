@@ -30,6 +30,8 @@ Multi-zone search should preload record-cache rows for the selected zones with o
 
 The WAPI HTTP transport should keep enough idle per-host connections for search workers. Size `MaxIdleConnsPerHost` and `MaxConnsPerHost` from `dns_search_worker_limit` so Windows does not repeatedly pay TCP/TLS setup costs during parallel `/allrecords` refreshes.
 
+When `dns_search_worker_limit > 10` and the active profile has a real `read_server`, global DNS search should assign about 20% of worker GET traffic to the primary server and keep the remaining workers on the read server. This is worker-based routing, not random request routing, and it relies on the existing pooled HTTP transport rather than active health polling. Writes always stay on primary.
+
 ## Global Cache and Search Settings
 
 The config file stores global cache/search tuning in the `[meta]` section:

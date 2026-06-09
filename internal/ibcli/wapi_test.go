@@ -58,6 +58,43 @@ func TestWapiClientRoutesGETToReadServerAndWritesToPrimary(t *testing.T) {
 	}
 }
 
+func TestWapiClientCanForceGETToPrimary(t *testing.T) {
+	var primaryMethods []string
+	var readMethods []string
+
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryMethods = append(primaryMethods, r.Method)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer primary.Close()
+
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		readMethods = append(readMethods, r.Method)
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "default"}})
+	}))
+	defer read.Close()
+
+	client := &WapiClient{
+		Server:            primary.URL,
+		ReadServer:        read.URL,
+		WAPIVersion:       defaultWAPIVersion,
+		Username:          "admin",
+		Password:          "secret",
+		ForcePrimaryReads: true,
+		httpClient:        primary.Client(),
+	}
+
+	if _, err := client.Request(http.MethodGet, viewObject, url.Values{}, nil); err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if len(readMethods) != 0 {
+		t.Fatalf("read methods = %#v, want none", readMethods)
+	}
+	if len(primaryMethods) != 1 || primaryMethods[0] != http.MethodGet {
+		t.Fatalf("primary methods = %#v", primaryMethods)
+	}
+}
+
 func TestWapiDebugTracesRequestWithoutCredentials(t *testing.T) {
 	var stderr bytes.Buffer
 	app := testApp(t)
