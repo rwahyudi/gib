@@ -145,6 +145,21 @@ func (a *App) cacheCommand() *cobra.Command {
 	revalidateCmd.Flags().String("view", "", "DNS view")
 	revalidateCmd.Flags().String("zone", "", "DNS zone")
 	cmd.AddCommand(revalidateCmd)
+	revalidateBatchCmd := &cobra.Command{
+		Use:    "revalidate-records",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profileName, _ := cmd.Flags().GetString("profile")
+			view, _ := cmd.Flags().GetString("view")
+			zones, _ := cmd.Flags().GetStringArray("zone")
+			return a.runRecordCacheRevalidateBatch(profileName, view, zones)
+		},
+	}
+	revalidateBatchCmd.Flags().String("profile", "", "profile name")
+	revalidateBatchCmd.Flags().String("view", "", "DNS view")
+	revalidateBatchCmd.Flags().StringArray("zone", nil, "DNS zone")
+	cmd.AddCommand(revalidateBatchCmd)
 	refreshZonesCmd := &cobra.Command{
 		Use:    "refresh-zones",
 		Hidden: true,

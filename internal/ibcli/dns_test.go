@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1843,6 +1844,147 @@ func TestSearchAcrossZonesUsesFreshPrefetchedRecordCache(t *testing.T) {
 	}
 	if freshCacheHits != len(zones) {
 		t.Fatalf("fresh cache hits = %d, want %d; events=%#v", freshCacheHits, len(zones), events)
+	}
+}
+
+func TestSearchAcrossZonesRenewsStalePrefetchedRecordCacheWithZoneSerial(t *testing.T) {
+	zones := []map[string]any{
+		{"fqdn": "one.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid", "soa_serial_number": "2026050801"},
+		{"fqdn": "two.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid", "soa_serial_number": "2026050801"},
+	}
+	var requestsMu sync.Mutex
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestsMu.Lock()
+		requests++
+		requestsMu.Unlock()
+		http.Error(w, "zone serial cache should satisfy this search", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedZones(profile, zones, now); err != nil {
+		t.Fatalf("write cached zones: %v", err)
+	}
+	for _, zone := range zones {
+		zoneName := cleanString(zone["fqdn"])
+		if err := app.writeCachedRecordsEntry(profile, zoneName, "2026050801", []map[string]any{
+			{"type": "HOST_IPV4ADDR", "name": "test." + zoneName, "address": "192.0.2.10", "zone": zoneName},
+		}, now.Add(-time.Hour).Unix(), now.Add(time.Hour).Unix()); err != nil {
+			t.Fatalf("write stale cached records for %s: %v", zoneName, err)
+		}
+	}
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		t.Fatalf("unexpected background revalidation for %s", zone)
+		return nil
+	}
+
+	var eventsMu sync.Mutex
+	var events []SearchProgressEvent
+	records, err := app.collectSearchResults(profile, testWapiClient(server), SearchOptions{
+		Keyword: "test",
+		Global:  true,
+		Progress: func(event SearchProgressEvent) {
+			eventsMu.Lock()
+			events = append(events, event)
+			eventsMu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	if len(records) != len(zones) {
+		t.Fatalf("records = %d, want %d: %#v", len(records), len(zones), records)
+	}
+	requestsMu.Lock()
+	defer requestsMu.Unlock()
+	if requests != 0 {
+		t.Fatalf("WAPI requests = %d, want 0", requests)
+	}
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	var serialCacheHits int
+	for _, event := range events {
+		if event.Kind == searchProgressWorkerDone && event.Source == recordCacheSourceSerialCache {
+			serialCacheHits++
+		}
+	}
+	if serialCacheHits != len(zones) {
+		t.Fatalf("serial cache hits = %d, want %d; events=%#v", serialCacheHits, len(zones), events)
+	}
+	for _, zone := range zones {
+		entry, err := app.readCachedRecords(profile, cleanString(zone["fqdn"]))
+		if err != nil {
+			t.Fatalf("read renewed cache: %v", err)
+		}
+		if !app.cacheEntryFresh(entry, time.Now()) {
+			t.Fatalf("cache for %s was not renewed", cleanString(zone["fqdn"]))
+		}
+	}
+}
+
+func TestSearchAcrossZonesBatchesDeferredStaleRevalidation(t *testing.T) {
+	zones := []map[string]any{
+		{"fqdn": "one.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "two.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}
+	var requestsMu sync.Mutex
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestsMu.Lock()
+		requests++
+		requestsMu.Unlock()
+		http.Error(w, "stale cache should satisfy this search", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedZones(profile, zones, now); err != nil {
+		t.Fatalf("write cached zones: %v", err)
+	}
+	for _, zone := range zones {
+		zoneName := cleanString(zone["fqdn"])
+		if err := app.writeCachedRecordsEntry(profile, zoneName, "2026050801", []map[string]any{
+			{"type": "HOST_IPV4ADDR", "name": "test." + zoneName, "address": "192.0.2.10", "zone": zoneName},
+		}, now.Add(-time.Hour).Unix(), now.Add(time.Hour).Unix()); err != nil {
+			t.Fatalf("write stale cached records for %s: %v", zoneName, err)
+		}
+	}
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		t.Fatalf("unexpected per-zone background revalidation for %s", zone)
+		return nil
+	}
+	batches := make(chan []string, 1)
+	app.backgroundRecordBatchRevalidator = func(profile Profile, zones []string) error {
+		batches <- append([]string(nil), zones...)
+		return nil
+	}
+
+	records, err := app.collectSearchResults(profile, testWapiClient(server), SearchOptions{Keyword: "test", Global: true})
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	if len(records) != len(zones) {
+		t.Fatalf("records = %d, want %d: %#v", len(records), len(zones), records)
+	}
+	requestsMu.Lock()
+	defer requestsMu.Unlock()
+	if requests != 0 {
+		t.Fatalf("WAPI requests = %d, want 0", requests)
+	}
+	var batch []string
+	select {
+	case batch = <-batches:
+	default:
+		t.Fatalf("batch revalidation was not queued")
+	}
+	sort.Strings(batch)
+	if strings.Join(batch, ",") != "one.example.com,two.example.com" {
+		t.Fatalf("batch zones = %#v", batch)
 	}
 }
 

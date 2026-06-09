@@ -12,7 +12,7 @@ worker pool.
 | Cache scope | DNS rows are keyed by profile, DNS view, and zone. IPAM rows are keyed by profile plus network view or IP. |
 | Freshness | Fresh until `cached_at + cache_ttl`; `fresh_until` is not stored. |
 | Stale window | Record and targeted IPAM rows can be served stale until `stale_expires_at`; IPAM list/search can serve older cached rows by default. |
-| Revalidation | Stale rows return immediately on the fast path and start one background refresh. |
+| Revalidation | Stale rows return immediately; DNS rows renew locally when cached zone serials match, otherwise background refresh starts are lease-protected and batched for multi-zone search. |
 | IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. |
 | Read endpoint | GET requests use `read_server` when configured. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
@@ -36,14 +36,19 @@ Default tuning in the profile config `[meta]` section:
 
 The important performance point is the stale-while-revalidate path: if a record
 or IPAM cache row is expired but still inside `records_cache_swr_ttl`, the user
-gets cached data immediately. `ib net list` and `ib net search` prefer latency
-even more aggressively: when network-view, network, or container cache rows
-exist, they return those rows even after SWR expiry and queue a background
-refresh. Use `--refresh` on those commands when the command must block for fresh
-WAPI data. DNS record reads and targeted IPAM reads only block on Infoblox when
-the row is missing or already outside the stale window. Before doing that
-foreground work, they wait up to `max_background_worker_wait` seconds for an
-active refresh of the same cache scope to finish.
+gets cached data immediately. Multi-zone DNS search also reuses cached zone-list
+SOA serials: when the zone serial matches the record-cache serial, `ib` renews
+the stale record row locally and avoids both a per-zone serial HTTP request and
+a detached refresh helper. Stale multi-zone rows that still need background
+revalidation are handed to one batch helper instead of one helper process per
+zone. `ib net list` and `ib net search` prefer latency even
+more aggressively: when network-view, network, or container cache rows exist,
+they return those rows even after SWR expiry and queue a background refresh. Use
+`--refresh` on those commands when the command must block for fresh WAPI data.
+DNS record reads and targeted IPAM reads only block on Infoblox when the row is
+missing, changed, serial-less, or already outside the stale window. Before doing
+that foreground work, they wait up to `max_background_worker_wait` seconds for
+an active refresh of the same cache scope to finish.
 
 For IPAM list/search, cached parent CIDRs are not expanded into synthetic child
 rows. Results only include network and container objects returned by Infoblox or
@@ -80,10 +85,12 @@ only for missing or expired rows. Each per-zone record load:
 2. Read the zone's `record_cache` row.
 3. Decode JSON records when a cache row exists.
 4. Decide fresh, stale-inside-SWR, or expired-outside-SWR.
-5. For missing or expired-outside-SWR rows, wait briefly for any active same-zone
+5. When a multi-zone search has a matching cached zone-list SOA serial, renew
+   unchanged stale record rows locally without a per-zone HTTP serial check.
+6. For missing, changed, serial-less, or expired-outside-SWR rows, wait briefly for any active same-zone
    refresh lease, then re-read cache if the helper completed.
-6. Acquire a refresh lease and launch a detached refresh only when needed.
-7. Normalize, deduplicate, sort, and match records by name, value, and comment.
+7. Acquire a refresh lease and launch a detached refresh only when needed.
+8. Normalize, deduplicate, sort, and match records by name, value, and comment.
 
 The progress label `Checking cache` covers all of that local work. It can still
 take visible time for large cached zones because JSON decoding and record

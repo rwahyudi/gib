@@ -88,17 +88,18 @@ type App struct {
 	Stdin               io.Reader
 	gum                 *Gum
 
-	dnsZoneOverride             string
-	dnsViewOverride             string
-	backgroundRecordRevalidator func(Profile, string) error
-	backgroundZoneRefresher     func(Profile) error
-	backgroundNetRefresher      func(Profile, string, string, string) error
-	dnsDeleteRecordSelector     func(string, []TypedRecord) (TypedRecord, bool, error)
-	dnsDeleteConfirmer          func(string, TypedRecord) (bool, error)
-	auditSink                   func(ConfigSettings, []byte) error
-	tlsRootCAs                  *x509.CertPool
-	configScope                 configScope
-	globalConfigGroup           string
+	dnsZoneOverride                  string
+	dnsViewOverride                  string
+	backgroundRecordRevalidator      func(Profile, string) error
+	backgroundRecordBatchRevalidator func(Profile, []string) error
+	backgroundZoneRefresher          func(Profile) error
+	backgroundNetRefresher           func(Profile, string, string, string) error
+	dnsDeleteRecordSelector          func(string, []TypedRecord) (TypedRecord, bool, error)
+	dnsDeleteConfirmer               func(string, TypedRecord) (bool, error)
+	auditSink                        func(ConfigSettings, []byte) error
+	tlsRootCAs                       *x509.CertPool
+	configScope                      configScope
+	globalConfigGroup                string
 }
 
 func NewDefaultApp() (*App, error) {

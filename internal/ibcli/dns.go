@@ -26,9 +26,9 @@ import (
 const (
 	allRecordsReturnFields = "name,type,view,zone,ttl,comment,address,record"
 	networkReturnFields    = "network,network_view,comment"
-	zoneReturnFields       = "fqdn,view,zone_format,comment,ns_group,primary_type"
-	zoneSerialFields       = zoneReturnFields + ",soa_serial_number"
-	zoneDetailFields       = zoneReturnFields + ",member_soa_mnames,soa_email,soa_expire,soa_negative_ttl,soa_refresh,soa_retry,soa_serial_number,network_view"
+	zoneReturnFields       = "fqdn,view,zone_format,comment,ns_group,primary_type,soa_serial_number"
+	zoneSerialFields       = zoneReturnFields
+	zoneDetailFields       = zoneReturnFields + ",member_soa_mnames,soa_email,soa_expire,soa_negative_ttl,soa_refresh,soa_retry,network_view"
 	viewReturnFields       = "name"
 	dnsSearchWorkerLimit   = defaultDNSSearchWorkerLimit
 	recordValueWrapWidth   = 48
@@ -1715,8 +1715,15 @@ type TypedRecord struct {
 }
 
 type cachedRecordLoadResult struct {
-	Records []TypedRecord
-	Source  string
+	Records         []TypedRecord
+	Source          string
+	RevalidateStale bool
+}
+
+type cachedRecordLoadOptions struct {
+	Enrich                 bool
+	KnownSerial            string
+	DeferStaleRevalidation bool
 }
 
 func recordsForZone(client *WapiClient, zoneName string) ([]TypedRecord, error) {
@@ -1857,12 +1864,12 @@ func recordsFromAllRecordRows(rows []map[string]any) []TypedRecord {
 }
 
 func (a *App) cachedRecordsForZone(profile Profile, client *WapiClient, zoneName string) ([]TypedRecord, error) {
-	result, err := a.cachedRecordsForZoneLoad(profile, client, zoneName, false)
+	result, err := a.cachedRecordsForZoneLoad(profile, client, zoneName, cachedRecordLoadOptions{})
 	return result.Records, err
 }
 
 func (a *App) cachedRecordsForZoneWithDetails(profile Profile, client *WapiClient, zoneName string, enrich bool) ([]TypedRecord, error) {
-	result, err := a.cachedRecordsForZoneLoad(profile, client, zoneName, enrich)
+	result, err := a.cachedRecordsForZoneLoad(profile, client, zoneName, cachedRecordLoadOptions{Enrich: enrich})
 	return result.Records, err
 }
 
@@ -1871,24 +1878,24 @@ func (a *App) cachedRecordsForZoneWithSource(profile Profile, client *WapiClient
 }
 
 func (a *App) cachedRecordsForZoneWithSourceAndDetails(profile Profile, client *WapiClient, zoneName string, enrich bool) ([]TypedRecord, string, error) {
-	result, err := a.cachedRecordsForZoneLoad(profile, client, zoneName, enrich)
+	result, err := a.cachedRecordsForZoneLoad(profile, client, zoneName, cachedRecordLoadOptions{Enrich: enrich})
 	return result.Records, result.Source, err
 }
 
-func (a *App) cachedRecordsForZoneWithPrefetchedSourceAndDetails(profile Profile, client *WapiClient, zoneName string, enrich bool, entry cachedPayload, hasEntry bool) ([]TypedRecord, string, error) {
+func (a *App) cachedRecordsForZoneWithPrefetchedResult(profile Profile, client *WapiClient, zoneName string, options cachedRecordLoadOptions, entry cachedPayload, hasEntry bool) (cachedRecordLoadResult, error) {
 	if hasEntry && entry.CacheFound {
-		if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, time.Now(), enrich); ok {
-			return result.Records, result.Source, nil
+		if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, time.Now(), options); ok {
+			return result, nil
 		}
 	}
-	return a.cachedRecordsForZoneWithSourceAndDetails(profile, client, zoneName, enrich)
+	return a.cachedRecordsForZoneLoad(profile, client, zoneName, options)
 }
 
-func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zoneName string, enrich bool) (cachedRecordLoadResult, error) {
+func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zoneName string, options cachedRecordLoadOptions) (cachedRecordLoadResult, error) {
 	now := time.Now()
 	entry, err := a.readCachedRecords(profile, zoneName)
 	if err == nil && entry.CacheFound {
-		if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, now, enrich); ok {
+		if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, now, options); ok {
 			return result, nil
 		}
 	}
@@ -1899,7 +1906,7 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 		now = time.Now()
 		entry, err = a.readCachedRecords(profile, zoneName)
 		if err == nil && entry.CacheFound {
-			if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, now, enrich); ok {
+			if result, ok := a.cachedRecordLoadResultFromEntry(profile, client, zoneName, entry, now, options); ok {
 				return result, nil
 			}
 		}
@@ -1908,6 +1915,9 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 	// Outside SWR, foreground work is required so callers do not see data older
 	// than the configured stale window. A matching SOA serial lets us renew the
 	// cache without downloading /allrecords again.
+	if result, ok := a.cachedRecordLoadResultFromKnownSerial(profile, client, zoneName, entry, now, options); ok {
+		return result, nil
+	}
 	currentSerial, hasSerial, err := currentZoneSerial(client, zoneName)
 	if err != nil {
 		return cachedRecordLoadResult{}, err
@@ -1915,7 +1925,7 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 	if entry.CacheFound && hasSerial && entry.Serial != "" && entry.Serial == currentSerial {
 		staleExpiresAt := now.Add(a.recordsCacheSWRTTL())
 		source := recordCacheSourceSerialCache
-		if enrich && enrichAllRecordRows(client, entry.Rows) {
+		if options.Enrich && enrichAllRecordRows(client, entry.Rows) {
 			_ = a.writeCachedRecordsEntry(profile, zoneName, currentSerial, entry.Rows, now.Unix(), staleExpiresAt.Unix())
 			source = recordCacheSourceSerialEnriched
 		} else {
@@ -1924,7 +1934,7 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 		return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: source}, nil
 	}
 
-	rows, err := allRecordRowsForZone(client, zoneName, enrich)
+	rows, err := allRecordRowsForZone(client, zoneName, options.Enrich)
 	if err != nil {
 		return cachedRecordLoadResult{}, err
 	}
@@ -1936,24 +1946,46 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 	return cachedRecordLoadResult{Records: recordsFromAllRecordRows(rows), Source: recordCacheSourceAllRecords}, nil
 }
 
-func (a *App) cachedRecordLoadResultFromEntry(profile Profile, client *WapiClient, zoneName string, entry cachedPayload, now time.Time, enrich bool) (cachedRecordLoadResult, bool) {
+func (a *App) cachedRecordLoadResultFromEntry(profile Profile, client *WapiClient, zoneName string, entry cachedPayload, now time.Time, options cachedRecordLoadOptions) (cachedRecordLoadResult, bool) {
 	// Fast path: fresh cached rows are returned without touching Infoblox.
 	if a.cacheEntryFresh(entry, now) {
 		source := recordCacheSourceFreshCache
-		if enrich && enrichAllRecordRows(client, entry.Rows) {
+		if options.Enrich && enrichAllRecordRows(client, entry.Rows) {
 			_ = a.writeCachedRecords(profile, zoneName, entry.Serial, entry.Rows, now)
 			source = recordCacheSourceFreshEnriched
 		}
 		return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: source}, true
 	}
+	if result, ok := a.cachedRecordLoadResultFromKnownSerial(profile, client, zoneName, entry, now, options); ok {
+		return result, true
+	}
 
 	// Stale-while-revalidate path: return cached rows immediately, then start
 	// exactly one detached revalidation process for this profile/view/zone.
 	if now.Unix() < entry.StaleExpiresAt {
+		if options.DeferStaleRevalidation {
+			return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: recordCacheSourceStaleCache, RevalidateStale: true}, true
+		}
 		a.startRecordCacheRevalidationAsync(profile, zoneName)
 		return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: recordCacheSourceStaleCache}, true
 	}
 	return cachedRecordLoadResult{}, false
+}
+
+func (a *App) cachedRecordLoadResultFromKnownSerial(profile Profile, client *WapiClient, zoneName string, entry cachedPayload, now time.Time, options cachedRecordLoadOptions) (cachedRecordLoadResult, bool) {
+	knownSerial := cleanIntegerString(options.KnownSerial)
+	if !entry.CacheFound || knownSerial == "" || entry.Serial == "" || entry.Serial != knownSerial {
+		return cachedRecordLoadResult{}, false
+	}
+	staleExpiresAt := now.Add(a.recordsCacheSWRTTL())
+	source := recordCacheSourceSerialCache
+	if options.Enrich && enrichAllRecordRows(client, entry.Rows) {
+		_ = a.writeCachedRecordsEntry(profile, zoneName, knownSerial, entry.Rows, now.Unix(), staleExpiresAt.Unix())
+		source = recordCacheSourceSerialEnriched
+	} else {
+		_ = a.renewCachedRecordsAge(profile, zoneName, now, staleExpiresAt)
+	}
+	return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: source}, true
 }
 
 func (a *App) queueRecordCacheRefreshAfterWrite(profile Profile, zoneName string) {
@@ -1970,6 +2002,27 @@ func (a *App) queueRecordCacheRefreshAfterWrite(profile Profile, zoneName string
 
 func (a *App) startRecordCacheRevalidationAsync(profile Profile, zoneName string) {
 	_ = a.startRecordCacheRevalidation(profile, zoneName)
+}
+
+func (a *App) startRecordCacheRevalidationBatchAsync(profile Profile, zoneNames []string) {
+	_ = a.startRecordCacheRevalidationBatch(profile, zoneNames)
+}
+
+func normalizeUniqueZoneNames(zoneNames []string) []string {
+	seen := map[string]bool{}
+	var normalized []string
+	for _, zoneName := range zoneNames {
+		zoneName, err := normalizeZoneName(zoneName)
+		if err != nil {
+			continue
+		}
+		if seen[zoneName] {
+			continue
+		}
+		seen[zoneName] = true
+		normalized = append(normalized, zoneName)
+	}
+	return normalized
 }
 
 func (a *App) startRecordCacheRevalidation(profile Profile, zoneName string) error {
@@ -2014,6 +2067,69 @@ func (a *App) startRecordCacheRevalidation(profile Profile, zoneName string) err
 	return nil
 }
 
+func (a *App) startRecordCacheRevalidationBatch(profile Profile, zoneNames []string) error {
+	zones := normalizeUniqueZoneNames(zoneNames)
+	if len(zones) == 0 {
+		return nil
+	}
+	var acquired []string
+	now := time.Now()
+	for _, zoneName := range zones {
+		ok, err := a.tryAcquireRecordRefreshLease(profile, zoneName, now, recordRefreshLeaseTTL)
+		if err != nil {
+			return err
+		}
+		if ok {
+			acquired = append(acquired, zoneName)
+		}
+	}
+	if len(acquired) == 0 {
+		return nil
+	}
+	if a.backgroundRecordBatchRevalidator != nil {
+		if err := a.backgroundRecordBatchRevalidator(profile, acquired); err != nil {
+			for _, zoneName := range acquired {
+				_ = a.releaseRecordRefreshLease(profile, zoneName)
+			}
+			return err
+		}
+		return nil
+	}
+	executable, ok, err := backgroundRefreshExecutable()
+	if err != nil {
+		for _, zoneName := range acquired {
+			_ = a.releaseRecordRefreshLease(profile, zoneName)
+		}
+		return err
+	}
+	if !ok {
+		for _, zoneName := range acquired {
+			_ = a.releaseRecordRefreshLease(profile, zoneName)
+		}
+		return nil
+	}
+	args := []string{
+		"config", "cache", "revalidate-records",
+		"--profile", firstNonEmpty(strings.TrimSpace(profile.Name), defaultProfileName),
+		"--view", strings.TrimSpace(profile.DNSView),
+	}
+	for _, zoneName := range acquired {
+		args = append(args, "--zone", zoneName)
+	}
+	cmd := exec.Command(executable, args...) // #nosec G204 -- executable is this ib binary and args are fixed internal cache-refresh flags
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		for _, zoneName := range acquired {
+			_ = a.releaseRecordRefreshLease(profile, zoneName)
+		}
+		return err
+	}
+	go func() {
+		_ = cmd.Wait()
+	}()
+	return nil
+}
+
 func (a *App) runRecordCacheRevalidate(profileName string, view string, zoneName string) error {
 	zoneName, err := normalizeZoneName(zoneName)
 	if err != nil {
@@ -2035,6 +2151,59 @@ func (a *App) runRecordCacheRevalidate(profileName string, view string, zoneName
 	}
 	releaseProfile = profile
 	return a.revalidateRecordCache(profile, a.newClient(profile), zoneName)
+}
+
+func (a *App) runRecordCacheRevalidateBatch(profileName string, view string, zoneNames []string) error {
+	zones := normalizeUniqueZoneNames(zoneNames)
+	if len(zones) == 0 {
+		return cliError("at least one --zone is required")
+	}
+	releaseProfile := Profile{Name: strings.TrimSpace(profileName), DNSView: strings.TrimSpace(view)}
+	if releaseProfile.Name == "" {
+		releaseProfile.Name = defaultProfileName
+	}
+	defer func() {
+		for _, zoneName := range zones {
+			_ = a.releaseRecordRefreshLease(releaseProfile, zoneName)
+		}
+	}()
+	profile, err := a.loadConfigProfile(profileName, true)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(view) != "" {
+		profile.DNSView = strings.TrimSpace(view)
+	}
+	releaseProfile = profile
+	client := a.newClient(profile)
+	workerCount := a.dnsSearchWorkerLimit()
+	if len(zones) < workerCount {
+		workerCount = len(zones)
+	}
+	jobs := make(chan string)
+	errs := make(chan error, len(zones))
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for zoneName := range jobs {
+				errs <- a.revalidateRecordCache(profile, client, zoneName)
+			}
+		}()
+	}
+	for _, zoneName := range zones {
+		jobs <- zoneName
+	}
+	close(jobs)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) revalidateRecordCache(profile Profile, client *WapiClient, zoneName string) error {
@@ -2483,13 +2652,15 @@ type zoneRecordBatch struct {
 type zoneRecordJob struct {
 	index    int
 	zoneName string
+	serial   string
 }
 
 type zoneRecordResult struct {
-	index    int
-	zoneName string
-	records  []TypedRecord
-	err      error
+	index           int
+	zoneName        string
+	records         []TypedRecord
+	revalidateStale bool
+	err             error
 }
 
 func (a *App) collectSearchResults(profile Profile, client *WapiClient, options SearchOptions) ([]TypedRecord, error) {
@@ -2720,7 +2891,7 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 					}
 					reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressWorkerStart, WorkerID: workerID, Zone: job.zoneName, Stage: "Checking cache"})
 					entry, hasEntry := prefetchedRecords[normalizeCacheZone(job.zoneName)]
-					records, source, err := a.cachedRecordsForZoneWithPrefetchedSourceAndDetails(profile, client, job.zoneName, enrich, entry, hasEntry)
+					result, err := a.cachedRecordsForZoneWithPrefetchedResult(profile, client, job.zoneName, cachedRecordLoadOptions{Enrich: enrich, KnownSerial: job.serial, DeferStaleRevalidation: true}, entry, hasEntry)
 					if err != nil {
 						if isSecondaryZoneDataUnavailable(err) {
 							reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressWorkerSkip, WorkerID: workerID, Zone: job.zoneName, Stage: "Secondary zone data unavailable", Err: err})
@@ -2728,9 +2899,9 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 							reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressWorkerError, WorkerID: workerID, Zone: job.zoneName, Err: err})
 						}
 					} else {
-						reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressWorkerDone, WorkerID: workerID, Zone: job.zoneName, Source: source, Records: len(records)})
+						reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressWorkerDone, WorkerID: workerID, Zone: job.zoneName, Source: result.Source, Records: len(result.Records)})
 					}
-					results <- zoneRecordResult{index: job.index, zoneName: job.zoneName, records: records, err: err}
+					results <- zoneRecordResult{index: job.index, zoneName: job.zoneName, records: result.Records, revalidateStale: result.RevalidateStale, err: err}
 				}
 			}
 		}()
@@ -2740,10 +2911,11 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 		defer close(jobs)
 		for index, zone := range zones {
 			zoneName := cleanString(zone["fqdn"])
+			serial := cleanIntegerString(cleanString(zone["soa_serial_number"]))
 			select {
 			case <-done:
 				return
-			case jobs <- zoneRecordJob{index: index, zoneName: zoneName}:
+			case jobs <- zoneRecordJob{index: index, zoneName: zoneName, serial: serial}:
 			}
 		}
 	}()
@@ -2754,6 +2926,7 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 	}()
 
 	batchesByIndex := make([]*zoneRecordBatch, len(zones))
+	var revalidateZones []string
 	var firstErr error
 	for result := range results {
 		if result.err != nil {
@@ -2768,9 +2941,15 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 		}
 		batch := zoneRecordBatch{ZoneName: result.zoneName, Records: result.records}
 		batchesByIndex[result.index] = &batch
+		if result.revalidateStale {
+			revalidateZones = append(revalidateZones, result.zoneName)
+		}
 	}
 	if firstErr != nil {
 		return nil, firstErr
+	}
+	if len(revalidateZones) > 0 {
+		a.startRecordCacheRevalidationBatchAsync(profile, revalidateZones)
 	}
 	batches := make([]zoneRecordBatch, 0, len(batchesByIndex))
 	for _, batch := range batchesByIndex {
