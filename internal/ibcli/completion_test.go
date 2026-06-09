@@ -1319,7 +1319,7 @@ func TestConfigureAliasCompletesCacheCommands(t *testing.T) {
 		{
 			args: []string{"__complete", "configure", "ca"},
 			wants: []string{
-				"cache\tManage SQLite cache",
+				"cache\tManage local cache",
 				":4",
 			},
 		},

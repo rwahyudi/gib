@@ -1,7 +1,7 @@
 # Performance & Caching
 
 `ib` is built for large Infoblox DNS zones and IPAM read workflows. List and
-search commands prefer the selected local or global SQLite cache, DNS record reads use `/allrecords`
+search commands prefer the selected local or global Badger cache, DNS record reads use `/allrecords`
 to avoid one request per record type, and multi-zone searches run with a bounded
 worker pool.
 
@@ -59,7 +59,7 @@ record names, or IPAM network CIDRs. With `completion_cache_prefetch = true`,
 cache-backed completion starts only the matching detached refresh helper when
 the selected zone-list, record, network-list, or container-list cache row is
 missing or stale. Cheap completions for commands, flags, output formats,
-columns, sorts, and record types skip SQLite entirely. PTR delete completion
+columns, sorts, and record types skip Badger entirely. PTR delete completion
 reads cached PTR records from cached reverse zones and completes owner IPs
 instead of forward-zone names. With `completion_cache_prefetch = false`,
 completion only reads selected cache rows and does not start background refresh
@@ -76,14 +76,13 @@ create, edit, delete, and zone mutation commands stay on the primary Grid Master
 ## What The Workers Do
 
 For a global search, `ib` first loads the searchable zone list, filters out
-secondary zones, preloads matching record-cache rows with one SQLite connection,
+secondary zones, preloads matching record-cache rows with one Badger handle,
 and then assigns zones to workers. Each worker uses the preloaded row when it is
 fresh or inside the SWR window, then falls back to the per-zone cache/WAPI path
 only for missing or expired rows. Each per-zone record load:
 
-1. Use the preloaded SQLite row, or open the SQLite cache with a single DB
-   connection and `busy_timeout` when a fallback is required.
-2. Read the zone's `record_cache` row.
+1. Use the preloaded Badger row, or open the Badger cache when a fallback is required.
+2. Read the zone's `records` key.
 3. Decode JSON records when a cache row exists.
 4. Decide fresh, stale-inside-SWR, or expired-outside-SWR.
 5. When a multi-zone search has a matching cached zone-list SOA serial, renew
@@ -97,18 +96,18 @@ The progress label `Checking cache` covers all of that local work. It can still
 take visible time for large cached zones because JSON decoding and record
 normalization happen before matching.
 
-## SQLite Cache Tables
+## Badger Cache Keyspace
 
-![Nord SQLite cache table diagram](assets/sqlite-cache-tables.svg)
+![Nord Badger cache keyspace diagram](assets/badger-cache-keyspace.svg)
 
-`cache_meta` stores cache schema metadata. `zone_cache` caches authoritative
-zone list payloads per profile and view. `record_cache` stores `/allrecords`
-payloads per profile, view, and zone. `network_view_cache`, `network_cache`,
-`network_container_cache`, and `ipv4_address_cache` store IPAM read payloads.
+Badger keys are grouped by prefixes. `zones` caches authoritative zone list
+payloads per profile and view. `records` stores `/allrecords` payloads per
+profile, view, and zone. `network_views`, `networks`,
+`network_containers`, and `ipv4_addresses` store IPAM read payloads.
 `record_refresh_locks` and `net_refresh_locks` prevent duplicate background
 refreshes for the same cache scope.
 
-Cache tables store Infoblox payloads as JSON text. The CLI normalizes those
+Cache values store Infoblox payloads as JSON. The CLI normalizes those
 payloads into typed records or IPAM rows when listing, searching, completing, or
 displaying data.
 

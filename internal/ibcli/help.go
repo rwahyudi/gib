@@ -317,7 +317,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"status", "show DNS and IPAM cache entries with age and expiry"},
 			{"clear", "delete DNS and IPAM cache entries"},
 			{"scope", "DNS caches use profile/view/zone; IPAM caches use profile/network view/IP"},
-			{"storage", "~/.ib/cache.sqlite3 locally or /etc/ib/cache.sqlite3 for Linux global profiles"},
+			{"storage", "~/.ib/cache.badger locally or /etc/ib/cache.badger for Linux global profiles"},
 		})
 	case "ib config cache status":
 		return sectionWithRows("Cache Status", [][]string{

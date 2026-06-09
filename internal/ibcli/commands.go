@@ -93,7 +93,7 @@ func (a *App) configCommand() *cobra.Command {
 }
 
 func (a *App) cacheCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "cache", Short: "Manage SQLite cache"}
+	cmd := &cobra.Command{Use: "cache", Short: "Manage local cache"}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "status",
 		Short: "Show cache status",

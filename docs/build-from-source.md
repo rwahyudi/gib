@@ -30,7 +30,7 @@ sudo install -m 0755 ib /usr/local/bin/ib
 ib --help
 ```
 
-This local build uses a cgo-free SQLite driver, so it does not require a C
+This local build uses a cgo-free Badger cache, so it does not require a C
 compiler or link against the build host's glibc.
 
 Optional Bash completion:
@@ -44,7 +44,7 @@ Open a new shell after installing completion.
 
 ## Windows
 
-Native Windows builds do not need a C compiler because SQLite support is
+Native Windows builds do not need a C compiler because cache support is
 cgo-free. MSYS2 UCRT64 is still a convenient shell for Go builds.
 
 Install MSYS2:

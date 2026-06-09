@@ -2,11 +2,9 @@ package ibcli
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -205,153 +203,6 @@ func TestConfiguredCacheTTLControlsComputedFreshness(t *testing.T) {
 	}
 	if app.cacheFreshUntil(zoneEntry.CachedAt)-zoneEntry.CachedAt != 42 {
 		t.Fatalf("zone cache ttl = %d seconds, want 42", app.cacheFreshUntil(zoneEntry.CachedAt)-zoneEntry.CachedAt)
-	}
-}
-
-func TestCacheMigrationRebuildsOldRecordCacheSchema(t *testing.T) {
-	app := testApp(t)
-	if err := os.MkdirAll(app.ConfigDir, 0o700); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	db, err := sql.Open("sqlite3", app.cachePath())
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := execSQLScript(db, `
-CREATE TABLE cache_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-INSERT INTO cache_meta (key, value) VALUES ('schema_version', '1');
-CREATE TABLE zone_cache (
-  cache_key TEXT PRIMARY KEY,
-  profile TEXT NOT NULL,
-  view TEXT NOT NULL,
-  cached_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  payload_json TEXT NOT NULL
-);
-CREATE TABLE record_cache (
-  cache_key TEXT PRIMARY KEY,
-  profile TEXT NOT NULL,
-  view TEXT NOT NULL,
-  zone TEXT NOT NULL,
-  cached_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  payload_json TEXT NOT NULL
-);
-`); err != nil {
-		_ = db.Close()
-		t.Fatalf("seed old schema: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close old db: %v", err)
-	}
-
-	migrated, err := app.openCacheDB()
-	if err != nil {
-		t.Fatalf("open migrated cache: %v", err)
-	}
-	recordColumns, err := tableColumnSet(migrated, "record_cache")
-	if err != nil {
-		_ = migrated.Close()
-		t.Fatalf("inspect migrated columns: %v", err)
-	}
-	zoneColumns, err := tableColumnSet(migrated, "zone_cache")
-	if err != nil {
-		_ = migrated.Close()
-		t.Fatalf("inspect migrated zone columns: %v", err)
-	}
-	if err := migrated.Close(); err != nil {
-		t.Fatalf("close migrated db: %v", err)
-	}
-	for _, column := range []string{"zone_serial", "stale_expires_at"} {
-		if !recordColumns[column] {
-			t.Fatalf("record_cache was not rebuilt with %s: %#v", column, recordColumns)
-		}
-	}
-	if recordColumns["expires_at"] || zoneColumns["expires_at"] {
-		t.Fatalf("migrated cache still stores expires_at: record=%#v zone=%#v", recordColumns, zoneColumns)
-	}
-
-	profile := Profile{Name: "default", DNSView: "default"}
-	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{{"name": "app.example.com"}}, time.Now()); err != nil {
-		t.Fatalf("write migrated record cache: %v", err)
-	}
-}
-
-func TestCacheMigrationAddsRecordCacheStaleExpiry(t *testing.T) {
-	app := testApp(t)
-	if err := os.MkdirAll(app.ConfigDir, 0o700); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	db, err := sql.Open("sqlite3", app.cachePath())
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	cachedAt := int64(1_700_000_000)
-	if err := execSQLScript(db, `
-CREATE TABLE cache_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-INSERT INTO cache_meta (key, value) VALUES ('schema_version', '2');
-CREATE TABLE zone_cache (
-  cache_key TEXT PRIMARY KEY,
-  profile TEXT NOT NULL,
-  view TEXT NOT NULL,
-  cached_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  payload_json TEXT NOT NULL
-);
-CREATE TABLE record_cache (
-  cache_key TEXT PRIMARY KEY,
-  profile TEXT NOT NULL,
-  view TEXT NOT NULL,
-  zone TEXT NOT NULL,
-  zone_serial TEXT,
-  cached_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  payload_json TEXT NOT NULL
-);
-`); err != nil {
-		_ = db.Close()
-		t.Fatalf("seed old schema: %v", err)
-	}
-	if _, err := db.Exec(`
-INSERT INTO record_cache (cache_key, profile, view, zone, zone_serial, cached_at, expires_at, payload_json)
-VALUES (?, 'default', 'default', 'example.com', '2026050801', ?, ?, '[{"name":"app.example.com"}]');
-`, cacheKey("records", "default", "default", "example.com"), cachedAt, cachedAt+defaultCacheTTLSeconds); err != nil {
-		_ = db.Close()
-		t.Fatalf("seed old schema: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close old db: %v", err)
-	}
-
-	migrated, err := app.openCacheDB()
-	if err != nil {
-		t.Fatalf("open migrated cache: %v", err)
-	}
-	recordColumns, err := tableColumnSet(migrated, "record_cache")
-	if err != nil {
-		_ = migrated.Close()
-		t.Fatalf("inspect migrated record columns: %v", err)
-	}
-	zoneColumns, err := tableColumnSet(migrated, "zone_cache")
-	if err != nil {
-		_ = migrated.Close()
-		t.Fatalf("inspect migrated zone columns: %v", err)
-	}
-	if err := migrated.Close(); err != nil {
-		t.Fatalf("close migrated db: %v", err)
-	}
-	if recordColumns["expires_at"] || zoneColumns["expires_at"] {
-		t.Fatalf("migrated cache still stores expires_at: record=%#v zone=%#v", recordColumns, zoneColumns)
-	}
-	entry, err := app.readCachedRecords(Profile{Name: "default", DNSView: "default"}, "example.com")
-	if err != nil {
-		t.Fatalf("read migrated record cache: %v", err)
-	}
-	if !entry.CacheFound {
-		t.Fatalf("migrated cache was not found")
-	}
-	if entry.StaleExpiresAt != cachedAt+defaultRecordsCacheSWRSeconds {
-		t.Fatalf("stale expiry = %d, want %d", entry.StaleExpiresAt, cachedAt+defaultRecordsCacheSWRSeconds)
 	}
 }
 

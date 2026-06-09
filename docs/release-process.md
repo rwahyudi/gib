@@ -20,8 +20,8 @@ builds inject the version and build date into `internal/ibcli` with ldflags, so
 `ib -v` should show the tag version and an AEST build time.
 
 Linux and Windows release artifacts are built with `CGO_ENABLED=0` using the
-cgo-free SQLite driver, so they do not link against the build host's glibc or
-need MinGW-w64 for SQLite support.
+cgo-free Badger cache, so they do not link against the build host's glibc or
+need MinGW-w64 for cache support.
 
 ## Step 1: Choose and Prepare the Version
 

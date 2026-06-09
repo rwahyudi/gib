@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -102,6 +104,9 @@ type App struct {
 	tlsRootCAs                       *x509.CertPool
 	configScope                      configScope
 	globalConfigGroup                string
+	cacheDBMu                        sync.Mutex
+	cacheDB                          *badger.DB
+	cacheDBPath                      string
 }
 
 func NewDefaultApp() (*App, error) {

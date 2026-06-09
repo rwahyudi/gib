@@ -220,7 +220,7 @@ func TestLoadConfigUsesGlobalConfigWhenOnlyGlobalExists(t *testing.T) {
 	if app.ConfigFile != app.GlobalConfigFile {
 		t.Fatalf("active config file = %q, want %q", app.ConfigFile, app.GlobalConfigFile)
 	}
-	if got := app.cachePath(); got != filepath.Join(app.GlobalConfigDir, cacheFileName) {
+	if got := app.cachePath(); got != filepath.Join(app.GlobalConfigDir, cacheDirName) {
 		t.Fatalf("cache path = %q", got)
 	}
 }
@@ -302,7 +302,7 @@ func TestLoadConfigExplicitProfileUsesGlobalOnlyProfile(t *testing.T) {
 	if profile.Name != "shared" || app.ConfigFile != app.GlobalConfigFile {
 		t.Fatalf("profile = %#v, active config = %q", profile, app.ConfigFile)
 	}
-	if got := app.cachePath(); got != filepath.Join(app.GlobalConfigDir, cacheFileName) {
+	if got := app.cachePath(); got != filepath.Join(app.GlobalConfigDir, cacheDirName) {
 		t.Fatalf("cache path = %q, want global cache", got)
 	}
 }
@@ -479,7 +479,7 @@ func TestLoadConfigUsesLocalScopeForLocalOverride(t *testing.T) {
 	if app.ConfigFile != app.LocalConfigFile {
 		t.Fatalf("active config = %q, want local", app.ConfigFile)
 	}
-	if got := app.cachePath(); got != filepath.Join(app.LocalConfigDir, cacheFileName) {
+	if got := app.cachePath(); got != filepath.Join(app.LocalConfigDir, cacheDirName) {
 		t.Fatalf("cache path = %q, want local cache", got)
 	}
 }

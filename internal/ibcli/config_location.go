@@ -1,6 +1,7 @@
 package ibcli
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -188,9 +189,40 @@ func (a *App) protectConfigKeyFileForScope(strict bool) error {
 
 func (a *App) protectCacheFileForScope(strict bool) error {
 	if !a.activeConfigIsGlobal() {
-		return protectPrivateFile(a.cachePath())
+		return protectConfigDir(a.cachePath())
 	}
-	return a.protectFileForScope(a.cachePath(), 0o660, strict)
+	group, err := a.activeGlobalConfigGroup()
+	if err != nil {
+		if strict {
+			return err
+		}
+		return nil
+	}
+	if err := chownPathGroupFunc(a.cachePath(), group); err != nil && strict {
+		return err
+	}
+	if err := os.Chmod(a.cachePath(), 0o2770); err != nil && strict {
+		return err
+	}
+	return filepath.WalkDir(a.cachePath(), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if strict {
+				return err
+			}
+			return nil
+		}
+		if err := chownPathGroupFunc(path, group); err != nil && strict {
+			return err
+		}
+		mode := os.FileMode(0o660)
+		if entry.IsDir() {
+			mode = 0o2770
+		}
+		if err := os.Chmod(path, mode); err != nil && strict {
+			return err
+		}
+		return nil
+	})
 }
 
 func (a *App) protectFileForScope(path string, globalMode os.FileMode, strict bool) error {
