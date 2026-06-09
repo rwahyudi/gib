@@ -46,6 +46,7 @@ func TestWindowsEncryptPasswordMigratesLegacyFernet(t *testing.T) {
 default_profile = default
 cache_ttl = 300
 dns_search_worker_limit = 16
+dns_search_primary_read_percent = 20
 records_cache_swr_ttl = 259200
 max_background_worker_wait = 3
 completion_cache_prefetch = true

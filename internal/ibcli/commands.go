@@ -947,6 +947,7 @@ func configMetadataTableRows(merged mergedConfigData) [][]string {
 		{"default_profile", merged.DefaultProfile},
 		{configCacheTTLKey, strconv.Itoa(settings.CacheTTLSeconds)},
 		{configDNSSearchWorkerLimitKey, strconv.Itoa(settings.DNSSearchWorkerLimit)},
+		{configDNSSearchPrimaryReadPercentKey, strconv.Itoa(settings.DNSSearchPrimaryReadPercent)},
 		{configRecordsCacheSWRKey, strconv.Itoa(settings.RecordsCacheSWRSeconds)},
 		{configMaxBackgroundWorkerWaitKey, strconv.Itoa(settings.MaxBackgroundWorkerWaitSeconds)},
 		{configCompletionCachePrefetchKey, strconv.FormatBool(settings.CompletionCachePrefetch)},

@@ -57,6 +57,7 @@ func writePlainTestConfig(t *testing.T, path string, defaultProfile string, prof
 	builder.WriteString("default_profile = " + defaultProfile + "\n")
 	builder.WriteString("cache_ttl = 300\n")
 	builder.WriteString("dns_search_worker_limit = 16\n")
+	builder.WriteString("dns_search_primary_read_percent = 20\n")
 	builder.WriteString("records_cache_swr_ttl = 259200\n")
 	builder.WriteString("max_background_worker_wait = 3\n")
 	builder.WriteString("completion_cache_prefetch = true\n")
@@ -576,6 +577,7 @@ func TestConfigListShowsMetadataTable(t *testing.T) {
 	writeConfigForSettings(t, app, ConfigSettings{
 		CacheTTLSeconds:                900,
 		DNSSearchWorkerLimit:           12,
+		DNSSearchPrimaryReadPercent:    35,
 		RecordsCacheSWRSeconds:         3600,
 		MaxBackgroundWorkerWaitSeconds: 7,
 		CompletionCachePrefetch:        false,
@@ -606,6 +608,8 @@ func TestConfigListShowsMetadataTable(t *testing.T) {
 		"900",
 		"dns_search_worker_limit",
 		"12",
+		"dns_search_primary_read_percent",
+		"35",
 		"records_cache_swr_ttl",
 		"3600",
 		"max_background_worker_wait",
@@ -758,6 +762,8 @@ func TestWriteConfigProfilesEncryptsPasswordAndReadsItBack(t *testing.T) {
 	for _, want := range []string{
 		"cache_ttl = 300",
 		"dns_search_worker_limit = 16",
+		"# Applies only when dns_search_worker_limit is greater than 10 and read_server is configured.",
+		"dns_search_primary_read_percent = 20",
 		"records_cache_swr_ttl = 259200",
 		"max_background_worker_wait = 3",
 		"completion_cache_prefetch = true",
@@ -845,6 +851,8 @@ timeout = 30
 	for _, want := range []string{
 		"cache_ttl = 300",
 		"dns_search_worker_limit = 16",
+		"# Applies only when dns_search_worker_limit is greater than 10 and read_server is configured.",
+		"dns_search_primary_read_percent = 20",
 		"records_cache_swr_ttl = 259200",
 		"max_background_worker_wait = 3",
 		"completion_cache_prefetch = true",
@@ -867,6 +875,7 @@ func TestReadConfigSettingsFallsBackForInvalidValues(t *testing.T) {
 default_profile = default
 cache_ttl = not-a-number
 dns_search_worker_limit = -5
+dns_search_primary_read_percent = 101
 records_cache_swr_ttl = 0
 max_background_worker_wait = nope
 completion_cache_prefetch = maybe
@@ -889,6 +898,9 @@ audit_logging_method = nowhere
 	}
 	if settings.DNSSearchWorkerLimit != defaultDNSSearchWorkerLimit {
 		t.Fatalf("worker limit = %d, want %d", settings.DNSSearchWorkerLimit, defaultDNSSearchWorkerLimit)
+	}
+	if settings.DNSSearchPrimaryReadPercent != defaultDNSSearchPrimaryReadPercent {
+		t.Fatalf("primary read percent = %d, want %d", settings.DNSSearchPrimaryReadPercent, defaultDNSSearchPrimaryReadPercent)
 	}
 	if settings.RecordsCacheSWRSeconds != defaultRecordsCacheSWRSeconds {
 		t.Fatalf("records cache swr ttl = %d, want %d", settings.RecordsCacheSWRSeconds, defaultRecordsCacheSWRSeconds)
@@ -913,6 +925,7 @@ func TestReadConfigSettingsAllowsDisabledCompletionPrefetch(t *testing.T) {
 default_profile = default
 cache_ttl = 600
 dns_search_worker_limit = 8
+dns_search_primary_read_percent = 0
 records_cache_swr_ttl = 1200
 max_background_worker_wait = 5
 completion_cache_prefetch = disabled
@@ -933,6 +946,9 @@ audit_log_file =
 	}
 	if settings.CompletionCachePrefetch {
 		t.Fatal("completion cache prefetch = true, want false")
+	}
+	if settings.DNSSearchPrimaryReadPercent != 0 {
+		t.Fatalf("primary read percent = %d, want 0", settings.DNSSearchPrimaryReadPercent)
 	}
 }
 

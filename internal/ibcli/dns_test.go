@@ -1795,17 +1795,43 @@ func TestSearchWorkerPrimaryReadSplit(t *testing.T) {
 		{workerCount: 24, wantCount: 5, wantIDs: []int{5, 10, 15, 20, 24}},
 	}
 	for _, tt := range tests {
-		if got := primaryReadWorkerCount(tt.workerCount); got != tt.wantCount {
-			t.Fatalf("primaryReadWorkerCount(%d) = %d, want %d", tt.workerCount, got, tt.wantCount)
+		if got := primaryReadWorkerCount(tt.workerCount, defaultDNSSearchPrimaryReadPercent); got != tt.wantCount {
+			t.Fatalf("primaryReadWorkerCount(%d, %d) = %d, want %d", tt.workerCount, defaultDNSSearchPrimaryReadPercent, got, tt.wantCount)
 		}
 		var gotIDs []int
 		for id := 1; id <= tt.workerCount; id++ {
-			if searchWorkerUsesPrimaryReads(client, id, tt.workerCount) {
+			if searchWorkerUsesPrimaryReads(client, id, tt.workerCount, defaultDNSSearchPrimaryReadPercent) {
 				gotIDs = append(gotIDs, id)
 			}
 		}
 		if fmt.Sprint(gotIDs) != fmt.Sprint(tt.wantIDs) {
 			t.Fatalf("primary worker IDs for %d workers = %v, want %v", tt.workerCount, gotIDs, tt.wantIDs)
+		}
+	}
+}
+
+func TestSearchWorkerPrimaryReadSplitUsesConfiguredPercent(t *testing.T) {
+	client := &WapiClient{Server: "https://primary.example", ReadServer: "https://read.example"}
+	for _, tt := range []struct {
+		percent   int
+		wantCount int
+		wantIDs   []int
+	}{
+		{percent: 0, wantCount: 0, wantIDs: nil},
+		{percent: 50, wantCount: 8, wantIDs: []int{2, 4, 6, 8, 10, 12, 14, 16}},
+		{percent: 100, wantCount: 16, wantIDs: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+	} {
+		if got := primaryReadWorkerCount(16, tt.percent); got != tt.wantCount {
+			t.Fatalf("primaryReadWorkerCount(16, %d) = %d, want %d", tt.percent, got, tt.wantCount)
+		}
+		var gotIDs []int
+		for id := 1; id <= 16; id++ {
+			if searchWorkerUsesPrimaryReads(client, id, 16, tt.percent) {
+				gotIDs = append(gotIDs, id)
+			}
+		}
+		if fmt.Sprint(gotIDs) != fmt.Sprint(tt.wantIDs) {
+			t.Fatalf("primary worker IDs for percent %d = %v, want %v", tt.percent, gotIDs, tt.wantIDs)
 		}
 	}
 }
@@ -1817,7 +1843,7 @@ func TestSearchWorkerPrimaryReadSplitRequiresRealReadServer(t *testing.T) {
 		{Server: "https://primary.example", ReadServer: "https://primary.example"},
 		{Server: "https://primary.example/", ReadServer: "https://primary.example"},
 	} {
-		if searchWorkerUsesPrimaryReads(client, 11, 16) {
+		if searchWorkerUsesPrimaryReads(client, 11, 16, defaultDNSSearchPrimaryReadPercent) {
 			t.Fatalf("searchWorkerUsesPrimaryReads(%#v) = true, want false", client)
 		}
 	}
@@ -1826,7 +1852,7 @@ func TestSearchWorkerPrimaryReadSplitRequiresRealReadServer(t *testing.T) {
 func TestSearchWorkerClientForPrimaryReadsSharesHTTPClient(t *testing.T) {
 	httpClient := &http.Client{}
 	client := &WapiClient{Server: "https://primary.example", ReadServer: "https://read.example", httpClient: httpClient}
-	workerClient := searchWorkerClient(client, 6, 16)
+	workerClient := searchWorkerClient(client, 6, 16, defaultDNSSearchPrimaryReadPercent)
 	if workerClient == client {
 		t.Fatal("primary-read worker reused base client, want clone")
 	}
@@ -1836,7 +1862,7 @@ func TestSearchWorkerClientForPrimaryReadsSharesHTTPClient(t *testing.T) {
 	if workerClient.httpClient != httpClient {
 		t.Fatal("primary-read worker did not share HTTP client")
 	}
-	readWorkerClient := searchWorkerClient(client, 1, 16)
+	readWorkerClient := searchWorkerClient(client, 1, 16, defaultDNSSearchPrimaryReadPercent)
 	if readWorkerClient != client {
 		t.Fatal("read worker cloned client, want base client")
 	}

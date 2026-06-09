@@ -30,7 +30,7 @@ Multi-zone search should preload record-cache rows for the selected zones with o
 
 The WAPI HTTP transport should keep enough idle per-host connections for search workers. Size `MaxIdleConnsPerHost` and `MaxConnsPerHost` from `dns_search_worker_limit` so Windows does not repeatedly pay TCP/TLS setup costs during parallel `/allrecords` refreshes.
 
-When `dns_search_worker_limit > 10` and the active profile has a real `read_server`, global DNS search should assign about 20% of worker GET traffic to the primary server and keep the remaining workers on the read server. This is worker-based routing, not random request routing, and it relies on the existing pooled HTTP transport rather than active health polling. Writes always stay on primary.
+When `dns_search_worker_limit > 10` and the active profile has a real `read_server`, global DNS search should assign `dns_search_primary_read_percent` of worker GET traffic to the primary server and keep the remaining workers on the read server. This is worker-based routing, not random request routing, and it relies on the existing pooled HTTP transport rather than active health polling. Writes always stay on primary.
 
 ## Global Cache and Search Settings
 
@@ -39,6 +39,8 @@ The config file stores global cache/search tuning in the `[meta]` section:
 ```ini
 cache_ttl = 300
 dns_search_worker_limit = 16
+# Applies only when dns_search_worker_limit is greater than 10 and read_server is configured.
+dns_search_primary_read_percent = 20
 records_cache_swr_ttl = 259200
 max_background_worker_wait = 3
 completion_cache_prefetch = true
@@ -51,6 +53,8 @@ global_group = ibusers
 `cache_ttl` is in seconds and controls both zone-list cache entries and per-zone record-cache entries. Freshness is calculated from `cached_at + cache_ttl`; the cache does not store a separate fresh-expiry timestamp. If the setting is missing or invalid, `ib` uses and writes the default value of `300`.
 
 `dns_search_worker_limit` controls how many zones `ib dns search --global` can load in parallel. If the setting is missing or invalid, `ib` uses and writes the default value of `16`.
+
+`dns_search_primary_read_percent` controls what percentage of global-search worker GET traffic is routed back to the primary server when `dns_search_worker_limit` is greater than `10` and `read_server` is configured. The default is `20`. Set it to `0` to keep all worker GET traffic on the read server. If the setting is missing, negative, or greater than `100`, `ib` uses and writes the default value of `20`.
 
 `records_cache_swr_ttl` is in seconds and controls how long expired per-zone record-cache entries can be served stale while `ib` refreshes them in the background. If the setting is missing or invalid, `ib` uses and writes the default value of `259200` seconds (3 days).
 

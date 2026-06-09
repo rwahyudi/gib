@@ -14,7 +14,7 @@ worker pool.
 | Stale window | Record and targeted IPAM rows can be served stale until `stale_expires_at`; IPAM list/search can serve older cached rows by default. |
 | Revalidation | Stale rows return immediately; DNS rows renew locally when cached zone serials match, otherwise background refresh starts are lease-protected and batched for multi-zone search. |
 | IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. |
-| Read endpoint | GET requests use `read_server` when configured; high-parallel DNS search spreads a small share back to primary. |
+| Read endpoint | GET requests use `read_server` when configured; high-parallel DNS search can spread a configured share back to primary. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
 | Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`. |
 | Connections | The WAPI HTTP client keeps an idle connection pool sized from `dns_search_worker_limit` for better TLS reuse. |
@@ -26,6 +26,7 @@ Default tuning in the profile config `[meta]` section:
 | `cache_ttl` | `300` seconds | Normal freshness for zone, record, and IPAM cache rows. |
 | `records_cache_swr_ttl` | `259200` seconds | How long expired record and IPAM rows can be served stale while revalidating. |
 | `dns_search_worker_limit` | `16` | Maximum parallel zone workers during multi-zone search. |
+| `dns_search_primary_read_percent` | `20` | Primary-server share for global-search worker GETs when `dns_search_worker_limit` is greater than 10 and `read_server` is configured. |
 | `max_background_worker_wait` | `3` seconds | Maximum wait for an active same-zone refresh before foreground WAPI work. |
 | `completion_cache_prefetch` | `true` | Whether cache-backed shell completion starts background refresh helpers for missing or stale DNS/IPAM context caches. |
 | refresh lease TTL | `300` seconds | Local lock lifetime that prevents duplicate refresh subprocesses. |
@@ -73,10 +74,12 @@ Read-only traffic can use a Grid Master Candidate when `ib config new/edit`
 finds one that supports read-only WAPI access. Writes never use that endpoint:
 create, edit, delete, and zone mutation commands stay on the primary Grid Master.
 When `dns_search_worker_limit` is greater than 10 and `read_server` is distinct
-from the primary server, global DNS search assigns about 20% of record-loading
-workers to primary GETs and leaves the other workers on the read server. Worker
-clients share the same pooled HTTP transport, so keep-alive reuse remains sized
-from `dns_search_worker_limit` across both endpoints.
+from the primary server, global DNS search assigns `dns_search_primary_read_percent`
+of record-loading workers to primary GETs and leaves the other workers on the
+read server. Worker clients share the same pooled HTTP transport, so keep-alive
+reuse remains sized from `dns_search_worker_limit` across both endpoints. Set
+`dns_search_primary_read_percent = 0` to keep all worker GETs on the read
+server.
 
 ## What The Workers Do
 

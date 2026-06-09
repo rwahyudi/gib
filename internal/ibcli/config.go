@@ -18,10 +18,12 @@ var profileNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 const (
 	defaultCacheTTLSeconds                = 300
 	defaultDNSSearchWorkerLimit           = 16
+	defaultDNSSearchPrimaryReadPercent    = 20
 	defaultRecordsCacheSWRSeconds         = 3 * 24 * 60 * 60
 	defaultMaxBackgroundWorkerWaitSeconds = 3
 	configCacheTTLKey                     = "cache_ttl"
 	configDNSSearchWorkerLimitKey         = "dns_search_worker_limit"
+	configDNSSearchPrimaryReadPercentKey  = "dns_search_primary_read_percent"
 	configRecordsCacheSWRKey              = "records_cache_swr_ttl"
 	configMaxBackgroundWorkerWaitKey      = "max_background_worker_wait"
 	configCompletionCachePrefetchKey      = "completion_cache_prefetch"
@@ -47,6 +49,8 @@ type Profile struct {
 type ConfigSettings struct {
 	CacheTTLSeconds                int
 	DNSSearchWorkerLimit           int
+	DNSSearchPrimaryReadPercent    int
+	dnsSearchPrimaryReadPercentSet bool
 	RecordsCacheSWRSeconds         int
 	MaxBackgroundWorkerWaitSeconds int
 	CompletionCachePrefetch        bool
@@ -62,6 +66,8 @@ func defaultConfigSettings() ConfigSettings {
 	return ConfigSettings{
 		CacheTTLSeconds:                defaultCacheTTLSeconds,
 		DNSSearchWorkerLimit:           defaultDNSSearchWorkerLimit,
+		DNSSearchPrimaryReadPercent:    defaultDNSSearchPrimaryReadPercent,
+		dnsSearchPrimaryReadPercentSet: true,
 		RecordsCacheSWRSeconds:         defaultRecordsCacheSWRSeconds,
 		MaxBackgroundWorkerWaitSeconds: defaultMaxBackgroundWorkerWaitSeconds,
 		CompletionCachePrefetch:        true,
@@ -79,6 +85,15 @@ func (s ConfigSettings) complete() ConfigSettings {
 	}
 	if s.DNSSearchWorkerLimit <= 0 {
 		s.DNSSearchWorkerLimit = defaults.DNSSearchWorkerLimit
+	}
+	if !s.dnsSearchPrimaryReadPercentSet {
+		if s.DNSSearchPrimaryReadPercent == 0 {
+			s.DNSSearchPrimaryReadPercent = defaults.DNSSearchPrimaryReadPercent
+		}
+		s.dnsSearchPrimaryReadPercentSet = true
+	}
+	if s.DNSSearchPrimaryReadPercent < 0 || s.DNSSearchPrimaryReadPercent > 100 {
+		s.DNSSearchPrimaryReadPercent = defaults.DNSSearchPrimaryReadPercent
 	}
 	if s.RecordsCacheSWRSeconds <= 0 {
 		s.RecordsCacheSWRSeconds = defaults.RecordsCacheSWRSeconds
@@ -110,6 +125,7 @@ func configSettingsFromSections(sections map[string]map[string]string) (ConfigSe
 	}
 	settings.CacheTTLSeconds, missing = positiveIntSetting(meta, configCacheTTLKey, settings.CacheTTLSeconds, missing)
 	settings.DNSSearchWorkerLimit, missing = positiveIntSetting(meta, configDNSSearchWorkerLimitKey, settings.DNSSearchWorkerLimit, missing)
+	settings.DNSSearchPrimaryReadPercent, settings.dnsSearchPrimaryReadPercentSet, missing = percentSetting(meta, configDNSSearchPrimaryReadPercentKey, settings.DNSSearchPrimaryReadPercent, missing)
 	settings.RecordsCacheSWRSeconds, missing = positiveIntSetting(meta, configRecordsCacheSWRKey, settings.RecordsCacheSWRSeconds, missing)
 	settings.MaxBackgroundWorkerWaitSeconds, missing = positiveIntSetting(meta, configMaxBackgroundWorkerWaitKey, settings.MaxBackgroundWorkerWaitSeconds, missing)
 	settings.CompletionCachePrefetch, settings.completionCachePrefetchSet, missing = boolSetting(meta, configCompletionCachePrefetchKey, settings.CompletionCachePrefetch, missing)
@@ -141,6 +157,18 @@ func positiveIntSetting(values map[string]string, key string, fallback int, miss
 		return fallback, true
 	}
 	return parsed, missing
+}
+
+func percentSetting(values map[string]string, key string, fallback int, missing bool) (int, bool, bool) {
+	raw, ok := values[key]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return fallback, false, true
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || parsed < 0 || parsed > 100 {
+		return fallback, false, true
+	}
+	return parsed, true, missing
 }
 
 func boolSetting(values map[string]string, key string, fallback bool, missing bool) (bool, bool, bool) {
@@ -187,6 +215,10 @@ func (a *App) cacheTTL() time.Duration {
 
 func (a *App) dnsSearchWorkerLimit() int {
 	return a.configSettings().DNSSearchWorkerLimit
+}
+
+func (a *App) dnsSearchPrimaryReadPercent() int {
+	return a.configSettings().DNSSearchPrimaryReadPercent
 }
 
 func (a *App) recordsCacheSWRTTL() time.Duration {
@@ -579,6 +611,8 @@ func (a *App) writeConfigProfilesWithSettingsMode(defaultProfile string, profile
 	builder.WriteString("default_profile = " + defaultProfile + "\n")
 	builder.WriteString(configCacheTTLKey + " = " + strconv.Itoa(settings.CacheTTLSeconds) + "\n")
 	builder.WriteString(configDNSSearchWorkerLimitKey + " = " + strconv.Itoa(settings.DNSSearchWorkerLimit) + "\n")
+	builder.WriteString("# Applies only when dns_search_worker_limit is greater than 10 and read_server is configured.\n")
+	builder.WriteString(configDNSSearchPrimaryReadPercentKey + " = " + strconv.Itoa(settings.DNSSearchPrimaryReadPercent) + "\n")
 	builder.WriteString(configRecordsCacheSWRKey + " = " + strconv.Itoa(settings.RecordsCacheSWRSeconds) + "\n")
 	builder.WriteString(configMaxBackgroundWorkerWaitKey + " = " + strconv.Itoa(settings.MaxBackgroundWorkerWaitSeconds) + "\n")
 	builder.WriteString(configCompletionCachePrefetchKey + " = " + strconv.FormatBool(settings.CompletionCachePrefetch) + "\n")

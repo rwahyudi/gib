@@ -2932,9 +2932,10 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 	}
 
 	var wg sync.WaitGroup
+	primaryReadPercent := a.dnsSearchPrimaryReadPercent()
 	for id := 1; id <= workerCount; id++ {
 		workerID := id
-		workerClient := searchWorkerClient(client, workerID, workerCount)
+		workerClient := searchWorkerClient(client, workerID, workerCount, primaryReadPercent)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -3018,8 +3019,8 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 	return batches, nil
 }
 
-func searchWorkerClient(client *WapiClient, workerID int, workerCount int) *WapiClient {
-	if client == nil || !searchWorkerUsesPrimaryReads(client, workerID, workerCount) {
+func searchWorkerClient(client *WapiClient, workerID int, workerCount int, primaryReadPercent int) *WapiClient {
+	if client == nil || !searchWorkerUsesPrimaryReads(client, workerID, workerCount, primaryReadPercent) {
 		return client
 	}
 	workerClient := client.clone()
@@ -3027,14 +3028,14 @@ func searchWorkerClient(client *WapiClient, workerID int, workerCount int) *Wapi
 	return workerClient
 }
 
-func searchWorkerUsesPrimaryReads(client *WapiClient, workerID int, workerCount int) bool {
+func searchWorkerUsesPrimaryReads(client *WapiClient, workerID int, workerCount int, primaryReadPercent int) bool {
 	if client == nil || workerID <= 0 || workerCount <= 10 {
 		return false
 	}
 	if strings.TrimSpace(client.ReadServer) == "" || strings.TrimRight(client.ReadServer, "/") == strings.TrimRight(client.Server, "/") {
 		return false
 	}
-	primaryWorkers := primaryReadWorkerCount(workerCount)
+	primaryWorkers := primaryReadWorkerCount(workerCount, primaryReadPercent)
 	if primaryWorkers == 0 {
 		return false
 	}
@@ -3043,11 +3044,14 @@ func searchWorkerUsesPrimaryReads(client *WapiClient, workerID int, workerCount 
 	return (workerID*primaryWorkers)/workerCount != ((workerID-1)*primaryWorkers)/workerCount
 }
 
-func primaryReadWorkerCount(workerCount int) int {
-	if workerCount <= 10 {
+func primaryReadWorkerCount(workerCount int, primaryReadPercent int) int {
+	if workerCount <= 10 || primaryReadPercent <= 0 {
 		return 0
 	}
-	primaryWorkers := int(math.Round(float64(workerCount) * 0.20))
+	if primaryReadPercent > 100 {
+		primaryReadPercent = 100
+	}
+	primaryWorkers := int(math.Round(float64(workerCount) * (float64(primaryReadPercent) / 100)))
 	if primaryWorkers < 1 {
 		primaryWorkers = 1
 	}
