@@ -48,9 +48,8 @@ sudo dnf install gib
 ```
 
 GitHub release assets use stable filenames, so `/releases/latest/download/...`
-always points at the newest published version. Use these assets on RHEL8 or
-other older glibc systems if a locally built binary reports a missing
-`GLIBC_*` version.
+always points at the newest published version. Linux release assets are built
+with `CGO_ENABLED=0`, so they do not require a specific glibc version.
 
 Linux tarball:
 

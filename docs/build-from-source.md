@@ -6,7 +6,6 @@ platform, or when validating source changes before a release.
 ## Requirements
 
 - Go 1.24 or newer.
-- A C compiler, because `ib` uses `go-sqlite3` through CGO.
 - Git.
 
 Use `/tmp` for Go caches in restricted or sandboxed checkouts:
@@ -18,7 +17,7 @@ export GOMODCACHE=/tmp/go-mod
 
 ## Linux
 
-Install Go and a C compiler with your system package manager, then build:
+Install Go with your system package manager, then build:
 
 ```bash
 git clone https://github.com/rwahyudi/gib.git
@@ -31,9 +30,8 @@ sudo install -m 0755 ib /usr/local/bin/ib
 ib --help
 ```
 
-This local build links against the glibc and C toolchain on the build host. To
-validate the published Linux release binary's RHEL8 glibc compatibility, use the
-GoReleaser snapshot and `readelf` checks in [Release Process](release-process.md).
+This local build uses a cgo-free SQLite driver, so it does not require a C
+compiler or link against the build host's glibc.
 
 Optional Bash completion:
 
@@ -46,8 +44,8 @@ Open a new shell after installing completion.
 
 ## Windows
 
-Native Windows builds need a MinGW-w64 compiler because SQLite support uses
-CGO. The most reliable path is MSYS2 UCRT64.
+Native Windows builds do not need a C compiler because SQLite support is
+cgo-free. MSYS2 UCRT64 is still a convenient shell for Go builds.
 
 Install MSYS2:
 
@@ -58,12 +56,12 @@ winget install MSYS2.MSYS2
 Open the **MSYS2 UCRT64** shell and run:
 
 ```bash
-pacman -S --needed git mingw-w64-ucrt-x86_64-go mingw-w64-ucrt-x86_64-gcc
+pacman -S --needed git mingw-w64-ucrt-x86_64-go
 
 git clone https://github.com/rwahyudi/gib.git
 cd gib
 
-export CGO_ENABLED=1
+export CGO_ENABLED=0
 export GOCACHE=/tmp/go-build
 export GOMODCACHE=/tmp/go-mod
 

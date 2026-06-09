@@ -33,11 +33,9 @@ Source1:        %{archivename}-vendor.tar.bz2
 Source2:        go-vendor-tools.toml
 
 BuildRequires:  bash-completion
-BuildRequires:  gcc
 BuildRequires:  go-rpm-macros
 BuildRequires:  go-vendor-tools
 BuildRequires:  golang >= 1.24
-BuildRequires:  pkgconfig(sqlite3)
 
 Requires:       ca-certificates
 
@@ -52,8 +50,7 @@ Requires:       ca-certificates
 %goprep -k -e
 
 %build
-export CGO_ENABLED=1
-export GO_BUILDTAGS="libsqlite3"
+export CGO_ENABLED=0
 %gobuild -o %{gobuilddir}/bin/ib %{goipath}/cmd/ib
 
 %install
@@ -70,8 +67,8 @@ install -m 0644 -vp packaging/man/ib.1 %{buildroot}%{_mandir}/man1/ib.1
 
 %check
 %go_vendor_license_check -c %{S:2}
-export CGO_ENABLED=1
-%gocheck2 -- -tags libsqlite3
+export CGO_ENABLED=0
+%gocheck2
 
 %files -f %{go_vendor_license_filelist}
 %doc %{godocs}

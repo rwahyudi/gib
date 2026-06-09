@@ -217,7 +217,7 @@ func TestCacheMigrationRebuildsOldRecordCacheSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if _, err := db.Exec(`
+	if err := execSQLScript(db, `
 CREATE TABLE cache_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO cache_meta (key, value) VALUES ('schema_version', '1');
 CREATE TABLE zone_cache (
@@ -287,7 +287,7 @@ func TestCacheMigrationAddsRecordCacheStaleExpiry(t *testing.T) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	cachedAt := int64(1_700_000_000)
-	if _, err := db.Exec(`
+	if err := execSQLScript(db, `
 CREATE TABLE cache_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO cache_meta (key, value) VALUES ('schema_version', '2');
 CREATE TABLE zone_cache (
@@ -308,6 +308,11 @@ CREATE TABLE record_cache (
   expires_at INTEGER NOT NULL,
   payload_json TEXT NOT NULL
 );
+`); err != nil {
+		_ = db.Close()
+		t.Fatalf("seed old schema: %v", err)
+	}
+	if _, err := db.Exec(`
 INSERT INTO record_cache (cache_key, profile, view, zone, zone_serial, cached_at, expires_at, payload_json)
 VALUES (?, 'default', 'default', 'example.com', '2026050801', ?, ?, '[{"name":"app.example.com"}]');
 `, cacheKey("records", "default", "default", "example.com"), cachedAt, cachedAt+defaultCacheTTLSeconds); err != nil {

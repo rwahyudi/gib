@@ -19,9 +19,9 @@ GoReleaser builds Linux and Windows amd64 binaries from `./cmd/ib`. Release
 builds inject the version and build date into `internal/ibcli` with ldflags, so
 `ib -v` should show the tag version and an AEST build time.
 
-Linux release artifacts are built with CGO enabled through Zig's
-`x86_64-linux-gnu.2.28` target so the published binary remains compatible with
-RHEL8 and other distributions that provide glibc 2.28 or newer.
+Linux and Windows release artifacts are built with `CGO_ENABLED=0` using the
+cgo-free SQLite driver, so they do not link against the build host's glibc or
+need MinGW-w64 for SQLite support.
 
 ## Step 1: Choose and Prepare the Version
 
@@ -107,22 +107,19 @@ Job flow:
 1. Check out the repository with `fetch-depth: 0` so GoReleaser can inspect tags
    and changelog data.
 2. Set up Go from `go.mod` with the GitHub Actions Go cache.
-3. Install Zig 0.14.1 for the Linux CGO build's RHEL8-compatible glibc target.
-4. Install Linux packaging and Windows cross-build dependencies:
-   `build-essential`, `rpm`, `gcc-mingw-w64-x86-64`, and
-   `g++-mingw-w64-x86-64`.
-5. Run `go mod download`.
-6. Run `go test ./...`.
-7. Run `scripts/check-licenses.sh`, which regenerates third-party notices in
+3. Install Linux package tooling: `rpm`.
+4. Run `go mod download`.
+5. Run `go test ./...`.
+6. Run `scripts/check-licenses.sh`, which regenerates third-party notices in
    check mode and rejects blocked or review-required license text.
-8. Smoke-test the Windows build with `GOOS=windows`, `GOARCH=amd64`,
-   `CGO_ENABLED=1`, and the MinGW compiler variables.
-9. Run `goreleaser/goreleaser-action@v7` with `goreleaser release --clean`.
+7. Smoke-test the Windows build with `GOOS=windows`, `GOARCH=amd64`, and
+   `CGO_ENABLED=0`.
+8. Run `goreleaser/goreleaser-action@v7` with `goreleaser release --clean`.
 
 GoReleaser then:
 
-1. Builds `ib` for Linux amd64 with CGO enabled and Zig targeting glibc 2.28.
-2. Builds `ib.exe` for Windows amd64 with MinGW-w64 and CGO enabled.
+1. Builds `ib` for Linux amd64 with CGO disabled.
+2. Builds `ib.exe` for Windows amd64 with CGO disabled.
 3. Injects `.Version` and `.Date` into `internal/ibcli.Version` and
    `internal/ibcli.BuildDate`.
 4. Creates the Linux tarball and Windows ZIP with README and license files.
@@ -192,14 +189,14 @@ curl -fL https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64
 "$tmp/ib" --help
 ```
 
-Check the Linux binary's required glibc symbol versions before publishing when
+Check that the Linux binary does not require glibc before publishing when
 release packaging changes:
 
 ```bash
-readelf --version-info "$tmp/ib" | rg 'GLIBC_[0-9]' | sort -Vu
+readelf --version-info "$tmp/ib" | rg 'GLIBC_[0-9]' || true
 ```
 
-The newest reported `GLIBC_*` version should be `GLIBC_2.28` or older.
+No `GLIBC_*` versions should be reported.
 
 Inspect package metadata when package tools are available:
 
@@ -249,6 +246,6 @@ packaging workflow explicitly changes. Commit only intentional updates to
 - Release workflow passes.
 - GitHub release is latest and contains all expected assets.
 - `ib -v` reports the release version and AEST build time.
-- Linux binary requires no glibc version newer than `GLIBC_2.28`.
+- Linux binary reports no required `GLIBC_*` symbol versions.
 - Linux tarball, RPM, DEB, and Windows ZIP links resolve.
 - Copr package is rebuilt after the GitHub release.

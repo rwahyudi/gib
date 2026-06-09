@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/ncruces/go-sqlite3/driver"
+	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
 const (
@@ -145,6 +146,10 @@ var (
 	cacheReadyPaths = map[string]bool{}
 )
 
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 // cachedPayload is the common in-memory form for zone-list and record-cache
 // rows. Freshness is computed from CachedAt plus the current cache_ttl setting;
 // only record rows also carry a stale-while-revalidate deadline.
@@ -213,7 +218,7 @@ func (a *App) ensureCacheDBReady(db *sql.DB) error {
 	}
 	defer cacheReadyMu.Unlock()
 
-	if _, err := db.Exec(cacheSchema); err != nil {
+	if err := execSQLScript(db, cacheSchema); err != nil {
 		return err
 	}
 	if err := migrateCacheDB(db); err != nil {
@@ -364,7 +369,7 @@ func migrateCacheFreshExpiry(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`
+	if err := execSQLScript(tx, `
 DROP INDEX IF EXISTS idx_zone_cache_scope;
 DROP INDEX IF EXISTS idx_record_cache_scope_zone;
 DROP INDEX IF EXISTS idx_record_cache_zone;
@@ -463,8 +468,21 @@ func tableColumnSet(db *sql.DB, tableName string) (map[string]bool, error) {
 	return columns, rows.Err()
 }
 
+func execSQLScript(execer sqlExecer, script string) error {
+	for _, statement := range strings.Split(script, ";") {
+		statement = strings.TrimSpace(statement)
+		if statement == "" {
+			continue
+		}
+		if _, err := execer.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func resetCacheSchema(db *sql.DB) error {
-	if _, err := db.Exec(`
+	if err := execSQLScript(db, `
 DROP TABLE IF EXISTS record_cache_addresses;
 DROP TABLE IF EXISTS record_cache_records;
 DROP TABLE IF EXISTS zone_cache_entries;
@@ -480,8 +498,7 @@ DELETE FROM cache_meta WHERE key = 'schema_version';
 `); err != nil {
 		return err
 	}
-	_, err := db.Exec(cacheSchema)
-	return err
+	return execSQLScript(db, cacheSchema)
 }
 
 func cacheScope(profile Profile) (string, string) {
@@ -932,10 +949,16 @@ func (a *App) clearCache() error {
 		return err
 	}
 	defer db.Close()
-	if _, err := db.Exec(`DELETE FROM zone_cache; DELETE FROM record_cache; DELETE FROM record_refresh_locks; DELETE FROM network_view_cache; DELETE FROM network_cache; DELETE FROM network_container_cache; DELETE FROM ipv4_address_cache; DELETE FROM net_refresh_locks;`); err != nil {
-		return err
-	}
-	return nil
+	return execSQLScript(db, `
+DELETE FROM zone_cache;
+DELETE FROM record_cache;
+DELETE FROM record_refresh_locks;
+DELETE FROM network_view_cache;
+DELETE FROM network_cache;
+DELETE FROM network_container_cache;
+DELETE FROM ipv4_address_cache;
+DELETE FROM net_refresh_locks;
+`)
 }
 
 func (a *App) clearProfileCache(profileName string) error {
@@ -948,16 +971,21 @@ func (a *App) clearProfileCache(profileName string) error {
 		return err
 	}
 	defer db.Close()
-	_, err = db.Exec(`
-DELETE FROM zone_cache WHERE profile = ?;
-DELETE FROM record_cache WHERE profile = ?;
-DELETE FROM record_refresh_locks WHERE profile = ?;
-DELETE FROM network_view_cache WHERE profile = ?;
-DELETE FROM network_cache WHERE profile = ?;
-DELETE FROM network_container_cache WHERE profile = ?;
-DELETE FROM ipv4_address_cache WHERE profile = ?;
-DELETE FROM net_refresh_locks WHERE profile = ?;`, profileName, profileName, profileName, profileName, profileName, profileName, profileName, profileName)
-	return err
+	for _, query := range []string{
+		`DELETE FROM zone_cache WHERE profile = ?`,
+		`DELETE FROM record_cache WHERE profile = ?`,
+		`DELETE FROM record_refresh_locks WHERE profile = ?`,
+		`DELETE FROM network_view_cache WHERE profile = ?`,
+		`DELETE FROM network_cache WHERE profile = ?`,
+		`DELETE FROM network_container_cache WHERE profile = ?`,
+		`DELETE FROM ipv4_address_cache WHERE profile = ?`,
+		`DELETE FROM net_refresh_locks WHERE profile = ?`,
+	} {
+		if _, err := db.Exec(query, profileName); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) tryAcquireRecordRefreshLease(profile Profile, zone string, now time.Time, ttl time.Duration) (bool, error) {
