@@ -61,6 +61,8 @@ creation requires root.
 .TP
 .B sudo ib config edit --global-config shared
 Edit a Linux global profile under /etc/ib. Global profile edits require root.
+Plain ib config edit follows the selected profile scope, so a current global
+default edits /etc/ib/config and warns on permission errors.
 .TP
 .B ib dns list
 List records in the current DNS context. Current-context footers mark global

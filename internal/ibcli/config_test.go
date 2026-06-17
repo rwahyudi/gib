@@ -413,6 +413,45 @@ func TestConfigUseGlobalProfileCreatesLocalMetadataOverride(t *testing.T) {
 	}
 }
 
+func TestConfigEditWithoutGlobalFlagUsesDefaultGlobalProfileLocation(t *testing.T) {
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": plainTestProfile("shared", "https://shared.example"),
+	}, "ibusers")
+
+	autoGlobal, err := app.useConfigLocationForInteractiveConfig("", false, false)
+	if err != nil {
+		t.Fatalf("select edit config location: %v", err)
+	}
+	if !autoGlobal {
+		t.Fatal("autoGlobal = false, want true for default global profile")
+	}
+	if app.ConfigFile != app.GlobalConfigFile {
+		t.Fatalf("active config file = %q, want global %q", app.ConfigFile, app.GlobalConfigFile)
+	}
+	if app.globalConfigGroup != "ibusers" {
+		t.Fatalf("global config group = %q, want ibusers", app.globalConfigGroup)
+	}
+}
+
+func TestConfigEditAutoGlobalPermissionWarning(t *testing.T) {
+	app := testApp(t)
+	var stderr bytes.Buffer
+	app.Stderr = &stderr
+	app.useConfigLocation(app.globalConfigLocation())
+
+	if !configPermissionError(os.ErrPermission) {
+		t.Fatal("os.ErrPermission was not detected as a permission error")
+	}
+	app.warnGlobalConfigEditPermission()
+	output := stderr.String()
+	for _, want := range []string{"WARNING:", "cannot edit global config", app.GlobalConfigFile, "sudo"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("permission warning missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func (a *App) withLocalConfigProfiles() (string, map[string]Profile, bool, error) {
 	var defaultProfile string
 	var profiles map[string]Profile

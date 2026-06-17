@@ -1071,16 +1071,9 @@ func (a *App) deleteProfile(profileName string) error {
 }
 
 func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault bool, globalConfig bool) error {
-	if globalConfig {
-		if !globalConfigSupported() {
-			return cliError("--global-config is only supported on Linux")
-		}
-		if err := requireGlobalConfigRoot(); err != nil {
-			return err
-		}
-		a.useConfigLocation(a.globalConfigLocation())
-	} else {
-		a.useConfigLocation(a.localConfigLocation())
+	autoGlobalEdit, err := a.useConfigLocationForInteractiveConfig(profileName, create, globalConfig)
+	if err != nil {
+		return err
 	}
 	defaultProfile := defaultProfileName
 	profiles := map[string]Profile{}
@@ -1101,7 +1094,6 @@ func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault
 	selected := profileName
 	a.printConfigureIntro(create, selected)
 	step := 1
-	var err error
 	if selected == "" && create {
 		selected, err = a.gum.Input("Profile name", "", false)
 		if err != nil {
@@ -1143,6 +1135,10 @@ func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault
 		if err == nil {
 			return nil
 		}
+		if autoGlobalEdit && configPermissionError(err) {
+			a.warnGlobalConfigEditPermission()
+			return err
+		}
 		if configInputCanceled(err) {
 			return err
 		}
@@ -1150,6 +1146,53 @@ func (a *App) saveConfigInteractive(profileName string, create bool, makeDefault
 			return err
 		}
 	}
+}
+
+func (a *App) useConfigLocationForInteractiveConfig(profileName string, create bool, globalConfig bool) (bool, error) {
+	if globalConfig {
+		if !globalConfigSupported() {
+			return false, cliError("--global-config is only supported on Linux")
+		}
+		if err := requireGlobalConfigRoot(); err != nil {
+			return false, err
+		}
+		a.useConfigLocation(a.globalConfigLocation())
+		return false, nil
+	}
+	if create {
+		a.useConfigLocation(a.localConfigLocation())
+		return false, nil
+	}
+
+	merged, err := a.readMergedConfig(false)
+	if err != nil {
+		return false, err
+	}
+	selected := strings.TrimSpace(profileName)
+	if selected == "" {
+		selected = merged.DefaultProfile
+	}
+	if selected != "" {
+		normalized, err := normalizeProfileName(selected)
+		if err != nil {
+			return false, err
+		}
+		if location, ok := merged.ProfileLocations[normalized]; ok && location.Scope == globalConfigScope {
+			a.activateConfigLocation(location, merged.FileData[location.Scope].Settings)
+			return true, nil
+		}
+	}
+
+	a.useConfigLocation(a.localConfigLocation())
+	return false, nil
+}
+
+func configPermissionError(err error) bool {
+	return err != nil && os.IsPermission(err)
+}
+
+func (a *App) warnGlobalConfigEditPermission() {
+	a.PrintWarning("WARNING: cannot edit global config " + a.ConfigFile + ": permission denied. Re-run with sudo or ask an administrator.")
 }
 
 func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile string, profiles map[string]Profile, makeDefault bool, startStep int, settings ConfigSettings) error {
