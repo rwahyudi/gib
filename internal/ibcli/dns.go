@@ -48,17 +48,19 @@ var (
 	zoneFormatTypes     = []string{"FORWARD", "IPV4", "IPV6"}
 
 	recordTypeColors = map[string]lipgloss.Color{
-		"a":           "#22c55e",
-		"aaaa":        "#16a34a",
-		"host":        "#06b6d4",
-		"cname":       "#a78bfa",
-		"txt":         "#f59e0b",
-		"mx":          "#3b82f6",
-		"ptr":         "#38bdf8",
-		"ns":          "#14b8a6",
-		"soa":         "#ec4899",
-		"srv":         "#f97316",
-		"unsupported": "#ef4444",
+		"a":             "#22c55e",
+		"aaaa":          "#16a34a",
+		"host":          "#06b6d4",
+		"cname":         "#a78bfa",
+		"txt":           "#f59e0b",
+		"mx":            "#3b82f6",
+		"ptr":           "#38bdf8",
+		"ns":            "#14b8a6",
+		"ns-auth":       "#14b8a6",
+		"ns-delegation": "#facc15",
+		"soa":           "#ec4899",
+		"srv":           "#f97316",
+		"unsupported":   "#ef4444",
 	}
 	defaultRecordTypeColor = lipgloss.Color("#94a3b8")
 
@@ -1555,8 +1557,15 @@ func selectRecordOutputColumns(row map[string]any, columns []string) map[string]
 }
 
 func recordTableValue(field string, row map[string]any) string {
+	return recordTableValueForRecord(field, row, TypedRecord{})
+}
+
+func recordTableValueForRecord(field string, row map[string]any, record TypedRecord) string {
 	switch field {
 	case "type":
+		if record.Type != "" {
+			return styledRecordType(recordDisplayType(record))
+		}
 		return styledRecordType(stringify(row[field]))
 	case "value":
 		return wrapRecordTableCell(stringify(row[field]), recordValueWrapWidth)
@@ -1565,6 +1574,43 @@ func recordTableValue(field string, row map[string]any) string {
 	default:
 		return stringify(row[field])
 	}
+}
+
+func recordDisplayType(record TypedRecord) string {
+	recordType := canonicalDisplayRecordType(record.Type)
+	if recordType != "ns" {
+		return record.Type
+	}
+	if nsAuthoritativeRecord(record.Item) {
+		return "ns-auth"
+	}
+	return "ns-delegation"
+}
+
+func nsAuthoritativeRecord(item map[string]any) bool {
+	referenceText := nsReferenceText(item)
+	if strings.Contains(referenceText, "fake_bind_ns") {
+		return true
+	}
+	if strings.Contains(referenceText, "bind_ns") || strings.Contains(referenceText, "record:ns/") {
+		return false
+	}
+	return sameDNSName(recordName(item, "ns"), cleanString(item["zone"]))
+}
+
+func nsReferenceText(item map[string]any) string {
+	return strings.ToLower(strings.Join([]string{
+		cleanString(item["_ref"]),
+		decodedAllRecordsRef(item),
+		cleanString(item["record"]),
+		cleanString(nestedRecord(item)["_ref"]),
+	}, " "))
+}
+
+func sameDNSName(left, right string) bool {
+	left = strings.TrimRight(strings.ToLower(strings.TrimSpace(left)), ".")
+	right = strings.TrimRight(strings.ToLower(strings.TrimSpace(right)), ".")
+	return left != "" && right != "" && left == right
 }
 
 func recordTypeColor(recordType string) lipgloss.Color {
@@ -1604,6 +1650,12 @@ func displayRecordTypeLabel(recordType string) string {
 	if value == "" || value == "<nil>" {
 		return ""
 	}
+	if value == "ns-auth" {
+		return "NS-AUTH"
+	}
+	if value == "ns-delegation" {
+		return "NS-DELEGATION"
+	}
 	return strings.ToUpper(value)
 }
 
@@ -1630,10 +1682,10 @@ func (a *App) emitRecordsWithContext(records []TypedRecord, showContext bool, se
 	}
 	if a.isTableOutput() {
 		displayRows := make([][]string, 0, len(rows))
-		for _, row := range rows {
+		for index, row := range rows {
 			display := make([]string, 0, len(columns))
 			for _, field := range columns {
-				display = append(display, recordTableValue(field, row))
+				display = append(display, recordTableValueForRecord(field, row, records[index]))
 			}
 			displayRows = append(displayRows, display)
 		}

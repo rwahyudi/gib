@@ -67,7 +67,9 @@ default edits /etc/ib/config and warns on permission errors.
 .B ib dns list
 List records in the current DNS context. Current-context footers mark global
 profiles with (global).
-Use --type ns to list read-only nameserver records.
+Use --type ns to list nameserver records. Table output labels NS rows as
+NS-AUTH for authoritative zone nameservers or NS-DELEGATION for child-zone
+delegation nameservers; filters still use ns.
 Larger IPv4 reverse CIDR scopes can include matching child reverse zones.
 .TP
 .B ib dns search app

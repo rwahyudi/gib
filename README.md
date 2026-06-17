@@ -247,7 +247,7 @@ ib dns edit host app 192.0.2.20 -t 300 -c "Application host"
 ib dns delete a app
 ```
 
-`ib dns list` and `ib dns search` operate on the current zone by default. For search, a complete forward FQDN such as `ben-dr-vss.net.latrobe.edu.au` can infer the longest matching authoritative zone, search that zone, and match the relative owner name such as `ben-dr-vss`. With `--global`, search still scans every searchable zone in the selected view, but the relative-owner match is limited to the inferred forward zone so the matching forward record can appear alongside PTR/reverse matches. Add `-r` or `--recursive` to include child zones. For IPv4 reverse DNS, `ib dns list` also accepts a larger CIDR scope such as `10.128.48.0/23` and lists records from matching child reverse zones such as `10.128.48.0/24` and `10.128.49.0/24`. `ib dns list` also supports `-t/--type` and `-e/--exclude` filters like search, including read-only nameserver filtering with `--type ns`. Add `-s` or `--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`; a blank `--sort` sorts by name, and a leading minus sorts descending, for example `--sort=-name`. Add `-C` or `--columns` to print selected columns from `type`, `name`, `value`, `zone`, `ttl`, and `comment`, for example `--columns name,value`.
+`ib dns list` and `ib dns search` operate on the current zone by default. For search, a complete forward FQDN such as `ben-dr-vss.net.latrobe.edu.au` can infer the longest matching authoritative zone, search that zone, and match the relative owner name such as `ben-dr-vss`. With `--global`, search still scans every searchable zone in the selected view, but the relative-owner match is limited to the inferred forward zone so the matching forward record can appear alongside PTR/reverse matches. Add `-r` or `--recursive` to include child zones. For IPv4 reverse DNS, `ib dns list` also accepts a larger CIDR scope such as `10.128.48.0/23` and lists records from matching child reverse zones such as `10.128.48.0/24` and `10.128.49.0/24`. `ib dns list` also supports `-t/--type` and `-e/--exclude` filters like search, including nameserver filtering with `--type ns`; table output labels NS rows as `NS-AUTH` for authoritative zone nameservers or `NS-DELEGATION` for delegated child-zone nameservers. Add `-s` or `--sort` to sort by `name`, `type`, `value`, `zone`, `ttl`, or `comment`; a blank `--sort` sorts by name, and a leading minus sorts descending, for example `--sort=-name`. Add `-C` or `--columns` to print selected columns from `type`, `name`, `value`, `zone`, `ttl`, and `comment`, for example `--columns name,value`.
 
 `ib dns zone list` supports the same output control pattern for zones. `--type` filters zone formats `FORWARD`, `IPV4`, or `IPV6`; `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment`; and `--columns` selects from the same zone fields. Use `--view` to list zones from another DNS view; `--zone` and `-z` are not accepted by this command.
 
@@ -278,7 +278,9 @@ order. Record fields are `name`, `type`, `value`, `zone`, `ttl`, and `comment`;
 zone fields are `zone`, `view`, `format`, `ns_group`, and `comment`; network
 fields are `network`, `type`, `network_view`, and `comment`. Use `--columns` or `-C`
 with a comma-separated list to keep only the fields you need. Use `-o csv` for
-CSV output, or `-o json` when the next step is a `jq` pipeline.
+CSV output, or `-o json` when the next step is a `jq` pipeline. DNS table output
+uses presentation-only NS type labels (`NS-AUTH` and `NS-DELEGATION`); JSON, CSV,
+filters, completions, and sorting continue to use the underlying `ns` type.
 
 
 

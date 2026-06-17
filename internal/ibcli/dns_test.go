@@ -641,6 +641,8 @@ func TestRecordTypeColorMapsKnownTypes(t *testing.T) {
 	tests := map[string]string{
 		"host":           "#06b6d4",
 		"NS":             "#14b8a6",
+		"ns-auth":        "#14b8a6",
+		"ns-delegation":  "#facc15",
 		"record:soa":     "#ec4899",
 		"sharedrecord:a": "#22c55e",
 		"unknown":        "#94a3b8",
@@ -648,6 +650,81 @@ func TestRecordTypeColorMapsKnownTypes(t *testing.T) {
 	for recordType, want := range tests {
 		if got := string(recordTypeColor(recordType)); got != want {
 			t.Fatalf("record type color for %q = %q, want %q", recordType, got, want)
+		}
+	}
+}
+
+func TestNSRecordDisplayTypeDifferentiatesAuthoritativeAndDelegation(t *testing.T) {
+	authoritativeRef := base64.RawURLEncoding.EncodeToString([]byte("dns.fake_bind_ns$example.com"))
+	delegationRef := base64.RawURLEncoding.EncodeToString([]byte("dns.bind_ns$child.example.com"))
+
+	tests := []struct {
+		name   string
+		record TypedRecord
+		want   string
+	}{
+		{
+			name: "authoritative fake bind ns ref",
+			record: TypedRecord{Type: "ns", Item: map[string]any{
+				"_ref":       "allrecords/" + authoritativeRef + ":example.com/default",
+				"name":       "example.com",
+				"nameserver": "ns1.example.com",
+				"zone":       "example.com",
+			}},
+			want: "ns-auth",
+		},
+		{
+			name: "delegation bind ns ref",
+			record: TypedRecord{Type: "ns", Item: map[string]any{
+				"_ref":       "allrecords/" + delegationRef + ":child.example.com/default",
+				"name":       "child.example.com",
+				"nameserver": "ns1.child.example.com",
+				"zone":       "example.com",
+			}},
+			want: "ns-delegation",
+		},
+		{
+			name: "apex ns without ref",
+			record: TypedRecord{Type: "ns", Item: map[string]any{
+				"name":       "example.com.",
+				"nameserver": "ns1.example.com",
+				"zone":       "example.com",
+			}},
+			want: "ns-auth",
+		},
+		{
+			name: "child ns without ref",
+			record: TypedRecord{Type: "ns", Item: map[string]any{
+				"name":       "child.example.com",
+				"nameserver": "ns1.child.example.com",
+				"zone":       "example.com",
+			}},
+			want: "ns-delegation",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := recordDisplayType(tt.record); got != tt.want {
+				t.Fatalf("record display type = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEmitRecordsTableLabelsNSRecords(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &App{Output: tableOutput, Stdout: &stdout}
+	if err := app.emitRecordsWithContext([]TypedRecord{
+		{Type: "ns", Item: map[string]any{"name": "example.com", "nameserver": "ns1.example.com", "zone": "example.com"}},
+		{Type: "ns", Item: map[string]any{"name": "child.example.com", "nameserver": "ns1.child.example.com", "zone": "example.com"}},
+	}, false); err != nil {
+		t.Fatalf("emit records: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{"NS-AUTH", "NS-DELEGATION"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("table output missing %q:\n%s", want, output)
 		}
 	}
 }
