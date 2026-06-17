@@ -435,6 +435,27 @@ func objectQueryParams(spec RecordSpec, client *WapiClient, extra map[string]str
 	return params
 }
 
+func lookupObjectQueryParams(spec RecordSpec, client *WapiClient, extra map[string]string) url.Values {
+	params := objectQueryParams(spec, client, extra)
+	params.Set("_return_fields", lookupReturnFields(spec.ReturnFields))
+	return params
+}
+
+func lookupReturnFields(returnFields string) string {
+	fields := strings.Split(returnFields, ",")
+	kept := fields[:0]
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		switch field {
+		case "", "ttl", "use_ttl":
+			continue
+		default:
+			kept = append(kept, field)
+		}
+	}
+	return strings.Join(kept, ",")
+}
+
 func zoneQueryParams(client *WapiClient, returnFields string, extra map[string]string) url.Values {
 	params := url.Values{}
 	params.Set("_return_fields", returnFields)
@@ -3366,7 +3387,7 @@ func (a *App) findForwardRecords(profile Profile, client *WapiClient, recordName
 			if recordType == "ptr" {
 				continue
 			}
-			results, err := pagedQuery(client, spec.Object, objectQueryParams(spec, client, map[string]string{"name": target}))
+			results, err := pagedQuery(client, spec.Object, lookupObjectQueryParams(spec, client, map[string]string{"name": target}))
 			if err != nil {
 				return firstTarget, nil, nil, err
 			}

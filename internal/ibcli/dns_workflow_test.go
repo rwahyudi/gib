@@ -603,6 +603,70 @@ func TestDNSDeleteDuplicateSelectionCanceledPrintsInfo(t *testing.T) {
 	}
 }
 
+func TestDNSDeleteCNAMELookupOmitsUnsupportedTTLReturnFields(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		if r.Method != http.MethodDelete || trimWAPIPath(r.URL.Path) != "record:cname/ref" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "record:cname/ref"})
+	}))
+	defer primary.Close()
+
+	var readRequests []string
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
+		object := trimWAPIPath(r.URL.Path)
+		readRequests = append(readRequests, object+" fields="+r.URL.Query().Get("_return_fields"))
+		if strings.Contains(r.URL.Query().Get("_return_fields"), "ttl") {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"text": "Unknown argument/field: 'ttl'"})
+			return
+		}
+		if object == "record:cname" && r.URL.Query().Get("name") == "cnametest2.example.com" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":      "record:cname/ref",
+					"name":      "cnametest2.example.com",
+					"canonical": "target.example.com",
+					"view":      "default",
+					"zone":      "example.com",
+				}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+	}))
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	refreshes := captureRecordRefreshes(app)
+	app.dnsDeleteConfirmer = func(target string, record TypedRecord) (bool, error) {
+		if target != "cnametest2.example.com" {
+			t.Fatalf("confirmation target = %q, want cnametest2.example.com", target)
+		}
+		return true, nil
+	}
+
+	if err := app.Execute([]string{"dns", "delete", "cname", "cnametest2"}); err != nil {
+		t.Fatalf("delete cname: %v", err)
+	}
+	if strings.Join(primaryRequests, ",") != "DELETE record:cname/ref" {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	joined := strings.Join(readRequests, ",")
+	if !strings.Contains(joined, "record:cname fields=name,canonical,view,zone,comment") {
+		t.Fatalf("CNAME lookup did not use minimal return fields: %#v", readRequests)
+	}
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+}
+
 func TestDNSDeleteDuplicateRecordsUsesSelectedRef(t *testing.T) {
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
