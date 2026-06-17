@@ -926,28 +926,23 @@ func (a *App) emitConfigProfileRows(title string, fields []string, rows []map[st
 	}
 	displayRows := make([][]string, 0, len(rows))
 	rowStyles := map[int]lipgloss.Style{}
+	cellStyles := map[tableCellPosition]lipgloss.Style{}
 	for rowIndex, row := range rows {
-		if style, ok := configProfileRowStyle(row); ok {
-			rowStyles[rowIndex] = style
+		if profileRowIsActive(row) {
+			rowStyles[rowIndex] = activeTableRowStyle
 		}
 		display := make([]string, 0, len(fields))
-		for _, field := range fields {
-			display = append(display, stringify(row[field]))
+		for colIndex, field := range fields {
+			value := stringify(row[field])
+			if field == "scope" && strings.EqualFold(strings.TrimSpace(value), string(globalConfigScope)) {
+				cellStyles[tableCellPosition{row: rowIndex, col: colIndex}] = globalScopeCellStyle
+			}
+			display = append(display, value)
 		}
 		displayRows = append(displayRows, display)
 	}
-	fmt.Fprintln(a.Stdout, renderTableWithRowStyles(title, titleCaseFields(fields), displayRows, rowStyles))
+	fmt.Fprintln(a.Stdout, renderTableWithStyles(title, titleCaseFields(fields), displayRows, rowStyles, cellStyles))
 	return nil
-}
-
-func configProfileRowStyle(row map[string]any) (lipgloss.Style, bool) {
-	if profileRowIsGlobal(row) {
-		return globalTableRowStyle, true
-	}
-	if profileRowIsActive(row) {
-		return activeTableRowStyle, true
-	}
-	return lipgloss.Style{}, false
 }
 
 func configMetadataTableRows(merged mergedConfigData) [][]string {
@@ -975,10 +970,6 @@ func configMetadataTableRows(merged mergedConfigData) [][]string {
 func profileRowIsActive(row map[string]any) bool {
 	active, ok := row["default"].(bool)
 	return ok && active
-}
-
-func profileRowIsGlobal(row map[string]any) bool {
-	return strings.EqualFold(strings.TrimSpace(stringify(row["scope"])), string(globalConfigScope))
 }
 
 func (a *App) useProfile(profileName string) error {

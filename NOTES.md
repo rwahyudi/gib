@@ -76,7 +76,7 @@ On Linux, `ib config new --global-config [PROFILE]` writes the profile to `/etc/
 
 `ib config use PROFILE` selects from the same merged profile set shown by `ib config list`. When the selected profile exists only in `/etc/ib/config`, the command writes a local metadata override with `default_profile = PROFILE` without copying the global profile or writing `/etc/ib/config`. This lets each user choose a different default global profile.
 
-`ib config list` includes a `scope` column for each profile. Table output highlights global-scope rows with a red background, while JSON and CSV remain row-only/plain. Current-context footers render global profiles as `Profile: NAME (global)` so users can tell when commands are using `/etc/ib/config`.
+`ib config list` includes a `scope` column for each profile. Table output highlights `global` scope cells with a red background, while JSON and CSV remain row-only/plain. Current-context footers render global profiles as `Profile: NAME (global)` so users can tell when commands are using `/etc/ib/config`.
 
 `ib config new` and `ib config edit` validate the entered server before asking for credentials. Unreachable servers print a warning and return to the server prompt. Trusted HTTPS certificates continue with `verify_ssl = true`; untrusted HTTPS certificates print certificate subject, issuer, validity, and SHA256 fingerprint before asking whether to trust the certificate for the profile. Accepting saves `verify_ssl = false`.
 

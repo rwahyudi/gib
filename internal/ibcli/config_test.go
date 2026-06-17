@@ -611,7 +611,7 @@ func TestConfigListHighlightsActiveProfileRow(t *testing.T) {
 	}
 }
 
-func TestConfigListHighlightsGlobalProfileRowsRed(t *testing.T) {
+func TestConfigListHighlightsGlobalScopeCellsRed(t *testing.T) {
 	originalProfile := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() {
@@ -633,14 +633,17 @@ func TestConfigListHighlightsGlobalProfileRowsRed(t *testing.T) {
 		t.Fatalf("config list: %v", err)
 	}
 	output := stdout.String()
-	if !strings.Contains(output, globalTableRowStyle.Render("shared")) {
-		t.Fatalf("config list did not apply global row background:\n%q", output)
+	if !strings.Contains(output, globalScopeCellStyle.Render("global")) {
+		t.Fatalf("config list did not apply global scope cell background:\n%q", output)
 	}
 	globalPadding := lipgloss.NewStyle().Background(lipgloss.Color("#dc2626")).Render(" ")
-	if strings.Count(output, globalPadding) < 6 {
-		t.Fatalf("config list did not color global row padding:\n%q", output)
+	if strings.Count(output, globalPadding) < 2 {
+		t.Fatalf("config list did not color global scope cell padding:\n%q", output)
 	}
-	if strings.Contains(output, globalTableRowStyle.Render("local")) {
+	if strings.Contains(output, globalScopeCellStyle.Render("shared")) {
+		t.Fatalf("config list highlighted global profile name instead of only scope cell:\n%q", output)
+	}
+	if strings.Contains(output, globalScopeCellStyle.Render("local")) {
 		t.Fatalf("config list highlighted local profile as global:\n%q", output)
 	}
 

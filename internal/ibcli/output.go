@@ -12,19 +12,28 @@ import (
 )
 
 var (
-	tableBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#38bdf8"))
-	tableHeaderStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#67e8f9"))
-	tableCellStyle      = lipgloss.NewStyle().Padding(0, 1)
-	tableTitleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ade80"))
-	activeTableRowStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#052e16")).Background(lipgloss.Color("#4ade80")).ColorWhitespace(true)
-	globalTableRowStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#fee2e2")).Background(lipgloss.Color("#dc2626")).ColorWhitespace(true)
+	tableBorderStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#38bdf8"))
+	tableHeaderStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#67e8f9"))
+	tableCellStyle       = lipgloss.NewStyle().Padding(0, 1)
+	tableTitleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ade80"))
+	activeTableRowStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#052e16")).Background(lipgloss.Color("#4ade80")).ColorWhitespace(true)
+	globalScopeCellStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#fee2e2")).Background(lipgloss.Color("#dc2626")).ColorWhitespace(true)
 )
+
+type tableCellPosition struct {
+	row int
+	col int
+}
 
 func renderTable(title string, headers []string, rows [][]string) string {
 	return renderTableWithRowStyles(title, headers, rows, nil)
 }
 
 func renderTableWithRowStyles(title string, headers []string, rows [][]string, rowStyles map[int]lipgloss.Style) string {
+	return renderTableWithStyles(title, headers, rows, rowStyles, nil)
+}
+
+func renderTableWithStyles(title string, headers []string, rows [][]string, rowStyles map[int]lipgloss.Style, cellStyles map[tableCellPosition]lipgloss.Style) string {
 	headers = lowerTableHeaders(headers)
 	numericColumns := numericTableColumns(headers)
 	t := table.New().
@@ -41,17 +50,17 @@ func renderTableWithRowStyles(title string, headers []string, rows [][]string, r
 				}
 				return style
 			}
+			style := tableCellStyle
 			if rightAlign {
-				style := tableCellStyle.Align(lipgloss.Right)
-				if rowStyle, ok := rowStyles[row]; ok {
-					return style.Inherit(rowStyle)
-				}
-				return style
+				style = style.Align(lipgloss.Right)
 			}
 			if rowStyle, ok := rowStyles[row]; ok {
-				return tableCellStyle.Inherit(rowStyle)
+				style = style.Inherit(rowStyle)
 			}
-			return tableCellStyle
+			if cellStyle, ok := cellStyles[tableCellPosition{row: row, col: col}]; ok {
+				style = style.Inherit(cellStyle)
+			}
+			return style
 		})
 
 	if title == "" {
