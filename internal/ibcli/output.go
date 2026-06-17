@@ -17,6 +17,7 @@ var (
 	tableCellStyle      = lipgloss.NewStyle().Padding(0, 1)
 	tableTitleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ade80"))
 	activeTableRowStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#052e16")).Background(lipgloss.Color("#4ade80")).ColorWhitespace(true)
+	globalTableRowStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#fee2e2")).Background(lipgloss.Color("#dc2626")).ColorWhitespace(true)
 )
 
 func renderTable(title string, headers []string, rows [][]string) string {

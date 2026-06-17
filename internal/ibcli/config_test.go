@@ -611,6 +611,48 @@ func TestConfigListHighlightsActiveProfileRow(t *testing.T) {
 	}
 }
 
+func TestConfigListHighlightsGlobalProfileRowsRed(t *testing.T) {
+	originalProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(originalProfile)
+	})
+	app := testApp(t)
+	writePlainTestConfig(t, app.GlobalConfigFile, "shared", map[string]Profile{
+		"shared": plainTestProfile("shared", "https://shared.example"),
+	}, "ibusers")
+	writePlainTestConfig(t, app.LocalConfigFile, "local", map[string]Profile{
+		"local": plainTestProfile("local", "https://local.example"),
+	}, "")
+	var stdout bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &bytes.Buffer{}
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "list"}); err != nil {
+		t.Fatalf("config list: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, globalTableRowStyle.Render("shared")) {
+		t.Fatalf("config list did not apply global row background:\n%q", output)
+	}
+	globalPadding := lipgloss.NewStyle().Background(lipgloss.Color("#dc2626")).Render(" ")
+	if strings.Count(output, globalPadding) < 6 {
+		t.Fatalf("config list did not color global row padding:\n%q", output)
+	}
+	if strings.Contains(output, globalTableRowStyle.Render("local")) {
+		t.Fatalf("config list highlighted local profile as global:\n%q", output)
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"-o", "json", "config", "list"}); err != nil {
+		t.Fatalf("config list json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "\x1b[") {
+		t.Fatalf("json config list contains ANSI styling: %q", stdout.String())
+	}
+}
+
 func TestConfigListShowsMetadataTable(t *testing.T) {
 	app := testApp(t)
 	writeConfigForSettings(t, app, ConfigSettings{
