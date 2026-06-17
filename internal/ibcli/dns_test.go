@@ -514,13 +514,13 @@ func TestParseRecordTypesAcceptsNS(t *testing.T) {
 	}
 }
 
-func TestNormalizeRecordTypeArgRejectsReadOnlyNS(t *testing.T) {
-	_, err := normalizeRecordTypeArg("ns")
-	if err == nil {
-		t.Fatal("normalize ns write record type succeeded, want error")
+func TestNormalizeRecordTypeArgAcceptsDelegationNS(t *testing.T) {
+	recordType, err := normalizeRecordTypeArg("ns")
+	if err != nil {
+		t.Fatalf("normalize ns write record type: %v", err)
 	}
-	if !strings.Contains(err.Error(), `unsupported record type "ns"`) {
-		t.Fatalf("error = %v", err)
+	if recordType != "ns" {
+		t.Fatalf("record type = %q, want ns", recordType)
 	}
 }
 

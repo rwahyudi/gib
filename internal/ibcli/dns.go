@@ -108,9 +108,9 @@ var recordTypes = map[string]RecordSpec{
 	},
 	"ns": {
 		Object:            "record:ns",
+		ValueField:        "nameserver",
 		SearchValueFields: []string{"nameserver"},
 		ReturnFields:      "name,nameserver,ttl,use_ttl,view,zone,comment",
-		ReadOnly:          true,
 	},
 	"srv": {
 		Object:            "record:srv",
@@ -278,6 +278,8 @@ func createPayload(recordType, value, name, zone string, ttl int, comment string
 			return "", nil, err
 		}
 		payload[spec.ValueField] = target
+	case "ns":
+		payload[spec.ValueField] = cleanDNSName(value)
 	default:
 		payload[spec.ValueField] = value
 	}

@@ -204,7 +204,7 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | `ib dns list [ZONE]` | List records in the current or provided zone. Add `-r` to include child zones, `-t/--type` to filter record types, `-e/--exclude` to hide matching records, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns search KEYWORD` | Search records by name, value, or comment. Complete FQDN keywords can infer the matching forward zone. Use `--global` for all searchable zones, `-r` for child zones under the current/root zone, `-s/--sort FIELD` to sort, or `-C/--columns LIST` to print selected columns. |
 | `ib dns next-ip NETWORK` | Compatibility path for next available IPv4 address lookup against a network or container. Prefer `ib net next-ip NETWORK` for IPAM work. |
-| `ib dns create TYPE NAME VALUE` | Create a DNS record, for example `ib dns create host app 192.0.2.10 -c "Application host"`. For PTR, use `ib dns create ptr IP_ADDRESS PTR_TARGET`; the reverse zone is auto-detected unless `--zone` is supplied. |
+| `ib dns create TYPE NAME VALUE` | Create a DNS record, for example `ib dns create host app 192.0.2.10 -c "Application host"`. For PTR, use `ib dns create ptr IP_ADDRESS PTR_TARGET`; the reverse zone is auto-detected unless `--zone` is supplied. For NS, use `ib dns create ns CHILD_ZONE NS_HOST` to create a delegation record. |
 | `ib dns edit TYPE NAME [VALUE]` | Edit an existing DNS record. |
 | `ib dns delete TYPE NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
 | `ib dns view list` | List DNS views. |
@@ -243,6 +243,7 @@ ib net address 192.0.2.10 --network-view default
 ib net next-ip 192.0.2.0/24 -n 3
 ib dns create host app 192.0.2.10 -c "Application host"
 ib dns create ptr 192.0.2.10 app.example.com
+ib dns create ns child ns1.example.com
 ib dns edit host app 192.0.2.20 -t 300 -c "Application host"
 ib dns delete a app
 ```
@@ -303,7 +304,7 @@ When DNS record cache is missing or already outside the stale window, list/searc
 
 `ib net next-ip` can use cached network or container rows to find the target `_ref`, but the `next_available_ip` function call is always sent live to the primary server so returned addresses are current.
 
-Shell completion prefetches cache freshness in the background only for cache-backed candidates. With `completion_cache_prefetch = true`, zone, record, and network CIDR completion starts the matching lease-protected refresh helper when the selected cache row is missing or stale. Cheap completions such as root commands, flags, output formats, columns, sorts, and record types do not open the Badger cache. `ib dns create <tab><tab>` offers supported record types and filters typed prefixes such as `p` to `ptr`; `ib dns delete ptr <tab><tab>` completes PTR owner IPs from cached reverse-zone records instead of forward-zone names. `ib dns next-ip`, `ib net next-ip`, and `ib net show` complete both network and container CIDRs from the selected cache when available, including stale rows. When the typed value matches a parent CIDR or CIDR prefix, completion also offers child network/container CIDRs in the same network view; if only a larger parent such as `/23` is cached, completion derives direct `/24` child candidates for selection. Completion does not perform foreground Infoblox refresh work. Set `completion_cache_prefetch = false` in `[meta]` to make completion read the selected cache only and skip background refresh starts.
+Shell completion prefetches cache freshness in the background only for cache-backed candidates. With `completion_cache_prefetch = true`, zone, record, and network CIDR completion starts the matching lease-protected refresh helper when the selected cache row is missing or stale. Cheap completions such as root commands, flags, output formats, columns, sorts, and record types do not open the Badger cache. `ib dns create <tab><tab>` offers supported record types including `ns` delegation records and filters typed prefixes such as `p` to `ptr`; `ib dns delete ptr <tab><tab>` completes PTR owner IPs from cached reverse-zone records instead of forward-zone names. `ib dns next-ip`, `ib net next-ip`, and `ib net show` complete both network and container CIDRs from the selected cache when available, including stale rows. When the typed value matches a parent CIDR or CIDR prefix, completion also offers child network/container CIDRs in the same network view; if only a larger parent such as `/23` is cached, completion derives direct `/24` child candidates for selection. Completion does not perform foreground Infoblox refresh work. Set `completion_cache_prefetch = false` in `[meta]` to make completion read the selected cache only and skip background refresh starts.
 
 `ib config cache status` keeps the detailed cache row table and adds a colored
 summary footer for table output: cache entries, cached records, fresh entries,

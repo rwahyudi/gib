@@ -704,9 +704,10 @@ func TestDNSCreateCompletesRecordTypesAtEmptyStart(t *testing.T) {
 		"a\tIPv4 address record",
 		"aaaa\tIPv6 address record",
 		"cname\tcanonical name alias",
-		"host\thost record",
-		"mx\tmail exchanger record",
-		"ptr\treverse pointer record",
+		"host	host record",
+		"mx	mail exchanger record",
+		"ns	nameserver record",
+		"ptr	reverse pointer record",
 		"srv\tservice locator record",
 		"txt\ttext record",
 	} {
@@ -1606,7 +1607,7 @@ func TestDynamicBashCompletionCreateNameSlotCompletesRecordTypes(t *testing.T) {
 	fakeIB := filepath.Join(dir, "ib")
 	if err := os.WriteFile(fakeIB, []byte(`#!/bin/sh
 if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [ "$4" = "" ]; then
-  printf '%s\n' a aaaa cname host mx ptr srv txt :4
+  printf '%s\n' a aaaa cname host mx ns ptr srv txt :4
   exit 0
 fi
 if [ "$1" = "__completeNoDesc" ] && [ "$2" = "dns" ] && [ "$3" = "create" ] && [ "$4" = "p" ]; then
@@ -1641,7 +1642,7 @@ printf 'types:%s\n' "${COMPREPLY[*]}"
 	if strings.Contains(output, "Usage") {
 		t.Fatalf("create type slot should complete record types instead of printing usage:\n%s", output)
 	}
-	if !strings.Contains(output, "types:a aaaa cname host mx ptr srv txt") {
+	if !strings.Contains(output, "types:a aaaa cname host mx ns ptr srv txt") {
 		t.Fatalf("create type slot missing record type completions:\n%s", output)
 	}
 

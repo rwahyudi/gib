@@ -98,6 +98,49 @@ func TestDNSCreateCNAMEQualifiesShortTarget(t *testing.T) {
 	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
+func TestDNSCreateNSCreatesDelegationRecord(t *testing.T) {
+	var postPayload map[string]any
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "record:ns" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&postPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode("record:ns/ref")
+	}))
+	defer primary.Close()
+
+	read := emptyReadServer(t)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	refreshes := captureRecordRefreshes(app)
+
+	if err := app.Execute([]string{"dns", "create", "ns", "child", "ns1.example.com."}); err != nil {
+		t.Fatalf("create ns: %v", err)
+	}
+
+	for key, want := range map[string]any{
+		"name":       "child.example.com",
+		"nameserver": "ns1.example.com",
+		"view":       "default",
+	} {
+		if postPayload[key] != want {
+			t.Fatalf("payload[%s] = %#v, want %#v; payload = %#v", key, postPayload[key], want, postPayload)
+		}
+	}
+	if strings.Join(primaryRequests, ",") != "POST record:ns" {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+}
+
 func TestDNSCreateUsesDNSContextOverrides(t *testing.T) {
 	var postPayload map[string]any
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
