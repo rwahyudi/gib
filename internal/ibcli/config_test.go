@@ -1562,11 +1562,14 @@ func TestConfigureNewProfileNamePromptStartsBlankAndDefaultsOnEnter(t *testing.T
 
 func TestConfigureNewDefaultsWAPIVersionFromSchema(t *testing.T) {
 	var requests []string
+	schemaRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		switch {
 		case r.URL.Path == "/wapi/v1.0/":
-			if auth := r.Header.Get("Authorization"); auth != "" {
+			schemaRequests++
+			if schemaRequests == 1 && r.Header.Get("Authorization") != "" {
+				auth := r.Header.Get("Authorization")
 				t.Fatalf("schema discovery sent authorization header: %q", auth)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -1620,6 +1623,75 @@ func TestConfigureNewDefaultsWAPIVersionFromSchema(t *testing.T) {
 	}
 	if schemaIndex, gridIndex := strings.Index(joined, "GET /wapi/v1.0/"), strings.Index(joined, "GET /wapi/v2.12.4/grid"); schemaIndex < 0 || gridIndex < 0 || schemaIndex > gridIndex {
 		t.Fatalf("schema discovery should run before credential validation: %#v", requests)
+	}
+}
+
+func TestConfigureNewRetriesAuthenticatedWAPIVersionDetectionAfterLogin(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path+" auth="+r.Header.Get("Authorization"))
+		switch {
+		case r.URL.Path == "/wapi/v1.0/":
+			username, password, ok := r.BasicAuth()
+			if !ok || username != "admin" || password != "secret" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"text": "schema authentication required"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"supported_versions": []string{"1.0", "2.9", defaultWAPIVersion, "2.12.4"},
+			})
+		case strings.HasSuffix(r.URL.Path, "/grid"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "grid"}})
+		case strings.HasSuffix(r.URL.Path, "/member"),
+			strings.HasSuffix(r.URL.Path, "/view"),
+			strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader(strings.Join([]string{
+		server.URL,
+		"admin",
+		"secret",
+		"",
+		"",
+		"",
+	}, "\n") + "\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+	if err := app.Execute([]string{"config", "new", "demo"}); err != nil {
+		t.Fatalf("configure new: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	_, profiles, _, err := app.readConfigProfiles(true)
+	if err != nil {
+		t.Fatalf("read profiles: %v", err)
+	}
+	if got := profiles["demo"].WAPIVersion; got != "v2.12.4" {
+		t.Fatalf("WAPI version = %q, want v2.12.4", got)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"INFO: could not auto-detect WAPI version; using " + defaultWAPIVersion + " as the default: schema discovery requires authentication (HTTP 401)",
+		"INFO: Infoblox login succeeded.",
+		"INFO: detected WAPI version v2.12.4 after login.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("configure output missing %q:\n%s", want, output)
+		}
+	}
+	joined := strings.Join(requests, ",")
+	for _, want := range []string{"GET /wapi/v1.0/ auth=", "GET /wapi/" + defaultWAPIVersion + "/grid auth=Basic ", "GET /wapi/v1.0/ auth=Basic ", "GET /wapi/v2.12.4/grid auth=Basic "} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("requests missing %q: %#v", want, requests)
+		}
 	}
 }
 

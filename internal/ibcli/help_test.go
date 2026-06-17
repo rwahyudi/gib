@@ -454,7 +454,7 @@ func TestConfigHelpCoversWorkflowAndStorage(t *testing.T) {
 		"ib config edit [PROFILE]",
 		"ib config cache status|clear",
 		"Profile Details",
-		"server reachability/TLS trust, unauth WAPI version discovery, validated credentials, auto GCM read endpoint, DNS view, default zone, audit logging",
+		"server reachability/TLS trust, unauth/auth WAPI discovery, validated credentials, auto GCM read endpoint, DNS view, default zone, audit logging",
 		"merges when present",
 		"selected global profiles use",
 		"encrypted at rest",

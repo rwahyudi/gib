@@ -1217,8 +1217,10 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 		VerifySSL: verifySSL,
 		Timeout:   firstNonZero(current.Timeout, defaultTimeoutSeconds),
 	}.complete()
+	preLoginWAPIDetected := false
 	if detected, err := a.detectWAPIVersion(versionProbe); err == nil {
 		wapiDefault = detected
+		preLoginWAPIDetected = true
 		a.printConfigureInfo("INFO: detected WAPI version " + detected + ".")
 	} else {
 		a.printConfigureInfo("INFO: could not auto-detect WAPI version; using " + wapiDefault + " as the default: " + wapiVersionDetectionSummary(err))
@@ -1236,6 +1238,17 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	username, password, err := a.promptValidatedCredentials(credentialProbe, current)
 	if err != nil {
 		return err
+	}
+	authenticatedVersionProbe := credentialProbe
+	authenticatedVersionProbe.Username = username
+	authenticatedVersionProbe.Password = password
+	if detected, err := a.detectAuthenticatedWAPIVersion(authenticatedVersionProbe); err == nil {
+		if !preLoginWAPIDetected || detected != wapiDefault {
+			wapiDefault = detected
+			a.printConfigureInfo("INFO: detected WAPI version " + detected + " after login.")
+		}
+	} else if !preLoginWAPIDetected {
+		a.printConfigureInfo("INFO: could not auto-detect WAPI version after login; keeping " + wapiDefault + ": " + wapiVersionDetectionSummary(err))
 	}
 	a.printConfigureStep(step, "WAPI", "Confirm the auto-detected WAPI version before testing the connection.")
 	step++
@@ -1616,13 +1629,25 @@ func (a *App) testConnection(profile Profile) error {
 }
 
 func (a *App) detectWAPIVersion(profile Profile) (string, error) {
+	return a.detectWAPIVersionWithAuth(profile, false)
+}
+
+func (a *App) detectAuthenticatedWAPIVersion(profile Profile) (string, error) {
+	return a.detectWAPIVersionWithAuth(profile, true)
+}
+
+func (a *App) detectWAPIVersionWithAuth(profile Profile, authenticate bool) (string, error) {
 	// Schema discovery is available from old WAPI versions and returns the
 	// server's supported_versions list, so probe v1.0 before asking the user
 	// which final version to store.
 	probe := profile.complete()
 	probe.WAPIVersion = "v1.0"
 	client := a.newClient(probe)
-	response, err := client.RequestUnauthenticated(http.MethodGet, "", url.Values{"_schema": []string{"1"}}, nil)
+	request := client.RequestUnauthenticated
+	if authenticate {
+		request = client.Request
+	}
+	response, err := request(http.MethodGet, "", url.Values{"_schema": []string{"1"}}, nil)
 	if err != nil {
 		return "", err
 	}

@@ -126,7 +126,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 				{"cache", "ib config cache status|clear"},
 			}),
 			sectionWithRows("Profile Details", [][]string{
-				{"prompts", "server reachability/TLS trust, unauth WAPI version discovery, validated credentials, auto GCM read endpoint, DNS view, default zone, audit logging"},
+				{"prompts", "server reachability/TLS trust, unauth/auth WAPI discovery, validated credentials, auto GCM read endpoint, DNS view, default zone, audit logging"},
 				{"storage", storage},
 				{"key", key},
 				{"password", credentialProtectionDescription()},
@@ -140,7 +140,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib config new":
 		return sectionWithRows("Create Profile", [][]string{
 			{"profile", "optional argument; blank prompt creates profile 'default'"},
-			{"prompts", "endpoint reachability, TLS trust, unauth WAPI discovery, credential validation, auto GCM, DNS defaults, audit logging"},
+			{"prompts", "endpoint reachability, TLS trust, unauth/auth WAPI discovery, credential validation, auto GCM, DNS defaults, audit logging"},
 			{"test", "connection test must pass before saving"},
 			{"retry", "failed connection test shows a retry prompt"},
 			{"default", "--default makes this profile the selected default"},
