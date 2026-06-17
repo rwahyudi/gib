@@ -95,6 +95,27 @@ func TestWapiClientCanForceGETToPrimary(t *testing.T) {
 	}
 }
 
+func TestWapiClientUnauthenticatedRequestOmitsAuthorization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if auth := r.Header.Get("Authorization"); auth != "" {
+			t.Fatalf("unauthenticated request sent authorization header: %q", auth)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	client := &WapiClient{
+		Server:      server.URL,
+		WAPIVersion: defaultWAPIVersion,
+		Username:    "admin",
+		Password:    "secret",
+		httpClient:  server.Client(),
+	}
+	if _, err := client.RequestUnauthenticated(http.MethodGet, "", url.Values{"_schema": []string{"1"}}, nil); err != nil {
+		t.Fatalf("unauthenticated GET: %v", err)
+	}
+}
+
 func TestWapiDebugTracesRequestWithoutCredentials(t *testing.T) {
 	var stderr bytes.Buffer
 	app := testApp(t)

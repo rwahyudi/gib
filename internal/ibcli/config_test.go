@@ -1566,6 +1566,9 @@ func TestConfigureNewDefaultsWAPIVersionFromSchema(t *testing.T) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		switch {
 		case r.URL.Path == "/wapi/v1.0/":
+			if auth := r.Header.Get("Authorization"); auth != "" {
+				t.Fatalf("schema discovery sent authorization header: %q", auth)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"supported_versions": []string{"1.0", "2.9", "2.12", "2.12.4"},
 			})
@@ -1614,6 +1617,9 @@ func TestConfigureNewDefaultsWAPIVersionFromSchema(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("requests missing %q: %#v", want, requests)
 		}
+	}
+	if schemaIndex, gridIndex := strings.Index(joined, "GET /wapi/v1.0/"), strings.Index(joined, "GET /wapi/v2.12.4/grid"); schemaIndex < 0 || gridIndex < 0 || schemaIndex > gridIndex {
+		t.Fatalf("schema discovery should run before credential validation: %#v", requests)
 	}
 }
 

@@ -1210,12 +1210,25 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	if err != nil {
 		return err
 	}
+	wapiDefault := firstNonEmpty(current.WAPIVersion, defaultWAPIVersion)
+	versionProbe := Profile{
+		Name:      selected,
+		Server:    server,
+		VerifySSL: verifySSL,
+		Timeout:   firstNonZero(current.Timeout, defaultTimeoutSeconds),
+	}.complete()
+	if detected, err := a.detectWAPIVersion(versionProbe); err == nil {
+		wapiDefault = detected
+		a.printConfigureInfo("INFO: detected WAPI version " + detected + ".")
+	} else {
+		a.printConfigureInfo("INFO: could not auto-detect WAPI version; using " + wapiDefault + " as the default: " + wapiVersionDetectionSummary(err))
+	}
 	a.printConfigureStep(step, "Credentials", "Username and password are required; the password is encrypted before it is written.")
 	step++
 	credentialProbe := Profile{
 		Name:        selected,
 		Server:      server,
-		WAPIVersion: firstNonEmpty(current.WAPIVersion, defaultWAPIVersion),
+		WAPIVersion: wapiDefault,
 		DNSView:     firstNonEmpty(current.DNSView, "default"),
 		VerifySSL:   verifySSL,
 		Timeout:     firstNonZero(current.Timeout, defaultTimeoutSeconds),
@@ -1226,21 +1239,6 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	}
 	a.printConfigureStep(step, "WAPI", "Confirm the auto-detected WAPI version before testing the connection.")
 	step++
-	wapiDefault := firstNonEmpty(current.WAPIVersion, defaultWAPIVersion)
-	versionProbe := Profile{
-		Name:      selected,
-		Server:    server,
-		Username:  username,
-		Password:  password,
-		VerifySSL: verifySSL,
-		Timeout:   firstNonZero(current.Timeout, defaultTimeoutSeconds),
-	}.complete()
-	if detected, err := a.detectWAPIVersion(versionProbe); err == nil {
-		wapiDefault = detected
-		a.printConfigureInfo("INFO: detected WAPI version " + detected + ".")
-	} else {
-		a.printConfigureInfo("INFO: could not auto-detect WAPI version; using " + wapiDefault + " as the default: " + err.Error())
-	}
 	wapiVersion, err := a.gum.Input("WAPI version", wapiDefault, false)
 	if err != nil {
 		return err
@@ -1594,6 +1592,19 @@ func credentialValidationSummary(err error) (string, bool) {
 	}
 }
 
+func wapiVersionDetectionSummary(err error) string {
+	var wapiErr *WapiError
+	if errors.As(err, &wapiErr) {
+		switch wapiErr.Status {
+		case http.StatusUnauthorized:
+			return "schema discovery requires authentication (HTTP 401)"
+		case http.StatusForbidden:
+			return "schema discovery was denied (HTTP 403)"
+		}
+	}
+	return err.Error()
+}
+
 func (a *App) testConnection(profile Profile) error {
 	client := a.newClient(profile)
 	params := url.Values{"_return_fields": []string{"name"}, "_max_results": []string{"1"}}
@@ -1611,7 +1622,7 @@ func (a *App) detectWAPIVersion(profile Profile) (string, error) {
 	probe := profile.complete()
 	probe.WAPIVersion = "v1.0"
 	client := a.newClient(probe)
-	response, err := client.Request(http.MethodGet, "", url.Values{"_schema": []string{"1"}}, nil)
+	response, err := client.RequestUnauthenticated(http.MethodGet, "", url.Values{"_schema": []string{"1"}}, nil)
 	if err != nil {
 		return "", err
 	}

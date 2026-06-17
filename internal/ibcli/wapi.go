@@ -136,6 +136,14 @@ func stripWAPIPath(path string) string {
 }
 
 func (c *WapiClient) Request(method, objectPath string, params url.Values, payload any) (any, error) {
+	return c.request(method, objectPath, params, payload, true)
+}
+
+func (c *WapiClient) RequestUnauthenticated(method, objectPath string, params url.Values, payload any) (any, error) {
+	return c.request(method, objectPath, params, payload, false)
+}
+
+func (c *WapiClient) request(method, objectPath string, params url.Values, payload any, authenticate bool) (any, error) {
 	method = strings.ToUpper(strings.TrimSpace(method))
 
 	// Only GET is allowed to use the read endpoint. All write verbs stay on the
@@ -167,7 +175,9 @@ func (c *WapiClient) Request(method, objectPath string, params url.Values, paylo
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(c.Username+":"+c.Password)))
+	if authenticate {
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(c.Username+":"+c.Password)))
+	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

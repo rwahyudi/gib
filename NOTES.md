@@ -80,7 +80,7 @@ On Linux, `ib config new --global-config [PROFILE]` writes the profile to `/etc/
 
 `ib config new` and `ib config edit` validate the entered server before asking for credentials. Unreachable servers print a warning and return to the server prompt. Trusted HTTPS certificates continue with `verify_ssl = true`; untrusted HTTPS certificates print certificate subject, issuer, validity, and SHA256 fingerprint before asking whether to trust the certificate for the profile. Accepting saves `verify_ssl = false`.
 
-After username and password entry, `ib config new` and `ib config edit` validate credentials with a small WAPI `grid` read before WAPI version setup. Authentication and authorization failures are summarized and return to the credential prompts without printing raw server response bodies.
+Before username and password entry, `ib config new` and `ib config edit` try unauthenticated WAPI schema discovery at `v1.0` to pick the best WAPI version default. Credential validation then uses that detected/default version for a small WAPI `grid` read. Authentication and authorization failures are summarized and return to the credential prompts without printing raw server response bodies. If unauthenticated schema discovery is blocked, config keeps the saved/default WAPI version and still prompts for confirmation after credentials succeed.
 
 `ib config new` and `ib config edit` ask whether audit logging should be enabled after DNS view and default-zone selection. Existing configs default to the saved audit settings; new profiles default to disabled. Config profile create/edit/delete audit data redacts password values and any key, credential, token, or secret-looking fields.
 
