@@ -845,8 +845,9 @@ func (a *App) configuredClient() (Profile, *WapiClient, error) {
 
 func normalizeRecordTypeArg(raw string) (string, error) {
 	recordType := strings.ToLower(strings.TrimSpace(raw))
-	if _, ok := recordTypes[recordType]; !ok {
-		return "", cliError("unsupported record type %q. Supported: %s", raw, strings.Join(supportedRecordTypes(), ", "))
+	spec, ok := recordTypes[recordType]
+	if !ok || spec.ReadOnly {
+		return "", cliError("unsupported record type %q. Supported: %s", raw, strings.Join(supportedWritableRecordTypes(), ", "))
 	}
 	return recordType, nil
 }

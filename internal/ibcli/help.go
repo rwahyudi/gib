@@ -182,7 +182,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		})
 	case "ib dns create":
 		return sectionWithRows("Create Record Usage", [][]string{
-			{"types", strings.Join(supportedRecordTypes(), ", ")},
+			{"types", strings.Join(supportedWritableRecordTypes(), ", ")},
 			{"zone", "--zone -> ib dns zone use -> IB_ZONE -> configured default"},
 			{"ptr", "ib dns create ptr <ip-address> <ptr-target>; reverse zone is auto-detected"},
 			{"ttl", "optional; omit to use the zone default"},

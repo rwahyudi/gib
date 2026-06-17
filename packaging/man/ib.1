@@ -66,8 +66,9 @@ default edits /etc/ib/config and warns on permission errors.
 .TP
 .B ib dns list
 List records in the current DNS context. Current-context footers mark global
-profiles as "(global)". Larger IPv4 reverse CIDR scopes can include matching
-child reverse zones.
+profiles with (global).
+Use --type ns to list read-only nameserver records.
+Larger IPv4 reverse CIDR scopes can include matching child reverse zones.
 .TP
 .B ib dns search app
 Search records by name, value, or comment.

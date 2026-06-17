@@ -71,6 +71,7 @@ type RecordSpec struct {
 	ValueField        string
 	SearchValueFields []string
 	ReturnFields      string
+	ReadOnly          bool
 }
 
 var recordTypes = map[string]RecordSpec{
@@ -103,6 +104,12 @@ var recordTypes = map[string]RecordSpec{
 		SearchValueFields: []string{"mail_exchanger"},
 		ReturnFields:      "name,mail_exchanger,preference,ttl,use_ttl,view,zone,comment",
 	},
+	"ns": {
+		Object:            "record:ns",
+		SearchValueFields: []string{"nameserver"},
+		ReturnFields:      "name,nameserver,ttl,use_ttl,view,zone,comment",
+		ReadOnly:          true,
+	},
 	"srv": {
 		Object:            "record:srv",
 		SearchValueFields: []string{"target"},
@@ -123,6 +130,18 @@ var recordTypes = map[string]RecordSpec{
 func supportedRecordTypes() []string {
 	types := make([]string, 0, len(recordTypes))
 	for recordType := range recordTypes {
+		types = append(types, recordType)
+	}
+	sort.Strings(types)
+	return types
+}
+
+func supportedWritableRecordTypes() []string {
+	types := make([]string, 0, len(recordTypes))
+	for recordType, spec := range recordTypes {
+		if spec.ReadOnly {
+			continue
+		}
 		types = append(types, recordType)
 	}
 	sort.Strings(types)
@@ -185,6 +204,9 @@ func createPayload(recordType, value, name, zone string, ttl int, comment string
 	spec, ok := recordTypes[recordType]
 	if !ok {
 		return "", nil, cliError("unsupported record type %q. Supported: %s", recordType, strings.Join(supportedRecordTypes(), ", "))
+	}
+	if spec.ReadOnly {
+		return "", nil, cliError("unsupported record type %q. Supported: %s", recordType, strings.Join(supportedWritableRecordTypes(), ", "))
 	}
 	recordComment, err := normalizeComment(comment)
 	if err != nil {
@@ -349,6 +371,9 @@ func updateValuePayload(recordType, value, zone string) (map[string]any, error) 
 	spec, ok := recordTypes[recordType]
 	if !ok {
 		return nil, cliError("unsupported record type %q. Supported: %s", recordType, strings.Join(supportedRecordTypes(), ", "))
+	}
+	if spec.ReadOnly {
+		return nil, cliError("unsupported record type %q. Supported: %s", recordType, strings.Join(supportedWritableRecordTypes(), ", "))
 	}
 	switch recordType {
 	case "mx":
@@ -1189,7 +1214,7 @@ func recordValue(recordType string, item map[string]any) string {
 		}
 		return strings.Join(parts, " ")
 	}
-	for _, key := range []string{"ipv4addr", "ipv6addr", "canonical", "text", "mail_exchanger", "ptrdname", "target"} {
+	for _, key := range []string{"ipv4addr", "ipv6addr", "canonical", "text", "mail_exchanger", "nameserver", "ptrdname", "target"} {
 		value := strings.TrimSpace(fmt.Sprint(item[key]))
 		if value != "" && value != "<nil>" {
 			return value

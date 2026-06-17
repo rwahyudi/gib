@@ -504,6 +504,26 @@ func TestUnsupportedAllRecordsTypeDecodesNSRef(t *testing.T) {
 	}
 }
 
+func TestParseRecordTypesAcceptsNS(t *testing.T) {
+	types, err := parseRecordTypes("ns")
+	if err != nil {
+		t.Fatalf("parse ns record type: %v", err)
+	}
+	if len(types) != 1 || types[0] != "ns" {
+		t.Fatalf("types = %#v, want []string{\"ns\"}", types)
+	}
+}
+
+func TestNormalizeRecordTypeArgRejectsReadOnlyNS(t *testing.T) {
+	_, err := normalizeRecordTypeArg("ns")
+	if err == nil {
+		t.Fatal("normalize ns write record type succeeded, want error")
+	}
+	if !strings.Contains(err.Error(), `unsupported record type "ns"`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestUnsupportedAllRecordsTypeDecodesSOARef(t *testing.T) {
 	encodedRef := base64.RawURLEncoding.EncodeToString([]byte("dns.bind_soa$example.com"))
 	recordType := recordTypeFromAllRecord(map[string]any{
@@ -541,6 +561,28 @@ func TestRecordDisplayKeepsNonRefRecordText(t *testing.T) {
 	recordType := recordTypeFromAllRecord(item)
 	if value := recordValue(recordType, item); value != "v=spf1 include:example.net -all" {
 		t.Fatalf("value = %q", value)
+	}
+}
+
+func TestFilterListedRecordsIncludesNS(t *testing.T) {
+	records := []TypedRecord{
+		{Type: "ns", Item: map[string]any{"name": "example.com", "nameserver": "ns1.example.com", "zone": "example.com"}},
+		{Type: "a", Item: map[string]any{"name": "app.example.com", "ipv4addr": "192.0.2.10", "zone": "example.com"}},
+	}
+
+	filtered := filterListedRecords(records, SearchOptions{Types: []string{"ns"}})
+	if len(filtered) != 1 {
+		t.Fatalf("filtered records = %d, want 1: %#v", len(filtered), filtered)
+	}
+	if filtered[0].Type != "ns" {
+		t.Fatalf("filtered type = %q, want ns", filtered[0].Type)
+	}
+}
+
+func TestRecordValueUsesNameserver(t *testing.T) {
+	value := recordValue("ns", map[string]any{"name": "example.com", "nameserver": "ns1.example.com"})
+	if value != "ns1.example.com" {
+		t.Fatalf("value = %q, want ns1.example.com", value)
 	}
 }
 
@@ -1456,6 +1498,57 @@ func TestGlobalSearchFQDNMatchesRelativeNameInInferredZone(t *testing.T) {
 		if requestedZones[zone] != 1 {
 			t.Fatalf("%s requests = %d, all requests = %#v", zone, requestedZones[zone], requestedZones)
 		}
+	}
+}
+
+func TestSearchTypeFilterIncludesNS(t *testing.T) {
+	encodedNSRef := base64.RawURLEncoding.EncodeToString([]byte("dns.bind_ns$example.com"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"fqdn": "example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+				},
+			})
+		case strings.HasSuffix(r.URL.Path, "/allrecords"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{
+						"_ref":       "allrecords/" + encodedNSRef + ":example.com/default",
+						"type":       "UNSUPPORTED",
+						"name":       "example.com",
+						"nameserver": "ns1.example.com",
+						"zone":       "example.com",
+					},
+					{
+						"type":    "HOST_IPV4ADDR",
+						"name":    "app.example.com",
+						"address": "192.0.2.10",
+						"zone":    "example.com",
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	records, err := app.collectSearchResults(
+		Profile{DNSView: "default", DefaultZone: "example.com"},
+		testWapiClient(server),
+		SearchOptions{Keyword: "example.com", Types: []string{"ns"}},
+	)
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1: %#v", len(records), records)
+	}
+	if records[0].Type != "ns" {
+		t.Fatalf("record type = %q, want ns", records[0].Type)
 	}
 }
 

@@ -184,6 +184,7 @@ var recordTypeDescriptions = map[string]string{
 	"cname": "canonical name alias",
 	"host":  "host record",
 	"mx":    "mail exchanger record",
+	"ns":    "nameserver record",
 	"ptr":   "reverse pointer record",
 	"srv":   "service locator record",
 	"txt":   "text record",
@@ -196,7 +197,7 @@ func recordTypeFlagCompletion(cmd *cobra.Command, args []string, toComplete stri
 func recordTypeCompletions(toComplete string) []string {
 	prefix := strings.ToLower(strings.TrimSpace(toComplete))
 	var rows []string
-	for _, recordType := range supportedRecordTypes() {
+	for _, recordType := range supportedWritableRecordTypes() {
 		if prefix != "" && !strings.HasPrefix(recordType, prefix) {
 			continue
 		}
