@@ -447,7 +447,7 @@ func lookupReturnFields(returnFields string) string {
 	for _, field := range fields {
 		field = strings.TrimSpace(field)
 		switch field {
-		case "", "ttl", "use_ttl":
+		case "", "ttl", "use_ttl", "comment":
 			continue
 		default:
 			kept = append(kept, field)

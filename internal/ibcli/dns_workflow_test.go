@@ -603,7 +603,7 @@ func TestDNSDeleteDuplicateSelectionCanceledPrintsInfo(t *testing.T) {
 	}
 }
 
-func TestDNSDeleteCNAMELookupOmitsUnsupportedTTLReturnFields(t *testing.T) {
+func TestDNSDeleteCNAMELookupOmitsUnsupportedReturnFields(t *testing.T) {
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
@@ -621,9 +621,13 @@ func TestDNSDeleteCNAMELookupOmitsUnsupportedTTLReturnFields(t *testing.T) {
 		}
 		object := trimWAPIPath(r.URL.Path)
 		readRequests = append(readRequests, object+" fields="+r.URL.Query().Get("_return_fields"))
-		if strings.Contains(r.URL.Query().Get("_return_fields"), "ttl") {
+		fields := r.URL.Query().Get("_return_fields")
+		for _, unsupported := range []string{"ttl", "comment"} {
+			if !strings.Contains(fields, unsupported) {
+				continue
+			}
 			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"text": "Unknown argument/field: 'ttl'"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"text": "Unknown argument/field: '" + unsupported + "'"})
 			return
 		}
 		if object == "record:cname" && r.URL.Query().Get("name") == "cnametest2.example.com" {
@@ -660,7 +664,7 @@ func TestDNSDeleteCNAMELookupOmitsUnsupportedTTLReturnFields(t *testing.T) {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
 	joined := strings.Join(readRequests, ",")
-	if !strings.Contains(joined, "record:cname fields=name,canonical,view,zone,comment") {
+	if !strings.Contains(joined, "record:cname fields=name,canonical,view,zone") {
 		t.Fatalf("CNAME lookup did not use minimal return fields: %#v", readRequests)
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
