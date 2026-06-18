@@ -241,6 +241,27 @@ func createPayload(recordType, value, name, zone string, ttl int, comment string
 		"name": recordName,
 		"view": client.View,
 	}
+	if recordType == "ns" {
+		fields, err := nsDelegatedZonePayload(value)
+		if err != nil {
+			return "", nil, err
+		}
+		payload = map[string]any{
+			"fqdn": recordName,
+			"view": client.View,
+		}
+		for key, item := range fields {
+			payload[key] = item
+		}
+		if ttl >= 0 {
+			payload["delegated_ttl"] = ttl
+			payload["use_delegated_ttl"] = true
+		}
+		if recordComment != "" {
+			payload["comment"] = recordComment
+		}
+		return "zone_delegated", payload, nil
+	}
 	for key, item := range ttlFields {
 		payload[key] = item
 	}
@@ -279,14 +300,6 @@ func createPayload(recordType, value, name, zone string, ttl int, comment string
 			return "", nil, err
 		}
 		payload[spec.ValueField] = target
-	case "ns":
-		fields, err := nsPayload(value)
-		if err != nil {
-			return "", nil, err
-		}
-		for key, item := range fields {
-			payload[key] = item
-		}
 	default:
 		payload[spec.ValueField] = value
 	}
@@ -367,32 +380,55 @@ func ptrPayload(name, value string) map[string]any {
 }
 
 func nsPayload(value string) (map[string]any, error) {
+	nameserver, addresses, err := nsServerAddresses(value)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"nameserver": nameserver, "addresses": addresses}, nil
+}
+
+func nsDelegatedZonePayload(value string) (map[string]any, error) {
+	nameserver, addresses, err := nsServerAddresses(value)
+	if err != nil {
+		return nil, err
+	}
+	delegateTo := make([]map[string]any, 0, len(addresses))
+	for _, address := range addresses {
+		delegateTo = append(delegateTo, map[string]any{
+			"name":    nameserver,
+			"address": address["address"],
+		})
+	}
+	return map[string]any{"delegate_to": delegateTo}, nil
+}
+
+func nsServerAddresses(value string) (string, []map[string]any, error) {
 	parts := strings.Fields(value)
 	if len(parts) == 0 {
-		return nil, cliError("NS nameserver is required")
+		return "", nil, cliError("NS nameserver is required")
 	}
 	nameserver := cleanDNSName(parts[0])
 	if nameserver == "" {
-		return nil, cliError("NS nameserver is required")
+		return "", nil, cliError("NS nameserver is required")
 	}
 	addresses := make([]map[string]any, 0, len(parts)-1)
 	if len(parts) > 1 {
 		var err error
 		addresses, err = nsExplicitAddressPayloads(parts[1:])
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 	} else {
 		var err error
 		addresses, err = resolveNSAddressPayloads(nameserver)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 	}
 	if len(addresses) == 0 {
-		return nil, cliError("NS nameserver %q did not resolve to any IP addresses", nameserver)
+		return "", nil, cliError("NS nameserver %q did not resolve to any IP addresses", nameserver)
 	}
-	return map[string]any{"nameserver": nameserver, "addresses": addresses}, nil
+	return nameserver, addresses, nil
 }
 
 func nsExplicitAddressPayloads(parts []string) ([]map[string]any, error) {

@@ -105,13 +105,13 @@ func TestDNSCreateNSCreatesDelegationRecord(t *testing.T) {
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
-		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "record:ns" {
+		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "zone_delegated" {
 			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&postPayload); err != nil {
 			t.Fatalf("decode payload: %v", err)
 		}
-		_ = json.NewEncoder(w).Encode("record:ns/ref")
+		_ = json.NewEncoder(w).Encode("zone_delegated/ref")
 	}))
 	defer primary.Close()
 
@@ -128,25 +128,24 @@ func TestDNSCreateNSCreatesDelegationRecord(t *testing.T) {
 	}
 
 	for key, want := range map[string]any{
-		"name":       "child.example.com",
-		"nameserver": "ns1.example.com",
-		"view":       "default",
+		"fqdn": "child.example.com",
+		"view": "default",
 	} {
 		if postPayload[key] != want {
 			t.Fatalf("payload[%s] = %#v, want %#v; payload = %#v", key, postPayload[key], want, postPayload)
 		}
 	}
-	if strings.Join(primaryRequests, ",") != "POST record:ns" {
+	if strings.Join(primaryRequests, ",") != "POST zone_delegated" {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
-	addresses, ok := postPayload["addresses"].([]any)
-	if !ok || len(addresses) != 2 {
-		t.Fatalf("payload addresses = %#v, want two addresses; payload = %#v", postPayload["addresses"], postPayload)
+	delegateTo, ok := postPayload["delegate_to"].([]any)
+	if !ok || len(delegateTo) != 2 {
+		t.Fatalf("payload delegate_to = %#v, want two delegate targets; payload = %#v", postPayload["delegate_to"], postPayload)
 	}
 	for i, want := range []string{"192.0.2.53", "2001:db8::53"} {
-		address, ok := addresses[i].(map[string]any)
-		if !ok || address["address"] != want {
-			t.Fatalf("payload address %d = %#v, want %s", i, addresses[i], want)
+		delegate, ok := delegateTo[i].(map[string]any)
+		if !ok || delegate["name"] != "ns1.example.com" || delegate["address"] != want {
+			t.Fatalf("payload delegate %d = %#v, want ns1.example.com/%s", i, delegateTo[i], want)
 		}
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
@@ -167,13 +166,13 @@ func TestDNSCreateNSResolvesAddressWhenOmitted(t *testing.T) {
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
-		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "record:ns" {
+		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "zone_delegated" {
 			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&postPayload); err != nil {
 			t.Fatalf("decode payload: %v", err)
 		}
-		_ = json.NewEncoder(w).Encode("record:ns/ref")
+		_ = json.NewEncoder(w).Encode("zone_delegated/ref")
 	}))
 	defer primary.Close()
 
@@ -189,25 +188,24 @@ func TestDNSCreateNSResolvesAddressWhenOmitted(t *testing.T) {
 		t.Fatalf("create ns: %v", err)
 	}
 	for key, want := range map[string]any{
-		"name":       "xternal.example.com",
-		"nameserver": "ns1.google.com",
-		"view":       "default",
+		"fqdn": "xternal.example.com",
+		"view": "default",
 	} {
 		if postPayload[key] != want {
 			t.Fatalf("payload[%s] = %#v, want %#v; payload = %#v", key, postPayload[key], want, postPayload)
 		}
 	}
-	addresses, ok := postPayload["addresses"].([]any)
-	if !ok || len(addresses) != 2 {
-		t.Fatalf("payload addresses = %#v, want two unique resolved addresses; payload = %#v", postPayload["addresses"], postPayload)
+	delegateTo, ok := postPayload["delegate_to"].([]any)
+	if !ok || len(delegateTo) != 2 {
+		t.Fatalf("payload delegate_to = %#v, want two unique resolved delegates; payload = %#v", postPayload["delegate_to"], postPayload)
 	}
 	for i, want := range []string{"216.239.32.10", "2001:4860:4802:32::a"} {
-		address, ok := addresses[i].(map[string]any)
-		if !ok || address["address"] != want {
-			t.Fatalf("payload address %d = %#v, want %s", i, addresses[i], want)
+		delegate, ok := delegateTo[i].(map[string]any)
+		if !ok || delegate["name"] != "ns1.google.com" || delegate["address"] != want {
+			t.Fatalf("payload delegate %d = %#v, want ns1.google.com/%s", i, delegateTo[i], want)
 		}
 	}
-	if strings.Join(primaryRequests, ",") != "POST record:ns" {
+	if strings.Join(primaryRequests, ",") != "POST zone_delegated" {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")

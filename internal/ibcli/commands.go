@@ -2150,6 +2150,9 @@ func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr 
 	}
 	targetName := cleanString(payload["name"])
 	if targetName == "" {
+		targetName = cleanString(payload["fqdn"])
+	}
+	if targetName == "" {
 		targetName = name
 	}
 	if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
