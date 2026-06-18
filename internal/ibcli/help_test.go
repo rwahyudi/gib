@@ -710,6 +710,8 @@ func TestCreateHelpUsesStyledUsagePanel(t *testing.T) {
 		"Create Record Usage",
 		"Current Context",
 		"ib dns create ptr <ip-address> <ptr-target>",
+		"ib dns create ns <child-zone> <nameserver> <address>",
+		"creates a delegation record",
 		"reverse zone is auto-detected",
 		"ttl      optional; omit to use the zone default",
 		`ib dns create host app 192.0.2.10 -c "Application host"`,

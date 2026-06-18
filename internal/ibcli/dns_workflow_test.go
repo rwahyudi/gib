@@ -121,7 +121,7 @@ func TestDNSCreateNSCreatesDelegationRecord(t *testing.T) {
 	writeWorkflowRecordCache(t, app, profile)
 	refreshes := captureRecordRefreshes(app)
 
-	if err := app.Execute([]string{"dns", "create", "ns", "child", "ns1.example.com."}); err != nil {
+	if err := app.Execute([]string{"dns", "create", "ns", "child", "ns1.example.com.", "192.0.2.53,2001:db8::53"}); err != nil {
 		t.Fatalf("create ns: %v", err)
 	}
 
@@ -137,8 +137,42 @@ func TestDNSCreateNSCreatesDelegationRecord(t *testing.T) {
 	if strings.Join(primaryRequests, ",") != "POST record:ns" {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
+	addresses, ok := postPayload["addresses"].([]any)
+	if !ok || len(addresses) != 2 {
+		t.Fatalf("payload addresses = %#v, want two addresses; payload = %#v", postPayload["addresses"], postPayload)
+	}
+	for i, want := range []string{"192.0.2.53", "2001:db8::53"} {
+		address, ok := addresses[i].(map[string]any)
+		if !ok || address["address"] != want {
+			t.Fatalf("payload address %d = %#v, want %s", i, addresses[i], want)
+		}
+	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
 	assertRecordRefreshQueued(t, refreshes, "example.com")
+}
+
+func TestDNSCreateNSRequiresAddressBeforeWAPI(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		http.NotFound(w, r)
+	}))
+	defer primary.Close()
+
+	read := emptyReadServer(t)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	err := app.Execute([]string{"dns", "create", "ns", "xternal", "ns1.google.com"})
+	if err == nil {
+		t.Fatal("create ns without address succeeded, want local validation error")
+	}
+	if !strings.Contains(err.Error(), "NS value must include nameserver and at least one address") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(primaryRequests) != 0 {
+		t.Fatalf("create ns without address made primary requests: %#v", primaryRequests)
+	}
 }
 
 func TestDNSCreateUsesDNSContextOverrides(t *testing.T) {

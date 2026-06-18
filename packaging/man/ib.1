@@ -84,9 +84,10 @@ still scans all zones but also matches the relative owner in that forward zone.
 Create a PTR record by IP address. The reverse zone is discovered automatically
 unless an explicit zone override is supplied.
 .TP
-.B ib dns create ns child ns1.example.com
-Create an NS delegation record for child.example.com. Authoritative zone
-nameservers are managed through zone configuration, not this record create path.
+.B ib dns create ns child ns1.example.com 192.0.2.53
+Create an NS delegation record for child.example.com. Infoblox requires at
+least one nameserver address. Authoritative zone nameservers are managed
+through zone configuration, not this record create path.
 .TP
 .B ib net list prod --network-view default
 List IPv4 networks and containers matching prod in the default IPAM network view.

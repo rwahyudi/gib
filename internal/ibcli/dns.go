@@ -279,7 +279,13 @@ func createPayload(recordType, value, name, zone string, ttl int, comment string
 		}
 		payload[spec.ValueField] = target
 	case "ns":
-		payload[spec.ValueField] = cleanDNSName(value)
+		fields, err := nsPayload(value)
+		if err != nil {
+			return "", nil, err
+		}
+		for key, item := range fields {
+			payload[key] = item
+		}
 	default:
 		payload[spec.ValueField] = value
 	}
@@ -359,6 +365,35 @@ func ptrPayload(name, value string) map[string]any {
 	return map[string]any{field: strings.TrimSpace(name), "ptrdname": strings.TrimRight(strings.TrimSpace(value), ".")}
 }
 
+func nsPayload(value string) (map[string]any, error) {
+	parts := strings.Fields(value)
+	if len(parts) < 2 {
+		return nil, cliError("NS value must include nameserver and at least one address. Use: ib dns create ns <child-zone> <nameserver> <address>[,<address>...]")
+	}
+	nameserver := cleanDNSName(parts[0])
+	if nameserver == "" {
+		return nil, cliError("NS nameserver is required")
+	}
+	addresses := make([]map[string]any, 0, len(parts)-1)
+	for _, part := range parts[1:] {
+		for _, raw := range strings.Split(part, ",") {
+			addressText := strings.TrimSpace(raw)
+			if addressText == "" {
+				continue
+			}
+			address, err := netip.ParseAddr(addressText)
+			if err != nil {
+				return nil, cliError("NS address %q must be an IPv4 or IPv6 address", addressText)
+			}
+			addresses = append(addresses, map[string]any{"address": address.String()})
+		}
+	}
+	if len(addresses) == 0 {
+		return nil, cliError("NS value must include at least one address. Use: ib dns create ns <child-zone> <nameserver> <address>[,<address>...]")
+	}
+	return map[string]any{"nameserver": nameserver, "addresses": addresses}, nil
+}
+
 func hostPayload(value string) (map[string]any, error) {
 	address, err := netip.ParseAddr(strings.TrimSpace(value))
 	if err != nil {
@@ -394,6 +429,8 @@ func updateValuePayload(recordType, value, zone string) (map[string]any, error) 
 			return nil, err
 		}
 		return map[string]any{spec.ValueField: target}, nil
+	case "ns":
+		return nsPayload(value)
 	default:
 		return map[string]any{spec.ValueField: value}, nil
 	}
