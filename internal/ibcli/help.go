@@ -185,7 +185,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"types", strings.Join(supportedWritableRecordTypes(), ", ")},
 			{"zone", "--zone -> ib dns zone use -> IB_ZONE -> configured default"},
 			{"ptr", "ib dns create ptr <ip-address> <ptr-target>; reverse zone is auto-detected"},
-			{"ns", "ib dns create ns <child-zone> <nameserver> <address>[,<address>...]; creates a delegation record"},
+			{"ns", "ib dns create ns <child-zone> <nameserver> [address,...]; creates a delegation record; resolves nameserver when address is omitted"},
 			{"ttl", "optional; omit to use the zone default"},
 			{"example", `ib dns create host app 192.0.2.10 -c "Application host"`},
 			{"creates", "HOST app.example.com with IPv4 address 192.0.2.10"},

@@ -66,6 +66,7 @@ var (
 
 	recordSortFields = []string{"name", "type", "value", "zone", "ttl", "comment"}
 	zoneSortFields   = []string{"zone", "view", "format", "ns_group", "comment"}
+	lookupIP         = net.LookupIP
 )
 
 type RecordSpec struct {
@@ -367,15 +368,36 @@ func ptrPayload(name, value string) map[string]any {
 
 func nsPayload(value string) (map[string]any, error) {
 	parts := strings.Fields(value)
-	if len(parts) < 2 {
-		return nil, cliError("NS value must include nameserver and at least one address. Use: ib dns create ns <child-zone> <nameserver> <address>[,<address>...]")
+	if len(parts) == 0 {
+		return nil, cliError("NS nameserver is required")
 	}
 	nameserver := cleanDNSName(parts[0])
 	if nameserver == "" {
 		return nil, cliError("NS nameserver is required")
 	}
 	addresses := make([]map[string]any, 0, len(parts)-1)
-	for _, part := range parts[1:] {
+	if len(parts) > 1 {
+		var err error
+		addresses, err = nsExplicitAddressPayloads(parts[1:])
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		addresses, err = resolveNSAddressPayloads(nameserver)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(addresses) == 0 {
+		return nil, cliError("NS nameserver %q did not resolve to any IP addresses", nameserver)
+	}
+	return map[string]any{"nameserver": nameserver, "addresses": addresses}, nil
+}
+
+func nsExplicitAddressPayloads(parts []string) ([]map[string]any, error) {
+	addresses := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
 		for _, raw := range strings.Split(part, ",") {
 			addressText := strings.TrimSpace(raw)
 			if addressText == "" {
@@ -388,10 +410,26 @@ func nsPayload(value string) (map[string]any, error) {
 			addresses = append(addresses, map[string]any{"address": address.String()})
 		}
 	}
-	if len(addresses) == 0 {
-		return nil, cliError("NS value must include at least one address. Use: ib dns create ns <child-zone> <nameserver> <address>[,<address>...]")
+	return addresses, nil
+}
+
+func resolveNSAddressPayloads(nameserver string) ([]map[string]any, error) {
+	ips, err := lookupIP(nameserver)
+	if err != nil {
+		return nil, cliError("NS nameserver %q did not resolve: %v", nameserver, err)
 	}
-	return map[string]any{"nameserver": nameserver, "addresses": addresses}, nil
+	addresses := make([]map[string]any, 0, len(ips))
+	seen := map[string]bool{}
+	for _, ip := range ips {
+		addressText := ip.String()
+		address, err := netip.ParseAddr(addressText)
+		if err != nil || seen[address.String()] {
+			continue
+		}
+		seen[address.String()] = true
+		addresses = append(addresses, map[string]any{"address": address.String()})
+	}
+	return addresses, nil
 }
 
 func hostPayload(value string) (map[string]any, error) {

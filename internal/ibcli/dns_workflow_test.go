@@ -3,6 +3,8 @@ package ibcli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -151,7 +153,77 @@ func TestDNSCreateNSCreatesDelegationRecord(t *testing.T) {
 	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
-func TestDNSCreateNSRequiresAddressBeforeWAPI(t *testing.T) {
+func TestDNSCreateNSResolvesAddressWhenOmitted(t *testing.T) {
+	oldLookupIP := lookupIP
+	lookupIP = func(host string) ([]net.IP, error) {
+		if host != "ns1.google.com" {
+			t.Fatalf("lookup host = %q", host)
+		}
+		return []net.IP{net.ParseIP("216.239.32.10"), net.ParseIP("2001:4860:4802:32::a"), net.ParseIP("216.239.32.10")}, nil
+	}
+	t.Cleanup(func() { lookupIP = oldLookupIP })
+
+	var postPayload map[string]any
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "record:ns" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&postPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode("record:ns/ref")
+	}))
+	defer primary.Close()
+
+	read := emptyReadServer(t)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	refreshes := captureRecordRefreshes(app)
+
+	if err := app.Execute([]string{"dns", "create", "ns", "xternal", "ns1.google.com"}); err != nil {
+		t.Fatalf("create ns: %v", err)
+	}
+	for key, want := range map[string]any{
+		"name":       "xternal.example.com",
+		"nameserver": "ns1.google.com",
+		"view":       "default",
+	} {
+		if postPayload[key] != want {
+			t.Fatalf("payload[%s] = %#v, want %#v; payload = %#v", key, postPayload[key], want, postPayload)
+		}
+	}
+	addresses, ok := postPayload["addresses"].([]any)
+	if !ok || len(addresses) != 2 {
+		t.Fatalf("payload addresses = %#v, want two unique resolved addresses; payload = %#v", postPayload["addresses"], postPayload)
+	}
+	for i, want := range []string{"216.239.32.10", "2001:4860:4802:32::a"} {
+		address, ok := addresses[i].(map[string]any)
+		if !ok || address["address"] != want {
+			t.Fatalf("payload address %d = %#v, want %s", i, addresses[i], want)
+		}
+	}
+	if strings.Join(primaryRequests, ",") != "POST record:ns" {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+}
+
+func TestDNSCreateNSErrorsWhenNameserverDoesNotResolve(t *testing.T) {
+	oldLookupIP := lookupIP
+	lookupIP = func(host string) ([]net.IP, error) {
+		if host != "missing.example.com" {
+			t.Fatalf("lookup host = %q", host)
+		}
+		return nil, errors.New("no such host")
+	}
+	t.Cleanup(func() { lookupIP = oldLookupIP })
+
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
@@ -163,15 +235,15 @@ func TestDNSCreateNSRequiresAddressBeforeWAPI(t *testing.T) {
 	defer read.Close()
 
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
-	err := app.Execute([]string{"dns", "create", "ns", "xternal", "ns1.google.com"})
+	err := app.Execute([]string{"dns", "create", "ns", "xternal", "missing.example.com"})
 	if err == nil {
-		t.Fatal("create ns without address succeeded, want local validation error")
+		t.Fatal("create ns with unresolvable nameserver succeeded, want local validation error")
 	}
-	if !strings.Contains(err.Error(), "NS value must include nameserver and at least one address") {
+	if !strings.Contains(err.Error(), `NS nameserver "missing.example.com" did not resolve`) {
 		t.Fatalf("error = %v", err)
 	}
 	if len(primaryRequests) != 0 {
-		t.Fatalf("create ns without address made primary requests: %#v", primaryRequests)
+		t.Fatalf("create ns with unresolvable nameserver made primary requests: %#v", primaryRequests)
 	}
 }
 

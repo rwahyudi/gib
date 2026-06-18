@@ -89,6 +89,11 @@ Create an NS delegation record for child.example.com. Infoblox requires at
 least one nameserver address. Authoritative zone nameservers are managed
 through zone configuration, not this record create path.
 .TP
+.B ib dns create ns child ns1.example.com
+Create an NS delegation record and resolve ns1.example.com automatically for
+the required nameserver addresses. The command fails locally if the nameserver
+does not resolve.
+.TP
 .B ib net list prod --network-view default
 List IPv4 networks and containers matching prod in the default IPAM network view.
 Default output shows network, type, and comment columns.
