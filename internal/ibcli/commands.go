@@ -571,25 +571,19 @@ func (a *App) dnsCreateCommand() *cobra.Command {
 	var ttl int
 	var noptr bool
 	cmd := &cobra.Command{
-		Use:   "create TYPE NAME VALUE [ADDRESS]",
+		Use:   "create TYPE NAME VALUE",
 		Short: "Create a DNS record",
 		Example: strings.TrimSpace(`ib dns create host app 192.0.2.10 -c "Application host"
 ib dns create ptr 192.0.2.10 app.example.com
-ib dns create ns child ns1.example.com 192.0.2.53`),
-		Args:              cobra.RangeArgs(3, 4),
+ib dns create ns child ns1.example.com`),
+		Args:              cobra.ExactArgs(3),
 		ValidArgsFunction: createArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			recordType, err := normalizeRecordTypeArg(args[0])
 			if err != nil {
 				return err
 			}
-			if len(args) == 4 && recordType != "ns" {
-				return cliError("extra ADDRESS argument is only supported for NS records")
-			}
 			value := args[2]
-			if recordType == "ns" && len(args) == 4 {
-				value += " " + args[3]
-			}
 			return a.runDNSCreate(recordType, args[1], value, a.dnsZoneOverride, ttl, noptr, comment)
 		},
 	}

@@ -35,6 +35,7 @@ const (
 	recordCommentWrapWidth = 40
 	defaultRecordSortField = "name"
 	defaultZoneSortField   = "zone"
+	nsDelegationAddress    = "255.255.255.255"
 )
 
 var (
@@ -388,18 +389,15 @@ func nsPayload(value string) (map[string]any, error) {
 }
 
 func nsDelegatedZonePayload(value string) (map[string]any, error) {
-	nameserver, addresses, err := nsServerAddresses(value)
-	if err != nil {
-		return nil, err
+	parts := strings.Fields(value)
+	if len(parts) != 1 {
+		return nil, cliError("NS delegation creation uses a fixed delegate address. Use: ib dns create ns <child-zone> <nameserver>")
 	}
-	delegateTo := make([]map[string]any, 0, len(addresses))
-	for _, address := range addresses {
-		delegateTo = append(delegateTo, map[string]any{
-			"name":    nameserver,
-			"address": address["address"],
-		})
+	nameserver := cleanDNSName(parts[0])
+	if nameserver == "" {
+		return nil, cliError("NS nameserver is required")
 	}
-	return map[string]any{"delegate_to": delegateTo}, nil
+	return map[string]any{"delegate_to": []map[string]any{{"name": nameserver, "address": nsDelegationAddress}}}, nil
 }
 
 func nsServerAddresses(value string) (string, []map[string]any, error) {

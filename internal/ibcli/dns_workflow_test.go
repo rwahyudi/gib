@@ -3,8 +3,6 @@ package ibcli
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -123,7 +121,7 @@ func TestDNSCreateNSCreatesDelegationRecord(t *testing.T) {
 	writeWorkflowRecordCache(t, app, profile)
 	refreshes := captureRecordRefreshes(app)
 
-	if err := app.Execute([]string{"dns", "create", "ns", "child", "ns1.example.com.", "192.0.2.53,2001:db8::53"}); err != nil {
+	if err := app.Execute([]string{"dns", "create", "ns", "child", "ns1.example.com."}); err != nil {
 		t.Fatalf("create ns: %v", err)
 	}
 
@@ -139,29 +137,18 @@ func TestDNSCreateNSCreatesDelegationRecord(t *testing.T) {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
 	delegateTo, ok := postPayload["delegate_to"].([]any)
-	if !ok || len(delegateTo) != 2 {
-		t.Fatalf("payload delegate_to = %#v, want two delegate targets; payload = %#v", postPayload["delegate_to"], postPayload)
+	if !ok || len(delegateTo) != 1 {
+		t.Fatalf("payload delegate_to = %#v, want one delegate target; payload = %#v", postPayload["delegate_to"], postPayload)
 	}
-	for i, want := range []string{"192.0.2.53", "2001:db8::53"} {
-		delegate, ok := delegateTo[i].(map[string]any)
-		if !ok || delegate["name"] != "ns1.example.com" || delegate["address"] != want {
-			t.Fatalf("payload delegate %d = %#v, want ns1.example.com/%s", i, delegateTo[i], want)
-		}
+	delegate, ok := delegateTo[0].(map[string]any)
+	if !ok || delegate["name"] != "ns1.example.com" || delegate["address"] != "255.255.255.255" {
+		t.Fatalf("payload delegate = %#v, want ns1.example.com/255.255.255.255", delegateTo[0])
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
 	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
-func TestDNSCreateNSResolvesAddressWhenOmitted(t *testing.T) {
-	oldLookupIP := lookupIP
-	lookupIP = func(host string) ([]net.IP, error) {
-		if host != "ns1.google.com" {
-			t.Fatalf("lookup host = %q", host)
-		}
-		return []net.IP{net.ParseIP("216.239.32.10"), net.ParseIP("2001:4860:4802:32::a"), net.ParseIP("216.239.32.10")}, nil
-	}
-	t.Cleanup(func() { lookupIP = oldLookupIP })
-
+func TestDNSCreateNSUsesFixedDelegateAddress(t *testing.T) {
 	var postPayload map[string]any
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -196,14 +183,12 @@ func TestDNSCreateNSResolvesAddressWhenOmitted(t *testing.T) {
 		}
 	}
 	delegateTo, ok := postPayload["delegate_to"].([]any)
-	if !ok || len(delegateTo) != 2 {
-		t.Fatalf("payload delegate_to = %#v, want two unique resolved delegates; payload = %#v", postPayload["delegate_to"], postPayload)
+	if !ok || len(delegateTo) != 1 {
+		t.Fatalf("payload delegate_to = %#v, want one fixed delegate; payload = %#v", postPayload["delegate_to"], postPayload)
 	}
-	for i, want := range []string{"216.239.32.10", "2001:4860:4802:32::a"} {
-		delegate, ok := delegateTo[i].(map[string]any)
-		if !ok || delegate["name"] != "ns1.google.com" || delegate["address"] != want {
-			t.Fatalf("payload delegate %d = %#v, want ns1.google.com/%s", i, delegateTo[i], want)
-		}
+	delegate, ok := delegateTo[0].(map[string]any)
+	if !ok || delegate["name"] != "ns1.google.com" || delegate["address"] != "255.255.255.255" {
+		t.Fatalf("payload delegate = %#v, want ns1.google.com/255.255.255.255", delegateTo[0])
 	}
 	if strings.Join(primaryRequests, ",") != "POST zone_delegated" {
 		t.Fatalf("primary requests = %#v", primaryRequests)
@@ -212,16 +197,7 @@ func TestDNSCreateNSResolvesAddressWhenOmitted(t *testing.T) {
 	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
-func TestDNSCreateNSErrorsWhenNameserverDoesNotResolve(t *testing.T) {
-	oldLookupIP := lookupIP
-	lookupIP = func(host string) ([]net.IP, error) {
-		if host != "missing.example.com" {
-			t.Fatalf("lookup host = %q", host)
-		}
-		return nil, errors.New("no such host")
-	}
-	t.Cleanup(func() { lookupIP = oldLookupIP })
-
+func TestDNSCreateNSRejectsExplicitAddress(t *testing.T) {
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
@@ -233,11 +209,11 @@ func TestDNSCreateNSErrorsWhenNameserverDoesNotResolve(t *testing.T) {
 	defer read.Close()
 
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
-	err := app.Execute([]string{"dns", "create", "ns", "xternal", "missing.example.com"})
+	err := app.Execute([]string{"dns", "create", "ns", "xternal", "ns1.example.com", "192.0.2.53"})
 	if err == nil {
-		t.Fatal("create ns with unresolvable nameserver succeeded, want local validation error")
+		t.Fatal("create ns with explicit address succeeded, want argument validation error")
 	}
-	if !strings.Contains(err.Error(), `NS nameserver "missing.example.com" did not resolve`) {
+	if !strings.Contains(err.Error(), "usage displayed") {
 		t.Fatalf("error = %v", err)
 	}
 	if len(primaryRequests) != 0 {
