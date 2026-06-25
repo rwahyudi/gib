@@ -9,7 +9,7 @@
 %global forgeurl https://github.com/rwahyudi/gib
 %global gomodulesmode GO111MODULE=on
 
-Version: 0.3.6
+Version: 0.3.7
 %global tag v%{version}
 %gometa
 
@@ -77,6 +77,9 @@ export CGO_ENABLED=0
 %{_mandir}/man1/ib.1*
 
 %changelog
+* Fri Jun 26 2026 rwahyudi <rwahyudi@users.noreply.github.com> - 0.3.7-1
+- Release 0.3.7
+
 * Wed Jun 10 2026 rwahyudi <rwahyudi@users.noreply.github.com> - 0.3.6-1
 - Release 0.3.6
 
