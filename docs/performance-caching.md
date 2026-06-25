@@ -137,6 +137,10 @@ ib config cache status
 ib config cache clear
 ```
 
+`ib config cache clear` drops and recreates the selected local/global Badger
+cache scope, removing storage files including value-log (`.vlog`) files instead
+of only deleting matching cache rows.
+
 Use `ib dns search KEYWORD --global --debug` to print timestamped command,
 WAPI, and cache timing lines to stderr while keeping stdout unchanged. Cache
 sources include `fresh cache`, `stale cache`, `serial-valid cache`, and

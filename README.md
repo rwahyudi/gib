@@ -194,7 +194,7 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | `ib config delete PROFILE` | Delete a non-default local profile and clear its cache rows. |
 | `ib config completion [bash\|zsh\|fish\|windows]` | Generate or install dynamic shell completion. |
 | `ib config cache status` | Show Badger cache entries with summary statistics, or structured statistics with `-o json`. |
-| `ib config cache clear` | Clear Badger cache entries for the selected local/global config scope. |
+| `ib config cache clear` | Clear the selected local/global Badger cache scope and recreate Badger storage files, including value-log (`.vlog`) files. |
 
 ### DNS
 
@@ -322,6 +322,8 @@ Useful cache commands:
 ib config cache status
 ib config cache clear
 ```
+
+`ib config cache clear` drops and recreates the selected local/global Badger cache scope so storage files, including `.vlog` value-log files, are removed instead of only deleting cache rows.
 
 To see what a command is doing and how long each step takes, add `--debug`.
 Debug output is written to stderr, so JSON and CSV stdout stay script-friendly:

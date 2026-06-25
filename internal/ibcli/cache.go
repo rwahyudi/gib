@@ -17,6 +17,7 @@ import (
 
 const (
 	cacheDirName          = "cache.badger"
+	cacheValueLogFileSize = 1 << 20
 	recordRefreshLeaseTTL = 300 * time.Second
 	zoneRefreshLockName   = "<zone-cache>"
 )
@@ -127,12 +128,26 @@ func (a *App) openCacheDB() (*badger.DB, error) {
 	}
 }
 
+func (a *App) closeCacheDB(path string) error {
+	a.cacheDBMu.Lock()
+	db := a.cacheDBs[path]
+	delete(a.cacheDBs, path)
+	a.cacheDBMu.Unlock()
+	if db == nil {
+		return nil
+	}
+	return db.Close()
+}
+
 func cacheBadgerOptions(path string) badger.Options {
 	// ib cache values are rewritten wholesale and rarely need Badger's separate
 	// value-log storage. LSMOnlyOptions keeps values in the LSM tree when
 	// possible so .vlog files mostly act as the write-ahead log instead of
 	// accumulating cache payloads.
-	return badger.LSMOnlyOptions(path).WithLogger(nil).WithCompactL0OnClose(true)
+	return badger.LSMOnlyOptions(path).
+		WithLogger(nil).
+		WithCompactL0OnClose(true).
+		WithValueLogFileSize(cacheValueLogFileSize)
 }
 
 func badgerOpenLockError(err error) bool {
@@ -608,20 +623,21 @@ func (a *App) invalidateRecordCache(profile Profile, zone string) {
 }
 
 func (a *App) clearCache() error {
-	db, err := a.openCacheDB()
-	if err != nil {
+	path := a.cachePath()
+	if err := a.closeCacheDB(path); err != nil {
 		return err
 	}
-	return deleteBadgerPrefixes(db, []string{
-		"zones",
-		"records",
-		"record_refresh_locks",
-		"network_views",
-		"networks",
-		"network_containers",
-		"ipv4_addresses",
-		"net_refresh_locks",
-	})
+	// A full cache clear should reclaim Badger storage files too. Prefix deletes
+	// or DropAll remove rows but can leave a large active sparse value-log file
+	// behind, which is surprising for users running `ib config cache clear` to
+	// free space.
+	if err := os.RemoveAll(path); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	return a.protectCacheFileForScope(false)
 }
 
 func (a *App) clearProfileCache(profileName string) error {

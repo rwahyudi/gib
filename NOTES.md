@@ -28,7 +28,7 @@ Search should avoid repeatedly opening the Badger cache while scanning many zone
 
 Multi-zone search should preload record-cache rows for the selected zones with one Badger handle before worker fan-out. This keeps native Windows search from repeatedly opening the cache directory for fresh rows; missing or expired rows still fall back to the normal per-zone cache/WAPI path.
 
-Use Badger LSM-only cache options and best-effort value-log GC on open so `.vlog` files mostly remain write-ahead logs instead of accumulating rewritten cache payloads. Keep that storage tuning in sync with any future cache backend or payload-size changes.
+Use Badger LSM-only cache options, a small value-log file size, and best-effort value-log GC on open so `.vlog` files mostly remain write-ahead logs instead of accumulating rewritten cache payloads. `ib config cache clear` should close, remove, and recreate the selected Badger cache scope so storage files, including `.vlog` value-log files, are removed rather than leaving large active value logs behind after row deletion. Keep that storage tuning in sync with any future cache backend or payload-size changes.
 
 The WAPI HTTP transport should keep enough idle per-host connections for search workers. Size `MaxIdleConnsPerHost` and `MaxConnsPerHost` from `dns_search_worker_limit` so Windows does not repeatedly pay TCP/TLS setup costs during parallel `/allrecords` refreshes.
 

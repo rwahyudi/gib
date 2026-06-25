@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +67,19 @@ func TestCacheStatusAndClear(t *testing.T) {
 	if len(rows) != 0 {
 		t.Fatalf("status rows after clear = %#v", rows)
 	}
+	matches, err := filepath.Glob(filepath.Join(app.cachePath(), "*.vlog"))
+	if err != nil {
+		t.Fatalf("glob vlog files: %v", err)
+	}
+	for _, match := range matches {
+		info, err := os.Stat(match)
+		if err != nil {
+			t.Fatalf("stat vlog file: %v", err)
+		}
+		if info.Size() > 2<<20 {
+			t.Fatalf("cache clear left large vlog %s at %d bytes", match, info.Size())
+		}
+	}
 }
 
 func TestCacheBadgerOptionsMinimizeValueLogUse(t *testing.T) {
@@ -79,6 +94,9 @@ func TestCacheBadgerOptionsMinimizeValueLogUse(t *testing.T) {
 	}
 	if !options.CompactL0OnClose {
 		t.Fatal("CompactL0OnClose = false, want true")
+	}
+	if options.ValueLogFileSize != cacheValueLogFileSize {
+		t.Fatalf("value log file size = %d, want %d", options.ValueLogFileSize, cacheValueLogFileSize)
 	}
 	if options.Logger != nil {
 		t.Fatal("cache Badger logger should be disabled")
