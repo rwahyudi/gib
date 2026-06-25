@@ -107,7 +107,7 @@ func (a *App) openCacheDB() (*badger.DB, error) {
 	if db := a.cacheDBs[path]; db != nil {
 		return db, nil
 	}
-	options := badger.DefaultOptions(path).WithLogger(nil)
+	options := cacheBadgerOptions(path)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		db, err := badger.Open(options)
@@ -117,6 +117,7 @@ func (a *App) openCacheDB() (*badger.DB, error) {
 				return nil, err
 			}
 			a.cacheDBs[path] = db
+			a.runValueLogGC(db)
 			return db, nil
 		}
 		if !badgerOpenLockError(err) || time.Now().After(deadline) {
@@ -126,12 +127,36 @@ func (a *App) openCacheDB() (*badger.DB, error) {
 	}
 }
 
+func cacheBadgerOptions(path string) badger.Options {
+	// ib cache values are rewritten wholesale and rarely need Badger's separate
+	// value-log storage. LSMOnlyOptions keeps values in the LSM tree when
+	// possible so .vlog files mostly act as the write-ahead log instead of
+	// accumulating cache payloads.
+	return badger.LSMOnlyOptions(path).WithLogger(nil).WithCompactL0OnClose(true)
+}
+
 func badgerOpenLockError(err error) bool {
 	if err == nil {
 		return false
 	}
 	text := strings.ToLower(err.Error())
 	return strings.Contains(text, "lock") || strings.Contains(text, "resource temporarily unavailable")
+}
+
+// runValueLogGC reclaims discardable space in Badger value log files. Each call
+// rewrites the most recyclable vlog; loop until ErrNoRewrite means nothing is
+// left. This runs best-effort on DB open so vlog files do not accumulate.
+func (a *App) runValueLogGC(db *badger.DB) {
+	for {
+		err := db.RunValueLogGC(0.5)
+		if errors.Is(err, badger.ErrNoRewrite) {
+			return
+		}
+		if err != nil {
+			a.debugEvent("value log gc error", df("error", err.Error()))
+			return
+		}
+	}
 }
 
 func cacheScope(profile Profile) (string, string) {

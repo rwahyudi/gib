@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dgraph-io/badger/v4"
 )
 
 func TestCacheStatusAndClear(t *testing.T) {
@@ -62,6 +64,24 @@ func TestCacheStatusAndClear(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("status rows after clear = %#v", rows)
+	}
+}
+
+func TestCacheBadgerOptionsMinimizeValueLogUse(t *testing.T) {
+	path := t.TempDir()
+	options := cacheBadgerOptions(path)
+	lsmOptions := badger.LSMOnlyOptions(path)
+	if options.Dir != path || options.ValueDir != path {
+		t.Fatalf("cache dirs = %q/%q, want %q", options.Dir, options.ValueDir, path)
+	}
+	if options.ValueThreshold != lsmOptions.ValueThreshold {
+		t.Fatalf("value threshold = %d, want LSM-only threshold %d", options.ValueThreshold, lsmOptions.ValueThreshold)
+	}
+	if !options.CompactL0OnClose {
+		t.Fatal("CompactL0OnClose = false, want true")
+	}
+	if options.Logger != nil {
+		t.Fatal("cache Badger logger should be disabled")
 	}
 }
 
