@@ -567,6 +567,33 @@ func lookupReturnFields(returnFields string) string {
 	return strings.Join(kept, ",")
 }
 
+func returnFieldsWithout(returnFields string, excludedFields ...string) string {
+	excluded := map[string]bool{}
+	for _, field := range excludedFields {
+		excluded[strings.TrimSpace(field)] = true
+	}
+	fields := strings.Split(returnFields, ",")
+	kept := fields[:0]
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" || excluded[field] {
+			continue
+		}
+		kept = append(kept, field)
+	}
+	return strings.Join(kept, ",")
+}
+
+func unsupportedWAPIFieldError(err error, field string) bool {
+	var wapiErr *WapiError
+	if !errors.As(err, &wapiErr) || wapiErr.Status != http.StatusBadRequest {
+		return false
+	}
+	message := strings.ToLower(wapiErr.Text)
+	field = strings.ToLower(strings.TrimSpace(field))
+	return strings.Contains(message, "unknown argument/field") && strings.Contains(message, field)
+}
+
 func zoneQueryParams(client *WapiClient, returnFields string, extra map[string]string) url.Values {
 	params := url.Values{}
 	params.Set("_return_fields", returnFields)
@@ -1981,7 +2008,12 @@ func allRecordRowsForZone(client *WapiClient, zoneName string, enrich bool) ([]m
 	// /allrecords is the fast path for large zones because it returns mixed
 	// record types in one paged query. Detail enrichment is optional because it
 	// requires per-record GETs and can be much slower.
-	rows, err := pagedQuery(client, allRecordsObject, allRecordsQueryParams(client, zoneName))
+	params := allRecordsQueryParams(client, zoneName)
+	rows, err := pagedQuery(client, allRecordsObject, params)
+	if unsupportedWAPIFieldError(err, "creation_time") {
+		params.Set("_return_fields", returnFieldsWithout(params.Get("_return_fields"), "creation_time"))
+		rows, err = pagedQuery(client, allRecordsObject, params)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -2055,6 +2087,10 @@ func recordDetailByRef(client *WapiClient, ref string, spec RecordSpec) (map[str
 	params := url.Values{}
 	params.Set("_return_fields", spec.ReturnFields)
 	response, err := client.Request(http.MethodGet, ref, params, nil)
+	if unsupportedWAPIFieldError(err, "creation_time") {
+		params.Set("_return_fields", returnFieldsWithout(spec.ReturnFields, "creation_time"))
+		response, err = client.Request(http.MethodGet, ref, params, nil)
+	}
 	if err != nil {
 		return nil, err
 	}
