@@ -185,7 +185,7 @@ When a command queries zone records:
 
 The in-flight background refresh marker is stored in the selected Badger cache and expires automatically after 300 seconds. This prevents repeated `ib dns list` or `ib dns search` calls from starting duplicate refreshes while still allowing recovery if a refresh subprocess exits unexpectedly. The wait is scoped to the exact profile, DNS view, and zone; refreshes for other zones do not block the current list/search.
 
-`ib dns list --details` may enrich fresh cached rows with per-record detail calls when TTL/detail fields are missing. Stale SWR responses are returned exactly as cached; the background revalidation updates the cache separately. Record creation time is requested opportunistically for the `created` column; if an older Infoblox WAPI version rejects `creation_time`, list/detail loading retries without that field and leaves `created` blank rather than failing the command.
+`ib dns list --details` may enrich fresh cached rows with per-record detail calls when TTL/detail fields are missing. Stale SWR responses are returned exactly as cached; the background revalidation updates the cache separately.
 
 `ib dns search` uses the same record-cache workflow. It first loads the searchable zone list, skips secondary zones, then loads records from cache or `/allrecords` for the current zone, an inferred FQDN zone, recursive child-zone scope, or global scope. Multi-zone searches use `dns_search_worker_limit` to bound parallel zone loading.
 
