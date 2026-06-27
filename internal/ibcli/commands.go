@@ -690,11 +690,10 @@ func (a *App) dnsListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			requireCreated := recordColumnsInclude(recordColumns, "created") || recordSort.Field == "created"
 			var records []TypedRecord
 			if err := a.withSpinner("Loading DNS records...", func() error {
 				var loadErr error
-				records, loadErr = a.listRecordsForZone(profile, client, target, recursive, details, requireCreated)
+				records, loadErr = a.listRecordsForZone(profile, client, target, recursive, details)
 				return loadErr
 			}); err != nil {
 				return err
