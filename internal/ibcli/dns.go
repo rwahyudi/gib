@@ -1724,6 +1724,16 @@ func isRecordOutputColumn(column string) bool {
 	return false
 }
 
+func recordColumnsInclude(columns []string, column string) bool {
+	column = strings.ToLower(strings.TrimSpace(column))
+	for _, candidate := range columns {
+		if strings.ToLower(strings.TrimSpace(candidate)) == column {
+			return true
+		}
+	}
+	return false
+}
+
 func selectRecordOutputColumns(row map[string]any, columns []string) map[string]any {
 	selected := make(map[string]any, len(columns))
 	for _, column := range columns {
@@ -1992,44 +2002,49 @@ type cachedRecordLoadResult struct {
 
 type cachedRecordLoadOptions struct {
 	Enrich                 bool
+	RequireCreated         bool
 	KnownSerial            string
 	DeferStaleRevalidation bool
 }
 
 func recordsForZone(client *WapiClient, zoneName string) ([]TypedRecord, error) {
-	results, err := allRecordRowsForZone(client, zoneName, true)
+	results, err := allRecordRowsForZone(client, zoneName, true, true)
 	if err != nil {
 		return nil, err
 	}
 	return recordsFromAllRecordRows(results), nil
 }
 
-func allRecordRowsForZone(client *WapiClient, zoneName string, enrich bool) ([]map[string]any, error) {
+func allRecordRowsForZone(client *WapiClient, zoneName string, enrich bool, requireCreated bool) ([]map[string]any, error) {
 	// /allrecords is the fast path for large zones because it returns mixed
 	// record types in one paged query. Detail enrichment is optional because it
-	// requires per-record GETs and can be much slower.
+	// requires per-record GETs and can be much slower. When older WAPI rejects
+	// creation_time on /allrecords, retry without it and enrich missing created
+	// values from concrete record refs so the public column remains useful.
 	params := allRecordsQueryParams(client, zoneName)
 	rows, err := pagedQuery(client, allRecordsObject, params)
+	creationTimeRejected := false
 	if unsupportedWAPIFieldError(err, "creation_time") {
+		creationTimeRejected = true
 		params.Set("_return_fields", returnFieldsWithout(params.Get("_return_fields"), "creation_time"))
 		rows, err = pagedQuery(client, allRecordsObject, params)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if enrich {
-		enrichAllRecordRows(client, rows)
+	if enrich || creationTimeRejected || requireCreated {
+		enrichAllRecordRows(client, rows, enrich, creationTimeRejected || requireCreated)
 	}
 	return rows, nil
 }
 
-func enrichAllRecordRows(client *WapiClient, rows []map[string]any) bool {
-	// Infoblox omits some concrete-record fields from /allrecords. When callers
-	// ask for details, fetch only rows missing TTL/detail data and merge those
-	// fields back into the cached /allrecords shape.
+func enrichAllRecordRows(client *WapiClient, rows []map[string]any, enrichDetails bool, requireCreated bool) bool {
+	// Infoblox omits some concrete-record fields from /allrecords. --details
+	// fetches full detail rows, while created-only enrichment fetches just the
+	// optional creation_time field to avoid slowing normal TTL/comment output.
 	changed := false
 	for _, item := range rows {
-		if recordHasTTLDetail(item) {
+		if recordHasDetail(item, enrichDetails, requireCreated) {
 			continue
 		}
 		recordType := recordTypeFromAllRecord(item)
@@ -2038,7 +2053,13 @@ func enrichAllRecordRows(client *WapiClient, rows []map[string]any) bool {
 		if !ok || ref == "" {
 			continue
 		}
-		detail, err := recordDetailByRef(client, ref, spec)
+		var detail map[string]any
+		var err error
+		if enrichDetails {
+			detail, err = recordDetailByRef(client, ref, spec)
+		} else {
+			detail, err = recordCreationTimeByRef(client, ref)
+		}
 		if err != nil {
 			continue
 		}
@@ -2048,6 +2069,13 @@ func enrichAllRecordRows(client *WapiClient, rows []map[string]any) bool {
 		}
 	}
 	return changed
+}
+
+func recordHasDetail(item map[string]any, enrichDetails bool, requireCreated bool) bool {
+	if enrichDetails && !recordHasTTLDetail(item) {
+		return false
+	}
+	return !requireCreated || recordCreated(item) != ""
 }
 
 func recordHasTTLDetail(item map[string]any) bool {
@@ -2100,6 +2128,24 @@ func recordDetailByRef(client *WapiClient, ref string, spec RecordSpec) (map[str
 	return nil, nil
 }
 
+func recordCreationTimeByRef(client *WapiClient, ref string) (map[string]any, error) {
+	params := url.Values{}
+	params.Set("_return_fields", "creation_time")
+	response, err := client.Request(http.MethodGet, ref, params, nil)
+	if unsupportedWAPIFieldError(err, "creation_time") {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if detail, ok := response.(map[string]any); ok {
+		if value, exists := detail["creation_time"]; exists {
+			return map[string]any{"creation_time": value}, nil
+		}
+	}
+	return nil, nil
+}
+
 func mergeRecordDetail(item map[string]any, detail map[string]any) {
 	if len(detail) == 0 {
 		return
@@ -2148,7 +2194,11 @@ func (a *App) cachedRecordsForZone(profile Profile, client *WapiClient, zoneName
 }
 
 func (a *App) cachedRecordsForZoneWithDetails(profile Profile, client *WapiClient, zoneName string, enrich bool) ([]TypedRecord, error) {
-	result, err := a.cachedRecordsForZoneLoad(profile, client, zoneName, cachedRecordLoadOptions{Enrich: enrich})
+	return a.cachedRecordsForZoneWithOptions(profile, client, zoneName, enrich, false)
+}
+
+func (a *App) cachedRecordsForZoneWithOptions(profile Profile, client *WapiClient, zoneName string, enrich bool, requireCreated bool) ([]TypedRecord, error) {
+	result, err := a.cachedRecordsForZoneLoad(profile, client, zoneName, cachedRecordLoadOptions{Enrich: enrich, RequireCreated: requireCreated})
 	return result.Records, err
 }
 
@@ -2209,7 +2259,7 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 	if entry.CacheFound && hasSerial && entry.Serial != "" && entry.Serial == currentSerial {
 		staleExpiresAt := now.Add(a.recordsCacheSWRTTL())
 		source := recordCacheSourceSerialCache
-		if options.Enrich && enrichAllRecordRows(client, entry.Rows) {
+		if (options.Enrich || options.RequireCreated) && enrichAllRecordRows(client, entry.Rows, options.Enrich, options.RequireCreated) {
 			_ = a.writeCachedRecordsEntry(profile, zoneName, currentSerial, entry.Rows, now.Unix(), staleExpiresAt.Unix())
 			source = recordCacheSourceSerialEnriched
 		} else {
@@ -2219,7 +2269,7 @@ func (a *App) cachedRecordsForZoneLoad(profile Profile, client *WapiClient, zone
 		return cachedRecordLoadResult{Records: recordsFromAllRecordRows(entry.Rows), Source: source}, nil
 	}
 
-	rows, err := allRecordRowsForZone(client, zoneName, options.Enrich)
+	rows, err := allRecordRowsForZone(client, zoneName, options.Enrich, options.RequireCreated)
 	if err != nil {
 		a.debugEvent("cache records source error", df("zone", zoneName), df("source", recordCacheSourceAllRecords), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedRecordLoadResult{}, err
@@ -2237,7 +2287,7 @@ func (a *App) cachedRecordLoadResultFromEntry(profile Profile, client *WapiClien
 	// Fast path: fresh cached rows are returned without touching Infoblox.
 	if a.cacheEntryFresh(entry, now) {
 		source := recordCacheSourceFreshCache
-		if options.Enrich && enrichAllRecordRows(client, entry.Rows) {
+		if (options.Enrich || options.RequireCreated) && enrichAllRecordRows(client, entry.Rows, options.Enrich, options.RequireCreated) {
 			_ = a.writeCachedRecords(profile, zoneName, entry.Serial, entry.Rows, now)
 			source = recordCacheSourceFreshEnriched
 		}
@@ -2267,7 +2317,7 @@ func (a *App) cachedRecordLoadResultFromKnownSerial(profile Profile, client *Wap
 	}
 	staleExpiresAt := now.Add(a.recordsCacheSWRTTL())
 	source := recordCacheSourceSerialCache
-	if options.Enrich && enrichAllRecordRows(client, entry.Rows) {
+	if (options.Enrich || options.RequireCreated) && enrichAllRecordRows(client, entry.Rows, options.Enrich, options.RequireCreated) {
 		_ = a.writeCachedRecordsEntry(profile, zoneName, knownSerial, entry.Rows, now.Unix(), staleExpiresAt.Unix())
 		source = recordCacheSourceSerialEnriched
 	} else {
@@ -2540,7 +2590,7 @@ func (a *App) revalidateRecordCache(profile Profile, client *WapiClient, zoneNam
 		done(err)
 		return err
 	}
-	rows, err := allRecordRowsForZone(client, zoneName, false)
+	rows, err := allRecordRowsForZone(client, zoneName, false, false)
 	if err != nil {
 		done(err)
 		return err
@@ -3064,18 +3114,18 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 	return records, nil
 }
 
-func (a *App) listRecordsForZone(profile Profile, client *WapiClient, zoneName string, recursive bool, enrich bool) ([]TypedRecord, error) {
+func (a *App) listRecordsForZone(profile Profile, client *WapiClient, zoneName string, recursive bool, enrich bool, requireCreated bool) ([]TypedRecord, error) {
 	if !recursive {
-		if records, handled, err := a.listRecordsForReverseCIDRScope(profile, client, zoneName, enrich); handled || err != nil {
+		if records, handled, err := a.listRecordsForReverseCIDRScope(profile, client, zoneName, enrich, requireCreated); handled || err != nil {
 			return records, err
 		}
-		return a.cachedRecordsForZoneWithDetails(profile, client, zoneName, enrich)
+		return a.cachedRecordsForZoneWithOptions(profile, client, zoneName, enrich, requireCreated)
 	}
 	zones, err := a.searchZones(profile, client, zoneName, true)
 	if err != nil {
 		return nil, err
 	}
-	batches, err := a.searchZoneRecordBatches(profile, client, zones, enrich, nil)
+	batches, err := a.searchZoneRecordBatches(profile, client, zones, enrich || requireCreated, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -3096,7 +3146,7 @@ func (a *App) listRecordsForZone(profile Profile, client *WapiClient, zoneName s
 	return records, nil
 }
 
-func (a *App) listRecordsForReverseCIDRScope(profile Profile, client *WapiClient, zoneName string, enrich bool) ([]TypedRecord, bool, error) {
+func (a *App) listRecordsForReverseCIDRScope(profile Profile, client *WapiClient, zoneName string, enrich bool, requireCreated bool) ([]TypedRecord, bool, error) {
 	scopeZones, err := a.reverseCIDRScopeZones(profile, client, zoneName)
 	if err != nil {
 		return nil, false, err
@@ -3104,7 +3154,7 @@ func (a *App) listRecordsForReverseCIDRScope(profile Profile, client *WapiClient
 	if len(scopeZones) == 0 {
 		return nil, false, nil
 	}
-	batches, err := a.searchZoneRecordBatches(profile, client, scopeZones, enrich, nil)
+	batches, err := a.searchZoneRecordBatches(profile, client, scopeZones, enrich || requireCreated, nil)
 	if err != nil {
 		return nil, true, err
 	}

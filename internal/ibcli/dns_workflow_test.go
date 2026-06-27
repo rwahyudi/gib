@@ -893,7 +893,7 @@ func TestDNSDeleteDuplicateRecordsFailsSafelyWhenNonInteractive(t *testing.T) {
 	}
 }
 
-func TestDNSListDefaultsToFastAllRecordsOnly(t *testing.T) {
+func TestDNSListDefaultCreatedColumnEnrichesWhenAllRecordsOmitsCreated(t *testing.T) {
 	var allRecordRequests int
 	var detailRequests int
 	server := dnsListDetailServer(t, &allRecordRequests, &detailRequests)
@@ -906,11 +906,14 @@ func TestDNSListDefaultsToFastAllRecordsOnly(t *testing.T) {
 	if allRecordRequests != 1 {
 		t.Fatalf("allrecords requests = %d, want 1", allRecordRequests)
 	}
-	if detailRequests != 0 {
-		t.Fatalf("detail requests = %d, want 0 for default fast list", detailRequests)
+	if detailRequests != 1 {
+		t.Fatalf("detail requests = %d, want 1 to populate default created column", detailRequests)
 	}
 	if strings.Contains(stdout.String(), "300") {
 		t.Fatalf("default fast list should not include enriched ttl:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "2026-06-27T20:13:10Z") {
+		t.Fatalf("default list should include enriched creation time:\n%s", stdout.String())
 	}
 }
 
@@ -1101,6 +1104,7 @@ func TestDNSListFallsBackWhenAllRecordsRejectsCreationTime(t *testing.T) {
 
 func TestDNSListDetailsFallsBackWhenRecordDetailRejectsCreationTime(t *testing.T) {
 	var detailRequests []string
+	var allRecordRequests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/zone_auth"):
@@ -1114,6 +1118,13 @@ func TestDNSListDetailsFallsBackWhenRecordDetailRejectsCreationTime(t *testing.T
 				}},
 			})
 		case strings.HasSuffix(r.URL.Path, "/allrecords"):
+			fields := r.URL.Query().Get("_return_fields")
+			allRecordRequests = append(allRecordRequests, fields)
+			if strings.Contains(fields, "creation_time") {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"text": "Unknown argument/field: 'creation_time'"})
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{{
 					"type":    "record:a",
@@ -1154,6 +1165,9 @@ func TestDNSListDetailsFallsBackWhenRecordDetailRejectsCreationTime(t *testing.T
 	if err := app.Execute([]string{"-o", "json", "dns", "list", "--details"}); err != nil {
 		t.Fatalf("dns list --details fallback: %v\nstdout:\n%s", err, stdout.String())
 	}
+	if len(allRecordRequests) != 2 {
+		t.Fatalf("allrecords requests = %#v, want retry without creation_time", allRecordRequests)
+	}
 	if len(detailRequests) != 2 {
 		t.Fatalf("detail requests = %#v, want retry without creation_time", detailRequests)
 	}
@@ -1169,6 +1183,74 @@ func TestDNSListDetailsFallsBackWhenRecordDetailRejectsCreationTime(t *testing.T
 	}
 	if len(rows) != 1 || cleanString(rows[0]["ttl"]) != "300" || cleanString(rows[0]["created"]) != "" {
 		t.Fatalf("rows = %#v, want ttl detail and blank created", rows)
+	}
+}
+
+func TestDNSListUsesDetailCreationTimeWhenAllRecordsRejectsCreationTime(t *testing.T) {
+	var detailRequests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"fqdn":              r.URL.Query().Get("fqdn"),
+					"view":              "default",
+					"zone_format":       "FORWARD",
+					"primary_type":      "Grid",
+					"soa_serial_number": "2026050801",
+				}},
+			})
+		case strings.HasSuffix(r.URL.Path, "/allrecords"):
+			fields := r.URL.Query().Get("_return_fields")
+			if strings.Contains(fields, "creation_time") {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"text": "Unknown argument/field: 'creation_time'"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"type":    "record:a",
+					"name":    "app.example.com",
+					"address": "192.0.2.10",
+					"zone":    "example.com",
+					"record": map[string]any{
+						"_ref":     "record:a/ref",
+						"name":     "app.example.com",
+						"ipv4addr": "192.0.2.10",
+					},
+				}},
+			})
+		case strings.HasSuffix(r.URL.Path, "/record:a/ref"):
+			detailRequests = append(detailRequests, r.URL.Query().Get("_return_fields"))
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"_ref":          "record:a/ref",
+				"name":          "app.example.com",
+				"ipv4addr":      "192.0.2.10",
+				"ttl":           300,
+				"use_ttl":       true,
+				"creation_time": "2026-06-27T20:13:10Z",
+				"view":          "default",
+				"zone":          "example.com",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "dns", "list"}); err != nil {
+		t.Fatalf("dns list creation-time detail fallback: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if len(detailRequests) != 1 || !strings.Contains(detailRequests[0], "creation_time") {
+		t.Fatalf("detail requests = %#v, want one creation_time detail request", detailRequests)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode records JSON: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 1 || cleanString(rows[0]["created"]) != "2026-06-27T20:13:10Z" {
+		t.Fatalf("rows = %#v, want created from detail fallback", rows)
 	}
 }
 
