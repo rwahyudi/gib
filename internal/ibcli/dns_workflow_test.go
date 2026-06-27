@@ -933,6 +933,9 @@ func TestDNSListDetailsLoadsPerRecordDetails(t *testing.T) {
 	if !strings.Contains(stdout.String(), "300") {
 		t.Fatalf("details list should include enriched ttl:\n%s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "2026-06-27T20:13:10Z") {
+		t.Fatalf("details list should include enriched creation time:\n%s", stdout.String())
+	}
 }
 
 func TestDNSListRecursiveIncludesChildZones(t *testing.T) {
@@ -993,6 +996,48 @@ func TestDNSListUsesFreshCacheWithoutSerialValidation(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "cached.example.com") {
 		t.Fatalf("dns list did not render cached record:\n%s", stdout.String())
+	}
+}
+
+func TestDNSListDefaultColumnsIncludeCreated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns list should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{
+			"type":          "record:a",
+			"name":          "app.example.com",
+			"address":       "192.0.2.10",
+			"zone":          "example.com",
+			"ttl":           300,
+			"use_ttl":       true,
+			"creation_time": "2026-06-27T20:13:10Z",
+			"comment":       "created timestamp",
+		},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "list"}); err != nil {
+		t.Fatalf("dns list: %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode records JSON: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v", rows)
+	}
+	if got := cleanString(rows[0]["created"]); got != "2026-06-27T20:13:10Z" {
+		t.Fatalf("created = %q, want timestamp; row = %#v", got, rows[0])
+	}
+	if _, ok := rows[0]["creation_time"]; ok {
+		t.Fatalf("row leaked raw creation_time key: %#v", rows[0])
 	}
 }
 
@@ -1058,6 +1103,27 @@ func TestDNSListSortsRecords(t *testing.T) {
 		t.Fatalf("dns list default sort field: %v\nstdout:\n%s", err, stdout.String())
 	}
 	assertJSONRecordNames(t, stdout.String(), []string{"alpha.example.com", "bravo.example.com", "charlie.example.com"})
+}
+
+func TestDNSListSortsRecordsByCreated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns list should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "new.example.com", "address": "192.0.2.20", "zone": "example.com", "creation_time": "2026-06-27T20:13:10Z"},
+		{"type": "record:a", "name": "old.example.com", "address": "192.0.2.10", "zone": "example.com", "creation_time": "2026-01-01T00:00:00Z"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "--sort", "created"}); err != nil {
+		t.Fatalf("dns list sort created: %v\nstdout:\n%s", err, stdout.String())
+	}
+	assertJSONRecordNames(t, stdout.String(), []string{"old.example.com", "new.example.com"})
 }
 
 func TestDNSListSortsReverseRecordsNumericallyByDefault(t *testing.T) {
@@ -1133,15 +1199,22 @@ func TestDNSListColumnsLimitJSONOutput(t *testing.T) {
 	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
 	profile := mustLoadProfile(t, app)
 	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
-		{"type": "record:a", "name": "app.example.com", "address": "192.0.2.10", "zone": "example.com", "comment": "selected"},
+		{"type": "record:a", "name": "app.example.com", "address": "192.0.2.10", "zone": "example.com", "creation_time": "2026-06-27T20:13:10Z", "comment": "selected"},
 	}, time.Now()); err != nil {
 		t.Fatalf("write record cache: %v", err)
 	}
 
-	if err := app.Execute([]string{"-o", "json", "dns", "list", "--columns", "name,value"}); err != nil {
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "--columns", "name,created"}); err != nil {
 		t.Fatalf("dns list columns: %v\nstdout:\n%s", err, stdout.String())
 	}
-	assertJSONRecordColumns(t, stdout.String(), []string{"name", "value"})
+	assertJSONRecordColumns(t, stdout.String(), []string{"name", "created"})
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode records: %v\n%s", err, stdout.String())
+	}
+	if got := cleanString(rows[0]["created"]); got != "2026-06-27T20:13:10Z" {
+		t.Fatalf("created = %q", got)
+	}
 }
 
 func TestDNSSearchColumnsLimitJSONOutput(t *testing.T) {
@@ -1618,6 +1691,9 @@ func dnsListDetailServer(t *testing.T, allRecordRequests *int, detailRequests *i
 			})
 		case strings.HasSuffix(r.URL.Path, "/allrecords"):
 			*allRecordRequests++
+			if !strings.Contains(r.URL.Query().Get("_return_fields"), "creation_time") {
+				t.Fatalf("allrecords _return_fields missing creation_time: %q", r.URL.Query().Get("_return_fields"))
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{{
 					"type":    "record:a",
@@ -1633,14 +1709,18 @@ func dnsListDetailServer(t *testing.T, allRecordRequests *int, detailRequests *i
 			})
 		case strings.HasSuffix(r.URL.Path, "/record:a/ref"):
 			*detailRequests++
+			if !strings.Contains(r.URL.Query().Get("_return_fields"), "creation_time") {
+				t.Fatalf("detail _return_fields missing creation_time: %q", r.URL.Query().Get("_return_fields"))
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"_ref":     "record:a/ref",
-				"name":     "app.example.com",
-				"ipv4addr": "192.0.2.10",
-				"ttl":      300,
-				"use_ttl":  true,
-				"view":     "default",
-				"zone":     "example.com",
+				"_ref":          "record:a/ref",
+				"name":          "app.example.com",
+				"ipv4addr":      "192.0.2.10",
+				"ttl":           300,
+				"use_ttl":       true,
+				"creation_time": "2026-06-27T20:13:10Z",
+				"view":          "default",
+				"zone":          "example.com",
 			})
 		default:
 			http.NotFound(w, r)

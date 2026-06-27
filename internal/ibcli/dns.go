@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	allRecordsReturnFields = "name,type,view,zone,ttl,comment,address,record"
+	allRecordsReturnFields = "name,type,view,zone,ttl,comment,creation_time,address,record"
 	networkReturnFields    = "network,network_view,comment"
 	zoneReturnFields       = "fqdn,view,zone_format,comment,ns_group,primary_type,soa_serial_number"
 	zoneSerialFields       = zoneReturnFields
@@ -43,7 +43,7 @@ var (
 
 	// recordOutputColumns is the public column contract for dns list/search
 	// across table, JSON, CSV, sorting, and shell completion.
-	recordOutputColumns = []string{"type", "name", "value", "zone", "ttl", "comment"}
+	recordOutputColumns = []string{"type", "name", "value", "zone", "ttl", "created", "comment"}
 	zoneOutputColumns   = []string{"zone", "view", "format", "ns_group", "comment"}
 	nextIPOutputColumns = []string{"network", "network_view", "ip"}
 	zoneFormatTypes     = []string{"FORWARD", "IPV4", "IPV6"}
@@ -65,7 +65,7 @@ var (
 	}
 	defaultRecordTypeColor = lipgloss.Color("#94a3b8")
 
-	recordSortFields = []string{"name", "type", "value", "zone", "ttl", "comment"}
+	recordSortFields = []string{"name", "type", "value", "zone", "ttl", "created", "comment"}
 	zoneSortFields   = []string{"zone", "view", "format", "ns_group", "comment"}
 	lookupIP         = net.LookupIP
 )
@@ -83,51 +83,51 @@ var recordTypes = map[string]RecordSpec{
 		Object:            "record:a",
 		ValueField:        "ipv4addr",
 		SearchValueFields: []string{"ipv4addr"},
-		ReturnFields:      "name,ipv4addr,ttl,use_ttl,view,zone,comment",
+		ReturnFields:      "name,ipv4addr,ttl,use_ttl,view,zone,comment,creation_time",
 	},
 	"aaaa": {
 		Object:            "record:aaaa",
 		ValueField:        "ipv6addr",
 		SearchValueFields: []string{"ipv6addr"},
-		ReturnFields:      "name,ipv6addr,ttl,use_ttl,view,zone,comment",
+		ReturnFields:      "name,ipv6addr,ttl,use_ttl,view,zone,comment,creation_time",
 	},
 	"cname": {
 		Object:            "record:cname",
 		ValueField:        "canonical",
 		SearchValueFields: []string{"canonical"},
-		ReturnFields:      "name,canonical,ttl,use_ttl,view,zone,comment",
+		ReturnFields:      "name,canonical,ttl,use_ttl,view,zone,comment,creation_time",
 	},
 	"txt": {
 		Object:            "record:txt",
 		ValueField:        "text",
 		SearchValueFields: []string{"text"},
-		ReturnFields:      "name,text,ttl,use_ttl,view,zone,comment",
+		ReturnFields:      "name,text,ttl,use_ttl,view,zone,comment,creation_time",
 	},
 	"mx": {
 		Object:            "record:mx",
 		SearchValueFields: []string{"mail_exchanger"},
-		ReturnFields:      "name,mail_exchanger,preference,ttl,use_ttl,view,zone,comment",
+		ReturnFields:      "name,mail_exchanger,preference,ttl,use_ttl,view,zone,comment,creation_time",
 	},
 	"ns": {
 		Object:            "record:ns",
 		ValueField:        "nameserver",
 		SearchValueFields: []string{"nameserver"},
-		ReturnFields:      "name,nameserver,ttl,use_ttl,view,zone,comment",
+		ReturnFields:      "name,nameserver,ttl,use_ttl,view,zone,comment,creation_time",
 	},
 	"srv": {
 		Object:            "record:srv",
 		SearchValueFields: []string{"target"},
-		ReturnFields:      "name,target,priority,weight,port,ttl,use_ttl,view,zone,comment",
+		ReturnFields:      "name,target,priority,weight,port,ttl,use_ttl,view,zone,comment,creation_time",
 	},
 	"host": {
 		Object:            "record:host",
 		SearchValueFields: []string{"ipv4addrs", "ipv6addrs"},
-		ReturnFields:      "name,ipv4addrs,ipv6addrs,ttl,use_ttl,view,zone,comment",
+		ReturnFields:      "name,ipv4addrs,ipv6addrs,ttl,use_ttl,view,zone,comment,creation_time",
 	},
 	"ptr": {
 		Object:            "record:ptr",
 		SearchValueFields: []string{"ptrdname", "ipv4addr", "ipv6addr"},
-		ReturnFields:      "name,ptrdname,ipv4addr,ipv6addr,ttl,use_ttl,view,zone,comment",
+		ReturnFields:      "name,ptrdname,ipv4addr,ipv6addr,ttl,use_ttl,view,zone,comment,creation_time",
 	},
 }
 
@@ -1546,6 +1546,22 @@ func recordTTL(item map[string]any) string {
 	return cleanIntegerString(nestedRecord(item)["ttl"])
 }
 
+func recordCreated(item map[string]any) string {
+	for _, value := range []any{
+		item["creation_time"],
+		nestedRecord(item)["creation_time"],
+		item["created"],
+		nestedRecord(item)["created"],
+		item["created_at"],
+		nestedRecord(item)["created_at"],
+	} {
+		if created := cleanString(value); created != "" {
+			return created
+		}
+	}
+	return ""
+}
+
 func recordUsesDefaultTTL(item map[string]any) bool {
 	if useTTL, ok := boolFromAny(item["use_ttl"]); ok {
 		return !useTTL
@@ -1638,6 +1654,7 @@ func recordOutputRow(recordType string, item map[string]any) map[string]any {
 		"value":   recordValue(recordType, item),
 		"zone":    cleanString(item["zone"]),
 		"ttl":     recordTTL(item),
+		"created": recordCreated(item),
 		"comment": cleanString(item["comment"]),
 	}
 }
@@ -2063,7 +2080,7 @@ func mergeRecordDetail(item map[string]any, detail map[string]any) {
 	item["record"] = nested
 
 	for _, key := range []string{
-		"ttl", "use_ttl", "comment",
+		"ttl", "use_ttl", "comment", "creation_time",
 		"ipv4addr", "ipv6addr", "canonical", "text", "mail_exchanger", "preference",
 		"priority", "weight", "port", "target", "ptrdname", "ipv4addrs", "ipv6addrs",
 	} {
@@ -2637,6 +2654,8 @@ func recordSortValue(record TypedRecord, field string) string {
 		return recordValue(record.Type, record.Item)
 	case "zone":
 		return cleanString(record.Item["zone"])
+	case "created":
+		return recordCreated(record.Item)
 	case "comment":
 		return cleanString(record.Item["comment"])
 	default:

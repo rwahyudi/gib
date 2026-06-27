@@ -784,7 +784,7 @@ ib dns search app --global`),
 }
 
 func addRecordSortFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVarP(target, "sort", "s", "", "sort records by field: name, type, value, zone, ttl, or comment; prefix with - for descending")
+	cmd.Flags().StringVarP(target, "sort", "s", "", "sort records by field: name, type, value, zone, ttl, created, or comment; prefix with - for descending")
 	_ = cmd.RegisterFlagCompletionFunc("sort", recordSortFlagCompletion)
 }
 
