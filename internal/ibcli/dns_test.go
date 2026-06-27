@@ -788,7 +788,7 @@ func TestParseRecordColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse default columns: %v", err)
 	}
-	if got := strings.Join(defaultColumns, ","); got != "type,name,value,zone,ttl,created,comment" {
+	if got := strings.Join(defaultColumns, ","); got != "type,name,value,zone,ttl,comment" {
 		t.Fatalf("default columns = %q", got)
 	}
 
@@ -1323,7 +1323,7 @@ func TestRecordSortRejectsUnsupportedField(t *testing.T) {
 	if err == nil {
 		t.Fatal("dns list accepted unsupported sort field")
 	}
-	for _, want := range []string{`unsupported sort field "owner"`, "name, type, value, zone, ttl, created, comment"} {
+	for _, want := range []string{`unsupported sort field "owner"`, "name, type, value, zone, ttl, comment"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error missing %q: %v", want, err)
 		}

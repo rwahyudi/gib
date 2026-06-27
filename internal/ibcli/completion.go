@@ -252,7 +252,6 @@ var recordSortDescriptions = map[string]string{
 	"value":   "record value",
 	"zone":    "DNS zone",
 	"ttl":     "record TTL",
-	"created": "record creation time",
 	"comment": "record comment",
 }
 
@@ -330,7 +329,6 @@ var recordColumnDescriptions = map[string]string{
 	"value":   "record value",
 	"zone":    "DNS zone",
 	"ttl":     "record TTL",
-	"created": "record creation time",
 	"comment": "record comment",
 }
 
