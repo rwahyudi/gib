@@ -94,20 +94,37 @@ type vlanEntry struct {
 func parseVLANEntry(item any) (vlanEntry, bool) {
 	switch typed := item.(type) {
 	case map[string]any:
-		id := cleanString(typed["vlan"])
-		if id == "" {
-			id = cleanString(typed["id"])
+		rawID := cleanString(typed["vlan"])
+		if rawID == "" {
+			rawID = cleanString(typed["id"])
 		}
 		name := cleanString(typed["name"])
 		parent := cleanString(typed["parent"])
-		if id == "" && name == "" {
+		// When the vlan field is a WAPI ref string like
+		// "vlan/<base64>:Bundoora/VLAN_4/4", extract id, name, and parent
+		// from the ref display path. Explicit name/parent fields on the map
+		// take precedence over the parsed ref values.
+		if refID, refName, refParent, ok := parseVLANRef(rawID); ok {
+			rawID = refID
+			if name == "" {
+				name = refName
+			}
+			if parent == "" {
+				parent = refParent
+			}
+		}
+		if rawID == "" && name == "" {
 			return vlanEntry{}, false
 		}
-		return vlanEntry{ID: normalizeVLANID(id), Name: name, Parent: parent}, true
+		return vlanEntry{ID: normalizeVLANID(rawID), Name: name, Parent: parent}, true
 	case string:
 		text := strings.TrimSpace(typed)
 		if text == "" {
 			return vlanEntry{}, false
+		}
+		// A bare string may be a VLAN ref or a plain VLAN id.
+		if refID, refName, refParent, ok := parseVLANRef(text); ok {
+			return vlanEntry{ID: normalizeVLANID(refID), Name: refName, Parent: refParent}, true
 		}
 		return vlanEntry{ID: normalizeVLANID(text)}, true
 	case float64:
@@ -119,8 +136,45 @@ func parseVLANEntry(item any) (vlanEntry, bool) {
 		if id == "" {
 			return vlanEntry{}, false
 		}
+		// The value may be a VLAN ref string.
+		if refID, refName, refParent, ok := parseVLANRef(id); ok {
+			return vlanEntry{ID: normalizeVLANID(refID), Name: refName, Parent: refParent}, true
+		}
 		return vlanEntry{ID: normalizeVLANID(id)}, true
 	}
+}
+
+// parseVLANRef parses a WAPI VLAN reference string into its id, name, and
+// parent (VLAN view) components. The ref format is:
+//
+//	vlan/<base64>:<vlan_view>/<vlan_name>/<vlan_id>
+//
+// For example "vlan/ZG5z...:Bundoora/VLAN_4/4" yields id="4",
+// name="VLAN_4", parent="Bundoora". Returns ok=false when the string is not a
+// VLAN ref (e.g. a plain integer VLAN id).
+func parseVLANRef(raw string) (id, name, parent string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "vlan/") {
+		return "", "", "", false
+	}
+	// The display path after the colon encodes view/name/id.
+	colon := strings.Index(raw, ":")
+	if colon < 0 || colon == len(raw)-1 {
+		return "", "", "", false
+	}
+	displayPath := raw[colon+1:]
+	segments := strings.Split(displayPath, "/")
+	if len(segments) < 3 {
+		return "", "", "", false
+	}
+	parent = strings.TrimSpace(segments[0])
+	id = strings.TrimSpace(segments[len(segments)-1])
+	// Middle segments form the VLAN name; join in case the name contains "/".
+	name = strings.TrimSpace(strings.Join(segments[1:len(segments)-1], "/"))
+	if id == "" {
+		return "", "", "", false
+	}
+	return id, name, parent, true
 }
 
 func normalizeVLANID(raw string) string {

@@ -26,13 +26,13 @@ func vlanListServer(t *testing.T) *httptest.Server {
 					{
 						"network":      "192.0.2.0/24",
 						"network_view": "default",
-						"vlans":        []map[string]any{{"vlan": 123, "name": "Users", "parent": "VLAN-View-1"}},
+						"vlans":        []map[string]any{{"vlan": "vlan/ZG5zLnZsYW4kLmNvbS5pbmZvYmxveC5kbnMudmxhbl92aWV3JEF1Y3RsYW5kLjEuNDA5NC4xMjM:Actland/VLAN_123/123", "name": "Users"}},
 						"comment":      "Production hosts",
 					},
 					{
 						"network":      "192.0.3.0/24",
 						"network_view": "default",
-						"vlans":        []map[string]any{{"vlan": 122, "name": "Voice", "parent": "VLAN-View-1"}},
+						"vlans":        []map[string]any{{"vlan": "vlan/ZG5zLnZsYW4kLmNvbS5pbmZvYmxveC5kbnMudmxhbl92aWV3JEF1Y3RsYW5kLjEuNDA5NC4xMjI:Actland/VLAN_122/122", "name": "Voice"}},
 						"comment":      "Phones",
 					},
 				},
@@ -43,7 +43,7 @@ func vlanListServer(t *testing.T) *httptest.Server {
 					{
 						"network":      "192.0.0.0/16",
 						"network_view": "default",
-						"vlans":        []map[string]any{{"vlan": 100, "name": "Core", "parent": "VLAN-View-2"}},
+						"vlans":        []map[string]any{{"vlan": "vlan/ZG5zLnZsYW4kLmNvbS5pbmZvYmxveC5kbnMudmxhbl92aWV3JEJ1bmRvb3JhLjEuNDA5NC40:Bundoora/VLAN_4/4", "name": "Core"}},
 						"comment":      "Container",
 					},
 				},
@@ -69,8 +69,8 @@ func TestVLANListIncludesDefaultColumns(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("vlan rows = %#v", rows)
 	}
-	// Sorted by vlan_id: 100 (Core), 122 (Voice), 123 (Users)
-	if got, want := cleanString(rows[0]["vlan_id"]), "100"; got != want {
+	// Sorted by vlan_id: 4 (Core), 122 (Voice), 123 (Users)
+	if got, want := cleanString(rows[0]["vlan_id"]), "4"; got != want {
 		t.Fatalf("rows[0] vlan_id = %q, want %q; row=%#v", got, want, rows[0])
 	}
 	if got, want := cleanString(rows[0]["name"]), "Core"; got != want {
@@ -79,7 +79,7 @@ func TestVLANListIncludesDefaultColumns(t *testing.T) {
 	if got, want := cleanString(rows[0]["networks"]), "192.0.0.0/16"; got != want {
 		t.Fatalf("rows[0] networks = %q, want %q; row=%#v", got, want, rows[0])
 	}
-	if got, want := cleanString(rows[0]["parent"]), "VLAN-View-2"; got != want {
+	if got, want := cleanString(rows[0]["parent"]), "Bundoora"; got != want {
 		t.Fatalf("rows[0] parent = %q, want %q; row=%#v", got, want, rows[0])
 	}
 	if got, want := strings.Join(sortedKeys(rows[0]), ","), "comment,name,networks,parent,vlan_id"; got != want {
@@ -153,7 +153,7 @@ func TestVLANShowByID(t *testing.T) {
 	if got, want := cleanString(row["networks"]), "192.0.2.0/24"; got != want {
 		t.Fatalf("networks = %q, want %q; row=%#v", got, want, row)
 	}
-	if got, want := cleanString(row["parent"]), "VLAN-View-1"; got != want {
+	if got, want := cleanString(row["parent"]), "Actland"; got != want {
 		t.Fatalf("parent = %q, want %q; row=%#v", got, want, row)
 	}
 }
@@ -170,7 +170,7 @@ func TestVLANShowByName(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &row); err != nil {
 		t.Fatalf("decode vlan: %v\n%s", err, stdout.String())
 	}
-	if got, want := cleanString(row["vlan_id"]), "100"; got != want {
+	if got, want := cleanString(row["vlan_id"]), "4"; got != want {
 		t.Fatalf("vlan_id = %q, want %q; row=%#v", got, want, row)
 	}
 }
@@ -289,8 +289,8 @@ func TestVLANColumnsValidation(t *testing.T) {
 
 func TestFlattenVLANFields(t *testing.T) {
 	assigned, name, entries := flattenVLANFields([]any{
-		map[string]any{"vlan": float64(123), "name": "Users", "parent": "VLAN-View-1"},
-		map[string]any{"vlan": float64(456), "name": "Voice", "parent": "VLAN-View-2"},
+		map[string]any{"vlan": "vlan/ZG5zLnZsYW4kLmNvbS5pbmZvYmxveC5kbnMudmxhbl92aWV3JEF1Y3RsYW5kLjEuNDA5NC4xMjM:Actland/VLAN_123/123", "name": "Users"},
+		map[string]any{"vlan": "vlan/ZG5zLnZsYW4kLmNvbS5pbmZvYmxveC5kbnMudmxhbl92aWV3JEF1Y3RsYW5kLjEuNDA5NC40NTY:Actland/VLAN_456/456"},
 	})
 	if assigned != "123" {
 		t.Fatalf("assigned = %q, want 123", assigned)
@@ -301,12 +301,49 @@ func TestFlattenVLANFields(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("entries = %d, want 2", len(entries))
 	}
-	if got, want := entries[0].Parent, "VLAN-View-1"; got != want {
+	if got, want := entries[0].ID, "123"; got != want {
+		t.Fatalf("entries[0] id = %q, want %q", got, want)
+	}
+	if got, want := entries[0].Parent, "Actland"; got != want {
 		t.Fatalf("entries[0] parent = %q, want %q", got, want)
+	}
+	if got, want := entries[1].Name, "VLAN_456"; got != want {
+		t.Fatalf("entries[1] name = %q, want %q (from ref)", got, want)
+	}
+	if got, want := entries[1].ID, "456"; got != want {
+		t.Fatalf("entries[1] id = %q, want %q", got, want)
 	}
 	// empty/nil input
 	assigned2, name2, entries2 := flattenVLANFields(nil)
 	if assigned2 != "" || name2 != "" || len(entries2) != 0 {
 		t.Fatalf("empty flatten = %q %q %d, want empty", assigned2, name2, len(entries2))
+	}
+}
+
+func TestParseVLANRef(t *testing.T) {
+	tests := []struct {
+		raw    string
+		id     string
+		name   string
+		parent string
+		ok     bool
+	}{
+		{"vlan/ZG5zLnZsYW4kLmNvbS5pbmZvYmxveC5kbnMudmxhbl92aWV3JEJ1bmRvb3JhLjEuNDA5NC40:Bundoora/VLAN_4/4", "4", "VLAN_4", "Bundoora", true},
+		{"vlan/ZG5z...:Multi/View/Name/10", "10", "View/Name", "Multi", true},
+		{"vlan/ZG5z...:View/Name/4094", "4094", "Name", "View", true},
+		{"123", "", "", "", false},
+		{"", "", "", "", false},
+		{"network/ZG5z...:foo/bar/1", "", "", "", false},
+		{"vlan/no-colon-here", "", "", "", false},
+		{"vlan/ZG5z...:only-one-segment", "", "", "", false},
+	}
+	for _, tc := range tests {
+		id, name, parent, ok := parseVLANRef(tc.raw)
+		if ok != tc.ok {
+			t.Fatalf("parseVLANRef(%q) ok = %v, want %v", tc.raw, ok, tc.ok)
+		}
+		if id != tc.id || name != tc.name || parent != tc.parent {
+			t.Fatalf("parseVLANRef(%q) = id=%q name=%q parent=%q, want id=%q name=%q parent=%q", tc.raw, id, name, parent, tc.id, tc.name, tc.parent)
+		}
 	}
 }
