@@ -118,6 +118,128 @@ func TestNetListSearchesSortsAndSelectsColumns(t *testing.T) {
 	}
 }
 
+func TestNetListIncludesAssignedVLANColumnsByDefault(t *testing.T) {
+	var networkReturnFields string
+	var containerReturnFields string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			networkReturnFields = r.URL.Query().Get("_return_fields")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{
+						"network":            "192.0.2.0/24",
+						"network_view":       "default",
+						"assigned_vlan":      "123",
+						"assigned_vlan_name": "Users",
+						"comment":            "Production hosts",
+					},
+				},
+			})
+		case networkContainerObject:
+			containerReturnFields = r.URL.Query().Get("_return_fields")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{
+						"network":            "192.0.0.0/16",
+						"network_view":       "default",
+						"assigned_vlan":      "100",
+						"assigned_vlan_name": "Server-Core",
+						"comment":            "Production container",
+					},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default"}); err != nil {
+		t.Fatalf("net list: %v\nstdout:\n%s", err, stdout.String())
+	}
+	for _, fields := range []string{networkReturnFields, containerReturnFields} {
+		if !strings.Contains(fields, "assigned_vlan") || !strings.Contains(fields, "assigned_vlan_name") {
+			t.Fatalf("_return_fields = %q, want assigned VLAN fields", fields)
+		}
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 2 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	if got, want := cleanString(rows[0]["assigned_vlan"]), "100"; got != want {
+		t.Fatalf("container assigned_vlan = %q, want %q; row=%#v", got, want, rows[0])
+	}
+	if got, want := cleanString(rows[0]["assigned_vlan_name"]), "Server-Core"; got != want {
+		t.Fatalf("container assigned_vlan_name = %q, want %q; row=%#v", got, want, rows[0])
+	}
+	if got, want := strings.Join(sortedKeys(rows[0]), ","), "assigned_vlan,assigned_vlan_name,comment,network,type"; got != want {
+		t.Fatalf("default columns = %q, want %q; row=%#v", got, want, rows[0])
+	}
+}
+
+func TestNetSearchMatchesSortsAndSelectsAssignedVLANColumns(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "192.0.2.0/24", "network_view": "default", "assigned_vlan": "123", "assigned_vlan_name": "Users", "comment": "Production hosts"},
+					{"network": "192.0.3.0/24", "network_view": "default", "assigned_vlan": "122", "assigned_vlan_name": "Voice", "comment": "Phones"},
+				},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "192.0.0.0/16", "network_view": "default", "assigned_vlan": "100", "assigned_vlan_name": "Core", "comment": "Container"},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{
+		"-o", "json", "net", "search", "user",
+		"--network-view", "default",
+		"--sort=-assigned_vlan_name",
+		"--columns", "network,assigned_vlan,assigned_vlan_name",
+	}); err != nil {
+		t.Fatalf("net search: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 1 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	if got, want := cleanString(rows[0]["network"]), "192.0.2.0/24"; got != want {
+		t.Fatalf("network = %q, want %q; row=%#v", got, want, rows[0])
+	}
+	if got, want := cleanString(rows[0]["assigned_vlan"]), "123"; got != want {
+		t.Fatalf("assigned_vlan = %q, want %q; row=%#v", got, want, rows[0])
+	}
+	if got, want := cleanString(rows[0]["assigned_vlan_name"]), "Users"; got != want {
+		t.Fatalf("assigned_vlan_name = %q, want %q; row=%#v", got, want, rows[0])
+	}
+	if _, ok := rows[0]["comment"]; ok {
+		t.Fatalf("comment column should not be selected: %#v", rows[0])
+	}
+}
+
 func TestNetListIncludesNetworksAndContainers(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -212,7 +334,7 @@ func TestDefaultNetworkColumnsPutNetworkBeforeType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse default network columns: %v", err)
 	}
-	if got, want := strings.Join(columns, ","), "network,type,comment"; got != want {
+	if got, want := strings.Join(columns, ","), "network,type,assigned_vlan,assigned_vlan_name,comment"; got != want {
 		t.Fatalf("default network columns = %q, want %q", got, want)
 	}
 }
@@ -224,6 +346,28 @@ func TestNetworkColumnsStillAllowNetworkViewWhenSelected(t *testing.T) {
 	}
 	if got, want := strings.Join(columns, ","), "network,type,network_view"; got != want {
 		t.Fatalf("selected network columns = %q, want %q", got, want)
+	}
+}
+
+func TestNetworkColumnsAllowAssignedVLANColumns(t *testing.T) {
+	columns, err := parseNetworkColumns("network,assigned_vlan,assigned_vlan_name")
+	if err != nil {
+		t.Fatalf("parse assigned VLAN network columns: %v", err)
+	}
+	if got, want := strings.Join(columns, ","), "network,assigned_vlan,assigned_vlan_name"; got != want {
+		t.Fatalf("selected network columns = %q, want %q", got, want)
+	}
+}
+
+func TestNetSortAllowsAssignedVLANFields(t *testing.T) {
+	for _, raw := range []string{"assigned_vlan", "-assigned_vlan_name"} {
+		option, err := parseNetSort(raw, true)
+		if err != nil {
+			t.Fatalf("parseNetSort(%q): %v", raw, err)
+		}
+		if !option.Enabled {
+			t.Fatalf("parseNetSort(%q) disabled sort", raw)
+		}
 	}
 }
 

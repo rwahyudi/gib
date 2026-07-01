@@ -588,10 +588,12 @@ func zoneColumnCompletions(toComplete string) []string {
 }
 
 var netSortDescriptions = map[string]string{
-	"type":         "IPAM object type",
-	"network":      "network CIDR",
-	"network_view": "IPAM network view",
-	"comment":      "network comment",
+	"type":               "IPAM object type",
+	"network":            "network CIDR",
+	"network_view":       "IPAM network view",
+	"assigned_vlan":      "assigned VLAN ID",
+	"assigned_vlan_name": "assigned VLAN name",
+	"comment":            "network comment",
 }
 
 func netSortFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -660,10 +662,12 @@ func appendNetSortCompletion(rows *[]string, value string, direction string, pre
 }
 
 var networkColumnDescriptions = map[string]string{
-	"type":         "IPAM object type",
-	"network":      "network CIDR",
-	"network_view": "IPAM network view",
-	"comment":      "network comment",
+	"type":               "IPAM object type",
+	"network":            "network CIDR",
+	"network_view":       "IPAM network view",
+	"assigned_vlan":      "assigned VLAN ID",
+	"assigned_vlan_name": "assigned VLAN name",
+	"comment":            "network comment",
 }
 
 func networkColumnFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

@@ -25,7 +25,7 @@ import (
 
 const (
 	allRecordsReturnFields = "name,type,view,zone,ttl,comment,address,record"
-	networkReturnFields    = "network,network_view,comment"
+	networkReturnFields    = "network,network_view,assigned_vlan,assigned_vlan_name,comment"
 	zoneReturnFields       = "fqdn,view,zone_format,comment,ns_group,primary_type,soa_serial_number"
 	zoneSerialFields       = zoneReturnFields
 	zoneDetailFields       = zoneReturnFields + ",member_soa_mnames,soa_email,soa_expire,soa_negative_ttl,soa_refresh,soa_retry,network_view"

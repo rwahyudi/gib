@@ -220,7 +220,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		return sectionWithRows("IPAM Usage", [][]string{
 			{"views", "ib net view list shows IPAM network views"},
 			{"networks", "ib net list [SEARCH] lists IPv4 networks and containers"},
-			{"search", "ib net search KEYWORD matches type, CIDR, network view, or comment"},
+			{"search", "ib net search KEYWORD matches type, CIDR, view, VLAN, or comment"},
 			{"cidr", "CIDR matches include related parent and child networks or containers in the same view"},
 			{"details", "ib net show NETWORK displays one network or container"},
 			{"address", "ib net address IP displays IPv4 address state"},
@@ -239,22 +239,22 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		})
 	case "ib net list":
 		return sectionWithRows("Network List Usage", [][]string{
-			{"search", "optional positional search matches type, CIDR, network view, or comment"},
+			{"search", "optional positional search matches type, CIDR, view, VLAN, or comment"},
 			{"cidr", "CIDR matches include related parent and child networks or containers in the same view"},
 			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
 			{"cache", "expired cache is shown immediately; --refresh waits for fresh WAPI data"},
 			{"sort", "-s network or --sort=-comment sorts by field; blank --sort uses network"},
-			{"columns", "-C network,type,comment prints selected output columns"},
+			{"columns", "-C network,type,assigned_vlan,comment prints selected output columns"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib net search":
 		return sectionWithRows("Network Search Usage", [][]string{
-			{"keyword", "matches type, CIDR, network view, or comment"},
+			{"keyword", "matches type, CIDR, view, VLAN, or comment"},
 			{"cidr", "CIDR matches include related parent and child networks or containers in the same view"},
 			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
 			{"cache", "expired cache is shown immediately; --refresh waits for fresh WAPI data"},
 			{"sort", "-s network_view or --sort=-network sorts by field"},
-			{"columns", "-C network,type,comment prints selected output columns"},
+			{"columns", "-C network,type,assigned_vlan,comment prints selected output columns"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib net show":

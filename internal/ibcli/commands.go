@@ -804,7 +804,7 @@ func addZoneColumnsFlag(cmd *cobra.Command, target *string) {
 }
 
 func addNetSortFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVarP(target, "sort", "s", "", "sort networks by field: network, type, network_view, or comment; prefix with - for descending")
+	cmd.Flags().StringVarP(target, "sort", "s", "", "sort networks by field: network, type, network_view, assigned_vlan, assigned_vlan_name, or comment; prefix with - for descending")
 	_ = cmd.RegisterFlagCompletionFunc("sort", netSortFlagCompletion)
 }
 

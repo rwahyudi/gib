@@ -95,7 +95,7 @@ nameservers are managed through zone configuration, not this record create path.
 .TP
 .B ib net list prod --network-view default
 List IPv4 networks and containers matching prod in the default IPAM network view.
-Default output shows network, type, and comment columns.
+Default output shows network, type, assigned_vlan, assigned_vlan_name, and comment columns.
 Table output color-codes CIDR size and network/container type values.
 Covered child CIDRs are not synthesized unless Infoblox returns them as objects.
 Existing cache is returned immediately; add --refresh to wait for fresh WAPI data.

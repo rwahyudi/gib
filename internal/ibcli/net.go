@@ -27,12 +27,12 @@ const (
 
 var (
 	networkViewOutputColumns       = []string{"name", "comment"}
-	networkOutputColumns           = []string{"network", "type", "comment"}
-	networkSelectableOutputColumns = []string{"network", "type", "network_view", "comment"}
-	networkDetailOutputColumns     = []string{"network", "type", "network_view", "comment"}
+	networkOutputColumns           = []string{"network", "type", "assigned_vlan", "assigned_vlan_name", "comment"}
+	networkSelectableOutputColumns = []string{"network", "type", "network_view", "assigned_vlan", "assigned_vlan_name", "comment"}
+	networkDetailOutputColumns     = []string{"network", "type", "network_view", "assigned_vlan", "assigned_vlan_name", "comment"}
 	ipv4AddressOutputColumns       = []string{"ip", "network", "container", "network_view", "status", "types", "names", "mac_address", "lease_state", "comment"}
 	netNextIPOutputColumns         = []string{"network", "type", "ip"}
-	netSortFields                  = []string{"network", "type", "network_view", "comment"}
+	netSortFields                  = []string{"network", "type", "network_view", "assigned_vlan", "assigned_vlan_name", "comment"}
 	ipamTypeColors                 = map[string]lipgloss.Color{
 		ipamTypeNetwork:   lipgloss.Color("#22c55e"),
 		ipamTypeContainer: lipgloss.Color("#f59e0b"),
@@ -663,6 +663,8 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 			cleanString(network["type"]),
 			cidr,
 			cleanString(network["network_view"]),
+			cleanString(network["assigned_vlan"]),
+			cleanString(network["assigned_vlan_name"]),
 			cleanString(network["comment"]),
 		}
 		cidrMatches := networkCIDRPrefixHierarchyExpansionEnabled(search) && networkCIDRContainsSearchPrefix(cidr, search)
@@ -767,29 +769,35 @@ func networkObjectRows(networks []map[string]any, containers []map[string]any) [
 
 func networkObjectRow(item map[string]any, itemType string) map[string]any {
 	return map[string]any{
-		"_ref":         cleanString(item["_ref"]),
-		"type":         firstNonEmpty(cleanString(item["type"]), itemType),
-		"network":      cleanString(item["network"]),
-		"network_view": cleanString(item["network_view"]),
-		"comment":      cleanString(item["comment"]),
+		"_ref":               cleanString(item["_ref"]),
+		"type":               firstNonEmpty(cleanString(item["type"]), itemType),
+		"network":            cleanString(item["network"]),
+		"network_view":       cleanString(item["network_view"]),
+		"assigned_vlan":      cleanString(item["assigned_vlan"]),
+		"assigned_vlan_name": cleanString(item["assigned_vlan_name"]),
+		"comment":            cleanString(item["comment"]),
 	}
 }
 
 func networkOutputRow(network map[string]any) map[string]any {
 	return map[string]any{
-		"type":         cleanString(network["type"]),
-		"network":      cleanString(network["network"]),
-		"network_view": cleanString(network["network_view"]),
-		"comment":      cleanString(network["comment"]),
+		"type":               cleanString(network["type"]),
+		"network":            cleanString(network["network"]),
+		"network_view":       cleanString(network["network_view"]),
+		"assigned_vlan":      cleanString(network["assigned_vlan"]),
+		"assigned_vlan_name": cleanString(network["assigned_vlan_name"]),
+		"comment":            cleanString(network["comment"]),
 	}
 }
 
 func networkDetailRow(network map[string]any) map[string]any {
 	return map[string]any{
-		"type":         cleanString(network["type"]),
-		"network":      cleanString(network["network"]),
-		"network_view": cleanString(network["network_view"]),
-		"comment":      cleanString(network["comment"]),
+		"type":               cleanString(network["type"]),
+		"network":            cleanString(network["network"]),
+		"network_view":       cleanString(network["network_view"]),
+		"assigned_vlan":      cleanString(network["assigned_vlan"]),
+		"assigned_vlan_name": cleanString(network["assigned_vlan_name"]),
+		"comment":            cleanString(network["comment"]),
 	}
 }
 
@@ -1021,6 +1029,10 @@ func compareNetworkRows(left map[string]any, right map[string]any, field string,
 		result = compareCaseInsensitiveText(cleanString(left["type"]), cleanString(right["type"]))
 	case "network_view":
 		result = compareCaseInsensitiveText(cleanString(left["network_view"]), cleanString(right["network_view"]))
+	case "assigned_vlan":
+		result = compareCaseInsensitiveText(cleanString(left["assigned_vlan"]), cleanString(right["assigned_vlan"]))
+	case "assigned_vlan_name":
+		result = compareCaseInsensitiveText(cleanString(left["assigned_vlan_name"]), cleanString(right["assigned_vlan_name"]))
 	case "comment":
 		result = compareCaseInsensitiveText(cleanString(left["comment"]), cleanString(right["comment"]))
 	default:

@@ -311,7 +311,7 @@ func TestNetHelpShowsIPAMOptions(t *testing.T) {
 				"omit --network-view to scan all IPAM views, or set it to one view",
 				"expired cache is shown immediately; --refresh waits for fresh WAPI data",
 				"-s network or --sort=-comment sorts by field",
-				"-C network,type,comment prints selected output columns",
+				"-C network,type,assigned_vlan,comment prints selected output columns",
 				"--network-view STRING",
 				"--refresh",
 				"-C, --columns STRING",
