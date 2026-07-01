@@ -185,6 +185,59 @@ func TestNetListIncludesAssignedVLANColumnsByDefault(t *testing.T) {
 	}
 }
 
+func TestNetListFallsBackWhenAssignedVLANFieldsUnsupported(t *testing.T) {
+	networkRequests := 0
+	containerRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			networkRequests++
+			if strings.Contains(r.URL.Query().Get("_return_fields"), "assigned_vlan") {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{"Error": "AdmConProtoError: Unknown argument/field: 'assigned_vlan'"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{"network": "192.0.2.0/24", "network_view": "default", "comment": "Production network"}},
+			})
+		case networkContainerObject:
+			containerRequests++
+			if strings.Contains(r.URL.Query().Get("_return_fields"), "assigned_vlan") {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{"text": "Unknown argument/field: 'assigned_vlan'"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{"network": "192.0.0.0/16", "network_view": "default", "comment": "Production container"}},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default", "--refresh"}); err != nil {
+		t.Fatalf("net list: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if networkRequests != 2 || containerRequests != 2 {
+		t.Fatalf("requests = network:%d container:%d, want 2 each", networkRequests, containerRequests)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 2 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	if _, ok := rows[0]["assigned_vlan"]; !ok {
+		t.Fatalf("fallback row should keep selected assigned_vlan column with empty value: %#v", rows[0])
+	}
+}
+
 func TestNetSearchMatchesSortsAndSelectsAssignedVLANColumns(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

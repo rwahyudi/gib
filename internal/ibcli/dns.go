@@ -24,18 +24,19 @@ import (
 )
 
 const (
-	allRecordsReturnFields = "name,type,view,zone,ttl,comment,address,record"
-	networkReturnFields    = "network,network_view,assigned_vlan,assigned_vlan_name,comment"
-	zoneReturnFields       = "fqdn,view,zone_format,comment,ns_group,primary_type,soa_serial_number"
-	zoneSerialFields       = zoneReturnFields
-	zoneDetailFields       = zoneReturnFields + ",member_soa_mnames,soa_email,soa_expire,soa_negative_ttl,soa_refresh,soa_retry,network_view"
-	viewReturnFields       = "name"
-	dnsSearchWorkerLimit   = defaultDNSSearchWorkerLimit
-	recordValueWrapWidth   = 48
-	recordCommentWrapWidth = 40
-	defaultRecordSortField = "name"
-	defaultZoneSortField   = "zone"
-	nsDelegationAddress    = "255.255.255.255"
+	allRecordsReturnFields  = "name,type,view,zone,ttl,comment,address,record"
+	baseNetworkReturnFields = "network,network_view,comment"
+	networkReturnFields     = baseNetworkReturnFields + ",assigned_vlan,assigned_vlan_name"
+	zoneReturnFields        = "fqdn,view,zone_format,comment,ns_group,primary_type,soa_serial_number"
+	zoneSerialFields        = zoneReturnFields
+	zoneDetailFields        = zoneReturnFields + ",member_soa_mnames,soa_email,soa_expire,soa_negative_ttl,soa_refresh,soa_retry,network_view"
+	viewReturnFields        = "name"
+	dnsSearchWorkerLimit    = defaultDNSSearchWorkerLimit
+	recordValueWrapWidth    = 48
+	recordCommentWrapWidth  = 40
+	defaultRecordSortField  = "name"
+	defaultZoneSortField    = "zone"
+	nsDelegationAddress     = "255.255.255.255"
 )
 
 var (
@@ -679,7 +680,27 @@ func queryNetworks(client *WapiClient, networkView string) ([]map[string]any, er
 	if strings.TrimSpace(networkView) != "" {
 		params.Set("network_view", strings.TrimSpace(networkView))
 	}
-	return pagedQuery(client, networkObject, params)
+	return queryNetworkObjectRows(client, networkObject, params)
+}
+
+func queryNetworkObjectRows(client *WapiClient, objectType string, params url.Values) ([]map[string]any, error) {
+	rows, err := pagedQuery(client, objectType, params)
+	if !isUnsupportedNetworkVLANFieldsError(err) {
+		return rows, err
+	}
+	fallbackParams := cloneValues(params)
+	fallbackParams.Set("_return_fields", baseNetworkReturnFields)
+	return pagedQuery(client, objectType, fallbackParams)
+}
+
+func isUnsupportedNetworkVLANFieldsError(err error) bool {
+	var wapiErr *WapiError
+	if !errors.As(err, &wapiErr) || wapiErr.Status != http.StatusBadRequest {
+		return false
+	}
+	text := strings.ToLower(wapiErr.Text)
+	return strings.Contains(text, "unknown argument/field") &&
+		(strings.Contains(text, "assigned_vlan") || strings.Contains(text, "assigned_vlan_name"))
 }
 
 func findNetworkObject(client *WapiClient, network string, networkView string) (map[string]any, error) {
@@ -687,11 +708,11 @@ func findNetworkObject(client *WapiClient, network string, networkView string) (
 	if err != nil {
 		return nil, err
 	}
-	networks, err := pagedQuery(client, networkObject, networkQueryParams(cidr, networkView))
+	networks, err := queryNetworkObjectRows(client, networkObject, networkQueryParams(cidr, networkView))
 	if err != nil {
 		return nil, err
 	}
-	containers, err := pagedQuery(client, networkContainerObject, networkQueryParams(cidr, networkView))
+	containers, err := queryNetworkObjectRows(client, networkContainerObject, networkQueryParams(cidr, networkView))
 	if err != nil {
 		return nil, err
 	}

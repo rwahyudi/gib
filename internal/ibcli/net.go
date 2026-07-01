@@ -331,7 +331,7 @@ func queryNetworkContainers(client *WapiClient, networkView string) ([]map[strin
 	if strings.TrimSpace(networkView) != "" {
 		params.Set("network_view", strings.TrimSpace(networkView))
 	}
-	return pagedQuery(client, networkContainerObject, params)
+	return queryNetworkObjectRows(client, networkContainerObject, params)
 }
 
 func (a *App) cachedNetworkViews(profile Profile, client *WapiClient) ([]map[string]any, error) {
