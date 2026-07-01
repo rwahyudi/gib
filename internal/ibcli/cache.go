@@ -17,7 +17,7 @@ import (
 
 const (
 	cacheDirName          = "cache.badger"
-	cacheValueLogFileSize = 1 << 20
+	cacheValueLogFileSize = 64 << 20
 	recordRefreshLeaseTTL = 300 * time.Second
 	zoneRefreshLockName   = "<zone-cache>"
 )
@@ -55,6 +55,7 @@ type cacheStatusStatistics struct {
 	NetworkEntries     int `json:"network_entries"`
 	ContainerEntries   int `json:"container_entries"`
 	IPv4AddressEntries int `json:"ipv4_address_entries"`
+	VLANEntries        int `json:"vlan_entries"`
 	CachedRecords      int `json:"cached_records"`
 	FreshEntries       int `json:"fresh_entries"`
 	SWRStaleEntries    int `json:"swr_stale_entries"`
@@ -317,6 +318,32 @@ func (a *App) writeCachedZones(profile Profile, rows []map[string]any, now time.
 		a.debugEvent("cache zones write", df("profile", profileName), df("view", view), df("rows", len(rows)), df("duration", time.Since(started)))
 	}
 	return err
+}
+
+func (a *App) readCachedVLANs(profile Profile, networkView string) (cachedPayload, error) {
+	profileName := cacheProfileName(profile)
+	networkView = strings.TrimSpace(networkView)
+	entry, found, err := a.readBadgerCacheEntry(cacheEntryKey("vlans", profileName, networkView))
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	if !found {
+		return cachedPayload{}, nil
+	}
+	return cachedPayloadFromBadger(entry), nil
+}
+
+func (a *App) writeCachedVLANs(profile Profile, networkView string, rows []map[string]any, now time.Time) error {
+	profileName := cacheProfileName(profile)
+	networkView = strings.TrimSpace(networkView)
+	return a.writeBadgerCacheEntry(cacheEntryKey("vlans", profileName, networkView), badgerCacheEntry{
+		Kind:           vlanCacheKind,
+		Profile:        profileName,
+		NetworkView:    networkView,
+		CachedAt:       now.Unix(),
+		StaleExpiresAt: now.Add(a.recordsCacheSWRTTL()).Unix(),
+		Rows:           rows,
+	})
 }
 
 func (a *App) readCachedNetworkViews(profile Profile) (cachedPayload, error) {
@@ -658,6 +685,7 @@ func (a *App) clearProfileCache(profileName string) error {
 		"network_containers",
 		"ipv4_addresses",
 		"net_refresh_locks",
+		"vlans",
 	} {
 		if err := deleteBadgerPrefix(db, badgerKey(prefix, profileName)); err != nil {
 			return err
@@ -945,7 +973,7 @@ func (a *App) cacheStatusSnapshot() (cacheStatusSnapshot, error) {
 	now := nowTime.Unix()
 	snapshot := cacheStatusSnapshot{Entries: []map[string]any{}}
 	if err := db.View(func(txn *badger.Txn) error {
-		for _, kind := range []string{"zones", "records", "network_views", "networks", "network_containers", "ipv4_addresses"} {
+		for _, kind := range []string{"zones", "records", "network_views", "networks", "network_containers", "ipv4_addresses", "vlans"} {
 			options := badger.DefaultIteratorOptions
 			options.PrefetchValues = true
 			iterator := txn.NewIterator(options)
@@ -1076,6 +1104,8 @@ func (s *cacheStatusStatistics) addEntry(kind string, itemCount int, staleExpire
 		s.ContainerEntries++
 	case "ipv4_addresses":
 		s.IPv4AddressEntries++
+	case "vlans":
+		s.VLANEntries++
 	}
 	if nowUnix < freshUntil {
 		s.FreshEntries++
@@ -1117,6 +1147,7 @@ func renderCacheStatusStatistics(stats cacheStatusStatistics) string {
 		renderCacheStatusBadge(cacheStatsEntryStyle, "Networks", stats.NetworkEntries),
 		renderCacheStatusBadge(cacheStatsEntryStyle, "Containers", stats.ContainerEntries),
 		renderCacheStatusBadge(cacheStatsEntryStyle, "IPv4 addresses", stats.IPv4AddressEntries),
+		renderCacheStatusBadge(cacheStatsEntryStyle, "VLANs", stats.VLANEntries),
 		renderCacheStatusBadge(cacheStatsFreshStyle, "Fresh", stats.FreshEntries),
 		renderCacheStatusBadge(cacheStatsStaleStyle, "SWR stale", stats.SWRStaleEntries),
 		renderCacheStatusBadge(cacheStatsExpiredStyle, "Expired", stats.ExpiredEntries),

@@ -21,6 +21,11 @@ Manage DNS views, zones, records, and searches.
 .B ib net
 Manage IPAM network views, IPv4 networks and containers, address details, and
 next available IP lookups.
+.TP
+.B ib vlan
+List, search, inspect, and select VLANs derived from the vlans array on IPAM
+networks and containers. Create, edit, and delete are unsupported on stock NIOS
+WAPI because VLANs are managed via network device discovery.
 .SH OPTIONS
 .TP
 .B \-v, \-\-version
@@ -111,6 +116,15 @@ Show IPAM address details for 192.0.2.10.
 .TP
 .B ib net next-ip 192.0.2.0/24 -n 3
 Find available IPv4 addresses in a network or container.
+.TP
+.B ib vlan list --network-view default
+List VLANs derived from the vlans array on IPAM networks and containers.
+.TP
+.B ib vlan show 123
+Show VLAN 123 and the networks assigned to it.
+.TP
+.B ib vlan search Users
+Search VLANs by id, name, network view, network, or comment.
 .SH FILES
 .TP
 .I ~/.ib/config
@@ -160,6 +174,12 @@ Print legacy per-zone DNS search cache sources to stderr. Prefer
 .B \-\-debug
 for broader command, WAPI, and cache timing diagnostics. Sources include fresh
 cache, stale cache, serial-valid cache, and allrecords.
+.TP
+.B IB_VLAN
+Optional explicit active VLAN override for future consuming commands.
+.B ib vlan use VLAN
+writes a PID-scoped session file instead; this variable is reserved for
+programmatic shell overrides.
 .SH SEE ALSO
 .B ib --help
 and

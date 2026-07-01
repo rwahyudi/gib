@@ -639,6 +639,8 @@ func (a *App) runNetCacheRefresh(profileName string, kind string, networkView st
 			break
 		}
 		_, err = a.refreshIPv4AddressCache(profile, client, ip, networkView)
+	case vlanCacheKind:
+		_, err = a.refreshVLANCache(profile, client, networkView)
 	default:
 		err = cliError("unsupported net cache refresh kind %q", kind)
 	}
@@ -768,13 +770,14 @@ func networkObjectRows(networks []map[string]any, containers []map[string]any) [
 }
 
 func networkObjectRow(item map[string]any, itemType string) map[string]any {
+	assignedVLAN, assignedVLANName, _ := flattenVLANFields(item["vlans"])
 	return map[string]any{
 		"_ref":               cleanString(item["_ref"]),
 		"type":               firstNonEmpty(cleanString(item["type"]), itemType),
 		"network":            cleanString(item["network"]),
 		"network_view":       cleanString(item["network_view"]),
-		"assigned_vlan":      cleanString(item["assigned_vlan"]),
-		"assigned_vlan_name": cleanString(item["assigned_vlan_name"]),
+		"assigned_vlan":      assignedVLAN,
+		"assigned_vlan_name": assignedVLANName,
 		"comment":            cleanString(item["comment"]),
 	}
 }

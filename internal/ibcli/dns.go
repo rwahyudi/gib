@@ -26,17 +26,21 @@ import (
 const (
 	allRecordsReturnFields  = "name,type,view,zone,ttl,comment,address,record"
 	baseNetworkReturnFields = "network,network_view,comment"
-	networkReturnFields     = baseNetworkReturnFields + ",assigned_vlan,assigned_vlan_name"
-	zoneReturnFields        = "fqdn,view,zone_format,comment,ns_group,primary_type,soa_serial_number"
-	zoneSerialFields        = zoneReturnFields
-	zoneDetailFields        = zoneReturnFields + ",member_soa_mnames,soa_email,soa_expire,soa_negative_ttl,soa_refresh,soa_retry,network_view"
-	viewReturnFields        = "name"
-	dnsSearchWorkerLimit    = defaultDNSSearchWorkerLimit
-	recordValueWrapWidth    = 48
-	recordCommentWrapWidth  = 40
-	defaultRecordSortField  = "name"
-	defaultZoneSortField    = "zone"
-	nsDelegationAddress     = "255.255.255.255"
+	// networkReturnFields requests the real WAPI `vlans` array field. Stock NIOS
+	// exposes VLAN metadata on network/networkcontainer rows via `vlans`, not the
+	// flat assigned_vlan/assigned_vlan_name fields that earlier releases assumed.
+	// flattenVLANFields turns the array into the public assigned_vlan columns.
+	networkReturnFields    = baseNetworkReturnFields + ",vlans"
+	zoneReturnFields       = "fqdn,view,zone_format,comment,ns_group,primary_type,soa_serial_number"
+	zoneSerialFields       = zoneReturnFields
+	zoneDetailFields       = zoneReturnFields + ",member_soa_mnames,soa_email,soa_expire,soa_negative_ttl,soa_refresh,soa_retry,network_view"
+	viewReturnFields       = "name"
+	dnsSearchWorkerLimit   = defaultDNSSearchWorkerLimit
+	recordValueWrapWidth   = 48
+	recordCommentWrapWidth = 40
+	defaultRecordSortField = "name"
+	defaultZoneSortField   = "zone"
+	nsDelegationAddress    = "255.255.255.255"
 )
 
 var (
@@ -700,7 +704,7 @@ func isUnsupportedNetworkVLANFieldsError(err error) bool {
 	}
 	text := strings.ToLower(wapiErr.Text)
 	return strings.Contains(text, "unknown argument/field") &&
-		(strings.Contains(text, "assigned_vlan") || strings.Contains(text, "assigned_vlan_name"))
+		(strings.Contains(text, "vlans") || strings.Contains(text, "assigned_vlan") || strings.Contains(text, "assigned_vlan_name"))
 }
 
 func findNetworkObject(client *WapiClient, network string, networkView string) (map[string]any, error) {

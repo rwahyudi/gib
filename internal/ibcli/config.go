@@ -890,6 +890,19 @@ func (a *App) writeSessionView(viewName string) error {
 	return writeSessionValue(sessionFile("active-views", "active-view-session"), payload)
 }
 
+func (a *App) readSessionVLAN(profileName string) string {
+	return readSessionValueFromSessionFiles("active-vlans", "active-vlan-session", "vlan", profileName)
+}
+
+func (a *App) writeSessionVLAN(vlanID, profileName string) error {
+	payload := map[string]any{
+		"vlan":       vlanID,
+		"profile":    profileName,
+		"parent_pid": sessionParentPID(),
+	}
+	return writeSessionValue(sessionFile("active-vlans", "active-vlan-session"), payload)
+}
+
 func readSessionValueFromSessionFiles(kind, prefix, key, profileName string) string {
 	for _, pid := range sessionCandidatePIDs() {
 		if value := readSessionValue(sessionFileForPID(kind, prefix, pid), key, profileName, pid); value != "" {

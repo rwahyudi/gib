@@ -152,7 +152,7 @@ func executableIsGoTestBinary(executable string) bool {
 }
 
 func (a *App) Execute(args []string) error {
-	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeNetSortValue(args) || a.completeZoneListFlagNames(args) {
+	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeNetSortValue(args) || a.completeVLANSortValue(args) || a.completeZoneListFlagNames(args) {
 		return nil
 	}
 	if argsContainDebug(args) {
@@ -227,8 +227,10 @@ Common usage:
 	  ib dns zone use example.com
 	  ib dns list
 	  ib dns search app
-	  ib net list
-	  ib net next-ip 192.0.2.0/24 -n 3
+  ib net list
+  ib net next-ip 192.0.2.0/24 -n 3
+  ib vlan list
+  ib vlan show 123
 	  ib dns create host app 192.0.2.10 -c "Application host"
 	  ib dns create ptr 192.0.2.10 app.example.com
 	  ib dns edit host app 192.0.2.20 -t 300 -c "Application host"
@@ -284,6 +286,7 @@ Common usage:
 	root.AddCommand(a.configCommand())
 	root.AddCommand(a.dnsCommand())
 	root.AddCommand(a.netCommand())
+	root.AddCommand(a.vlanCommand())
 	a.installHelp(root)
 	return root
 }
@@ -365,7 +368,7 @@ func normalizeSortArgs(args []string) []string {
 }
 
 func normalizeSortCompletionArgs(args []string) []string {
-	if len(args) < 4 || (!isRecordListOrSearchArgs(args) && !isZoneListArgs(args) && !isNetListOrSearchArgs(args)) {
+	if len(args) < 4 || (!isRecordListOrSearchArgs(args) && !isZoneListArgs(args) && !isNetListOrSearchArgs(args) && !isVLANListOrSearchArgs(args)) {
 		return args
 	}
 	normalized := append([]string(nil), args...)
@@ -386,6 +389,9 @@ func defaultSortFieldForArgs(args []string) string {
 	if isNetListOrSearchArgs(args) {
 		return defaultNetSortField
 	}
+	if isVLANListOrSearchArgs(args) {
+		return defaultVLANSortField
+	}
 	return defaultRecordSortField
 }
 
@@ -402,6 +408,9 @@ func shouldConsumeSortValue(args []string, value string) bool {
 		if isNetListOrSearchArgs(args) {
 			return isNetSortField(field)
 		}
+		if isVLANListOrSearchArgs(args) {
+			return isVLANSortField(field)
+		}
 		return isRecordSortField(field)
 	}
 	return true
@@ -417,6 +426,10 @@ func isZoneListArgs(args []string) bool {
 
 func isNetListOrSearchArgs(args []string) bool {
 	return containsArgSequence(args, []string{"net", "list"}) || containsArgSequence(args, []string{"net", "search"})
+}
+
+func isVLANListOrSearchArgs(args []string) bool {
+	return containsArgSequence(args, []string{"vlan", "list"}) || containsArgSequence(args, []string{"vlan", "search"})
 }
 
 func containsArgSequence(args []string, sequence []string) bool {

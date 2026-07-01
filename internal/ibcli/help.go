@@ -105,6 +105,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		return sectionWithLines("Workflow", []string{
 			"ib config new --default  ->  ib dns zone use example.com  ->  ib dns list",
 			"ib net list  ->  ib net next-ip 192.0.2.0/24 -n 3",
+			"ib vlan list  ->  ib vlan show 123",
 			`ib dns create host app 192.0.2.10 -c "Application host"`,
 		})
 	case "ib config":
@@ -280,6 +281,61 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"exclude", "-e 192.0.2.10 excludes an address from allocation; repeatable"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
+	case "ib vlan":
+		return sectionWithRows("VLAN Usage", [][]string{
+			{"source", "VLANs are derived from the vlans array on IPAM networks and containers"},
+			{"list", "ib vlan list [SEARCH] lists VLANs with assigned networks"},
+			{"search", "ib vlan search KEYWORD matches id, name, network view, network, or comment"},
+			{"details", "ib vlan show VLAN displays one VLAN and its assigned networks"},
+			{"use", "ib vlan use VLAN sets the active VLAN for the current shell session"},
+			{"writes", "create/edit/delete are unsupported on stock NIOS WAPI; VLANs are managed via network device discovery"},
+		})
+	case "ib vlan list":
+		return sectionWithRows("VLAN List Usage", [][]string{
+			{"search", "optional positional search matches id, name, network view, network, or comment"},
+			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
+			{"cache", "expired cache is shown immediately; --refresh waits for fresh WAPI data"},
+			{"sort", "-s vlan_id or --sort=-name sorts by field; blank --sort uses vlan_id"},
+			{"columns", "-C vlan_id,name,networks,comment prints selected output columns"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib vlan search":
+		return sectionWithRows("VLAN Search Usage", [][]string{
+			{"keyword", "matches id, name, network view, network, or comment"},
+			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
+			{"cache", "expired cache is shown immediately; --refresh waits for fresh WAPI data"},
+			{"sort", "-s vlan_id or --sort=-name sorts by field"},
+			{"columns", "-C vlan_id,name,networks,comment prints selected output columns"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib vlan show":
+		return sectionWithRows("VLAN Details Usage", [][]string{
+			{"vlan", "VLAN id or name such as 123 or Users"},
+			{"view", "--network-view chooses the IPAM network view when a VLAN is ambiguous"},
+			{"shows", "vlan id, name, network view, assigned networks, and comment when available"},
+			{"formats", "-o table, -o json, or -o csv"},
+		})
+	case "ib vlan use":
+		return sectionWithRows("Select Active VLAN", [][]string{
+			{"effect", "writes an active VLAN session file for the current shell"},
+			{"scope", "applies to the current shell session and selected profile only"},
+			{"example", "ib vlan use 123"},
+		})
+	case "ib vlan create":
+		return sectionWithRows("Create VLAN Usage", [][]string{
+			{"unsupported", "NIOS WAPI does not support VLAN creation; VLANs are imported from network devices"},
+			{"args", "VLAN_ID NAME with optional --comment and --network-view"},
+		})
+	case "ib vlan edit":
+		return sectionWithRows("Edit VLAN Usage", [][]string{
+			{"unsupported", "NIOS WAPI does not support VLAN edits; VLANs are managed via network device discovery"},
+			{"args", "VLAN with optional --name and --comment"},
+		})
+	case "ib vlan delete":
+		return sectionWithRows("Delete VLAN Usage", [][]string{
+			{"unsupported", "NIOS WAPI does not support VLAN deletion; VLANs are managed via network device discovery"},
+			{"args", "VLAN with optional --network-view"},
+		})
 	case "ib dns zone list":
 		return sectionWithRows("Zone List Usage", [][]string{
 			{"search", "optional positional search matches zone name or comment"},
@@ -401,6 +457,16 @@ func usageDetails(cmd *cobra.Command) string {
 		return strings.Join([]string{
 			sectionWithLines("Example", []string{"ib net search 10.129.0.0/16"}),
 			helpSubtitleStyle.Render(`Use "ib net search -h" for more info.`),
+		}, "\n")
+	case "ib vlan search":
+		return strings.Join([]string{
+			sectionWithLines("Example", []string{"ib vlan search Users", "ib vlan search 123"}),
+			helpSubtitleStyle.Render(`Use "ib vlan search -h" for more info.`),
+		}, "\n")
+	case "ib vlan show":
+		return strings.Join([]string{
+			sectionWithLines("Example", []string{"ib vlan show 123", "ib vlan show Users"}),
+			helpSubtitleStyle.Render(`Use "ib vlan show -h" for more info.`),
 		}, "\n")
 	}
 	return ""

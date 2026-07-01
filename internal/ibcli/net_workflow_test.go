@@ -131,11 +131,12 @@ func TestNetListIncludesAssignedVLANColumnsByDefault(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
 					{
-						"network":            "192.0.2.0/24",
-						"network_view":       "default",
-						"assigned_vlan":      "123",
-						"assigned_vlan_name": "Users",
-						"comment":            "Production hosts",
+						"network":      "192.0.2.0/24",
+						"network_view": "default",
+						"vlans": []map[string]any{
+							{"vlan": 123, "name": "Users"},
+						},
+						"comment": "Production hosts",
 					},
 				},
 			})
@@ -144,11 +145,12 @@ func TestNetListIncludesAssignedVLANColumnsByDefault(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
 					{
-						"network":            "192.0.0.0/16",
-						"network_view":       "default",
-						"assigned_vlan":      "100",
-						"assigned_vlan_name": "Server-Core",
-						"comment":            "Production container",
+						"network":      "192.0.0.0/16",
+						"network_view": "default",
+						"vlans": []map[string]any{
+							{"vlan": 100, "name": "Server-Core"},
+						},
+						"comment": "Production container",
 					},
 				},
 			})
@@ -163,8 +165,8 @@ func TestNetListIncludesAssignedVLANColumnsByDefault(t *testing.T) {
 		t.Fatalf("net list: %v\nstdout:\n%s", err, stdout.String())
 	}
 	for _, fields := range []string{networkReturnFields, containerReturnFields} {
-		if !strings.Contains(fields, "assigned_vlan") || !strings.Contains(fields, "assigned_vlan_name") {
-			t.Fatalf("_return_fields = %q, want assigned VLAN fields", fields)
+		if !strings.Contains(fields, "vlans") {
+			t.Fatalf("_return_fields = %q, want vlans field", fields)
 		}
 	}
 	var rows []map[string]any
@@ -195,9 +197,9 @@ func TestNetListFallsBackWhenAssignedVLANFieldsUnsupported(t *testing.T) {
 		switch trimWAPIPath(r.URL.Path) {
 		case networkObject:
 			networkRequests++
-			if strings.Contains(r.URL.Query().Get("_return_fields"), "assigned_vlan") {
+			if strings.Contains(r.URL.Query().Get("_return_fields"), "vlans") {
 				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]any{"Error": "AdmConProtoError: Unknown argument/field: 'assigned_vlan'"})
+				_ = json.NewEncoder(w).Encode(map[string]any{"Error": "AdmConProtoError: Unknown argument/field: 'vlans'"})
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -205,9 +207,9 @@ func TestNetListFallsBackWhenAssignedVLANFieldsUnsupported(t *testing.T) {
 			})
 		case networkContainerObject:
 			containerRequests++
-			if strings.Contains(r.URL.Query().Get("_return_fields"), "assigned_vlan") {
+			if strings.Contains(r.URL.Query().Get("_return_fields"), "vlans") {
 				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]any{"text": "Unknown argument/field: 'assigned_vlan'"})
+				_ = json.NewEncoder(w).Encode(map[string]any{"text": "Unknown argument/field: 'vlans'"})
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -247,14 +249,14 @@ func TestNetSearchMatchesSortsAndSelectsAssignedVLANColumns(t *testing.T) {
 		case networkObject:
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
-					{"network": "192.0.2.0/24", "network_view": "default", "assigned_vlan": "123", "assigned_vlan_name": "Users", "comment": "Production hosts"},
-					{"network": "192.0.3.0/24", "network_view": "default", "assigned_vlan": "122", "assigned_vlan_name": "Voice", "comment": "Phones"},
+					{"network": "192.0.2.0/24", "network_view": "default", "vlans": []map[string]any{{"vlan": 123, "name": "Users"}}, "comment": "Production hosts"},
+					{"network": "192.0.3.0/24", "network_view": "default", "vlans": []map[string]any{{"vlan": 122, "name": "Voice"}}, "comment": "Phones"},
 				},
 			})
 		case networkContainerObject:
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{
-					{"network": "192.0.0.0/16", "network_view": "default", "assigned_vlan": "100", "assigned_vlan_name": "Core", "comment": "Container"},
+					{"network": "192.0.0.0/16", "network_view": "default", "vlans": []map[string]any{{"vlan": 100, "name": "Core"}}, "comment": "Container"},
 				},
 			})
 		default:

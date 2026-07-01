@@ -160,6 +160,7 @@ ib dns --view "DNS Zone View" search app
 | `config` | Manage profiles, encrypted credentials, completion, and cache. | `ib config new --default` |
 | `dns` | Manage Infoblox DNS views, zones, records, searches, and context overrides. | `ib dns list` |
 | `net` | Manage IPAM network views, IPv4 networks and containers, addresses, and next-IP lookups. | `ib net list` |
+| `vlan` | List, search, inspect, and select VLANs derived from IPAM network/container VLAN metadata. | `ib vlan list` |
 
 ## How It Works
 
@@ -227,6 +228,19 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | `ib net address IP` | Show IPAM details for an IPv4 address, including network, parent container, status, types, names, MAC address, lease state, and comment when available. |
 | `ib net next-ip NETWORK` | Find the next available IPv4 address in a network or container. Use `--network-view` for ambiguous CIDRs, `-n/--num` for multiple addresses, and repeat `-e/--exclude` to skip addresses. |
 
+### VLAN
+
+| Command | Description |
+| --- | --- |
+| `ib vlan` | Show VLAN command help. |
+| `ib vlan list [SEARCH]` | List VLANs derived from the `vlans` array on IPAM networks and containers. Add `--network-view` to filter by IPAM network view, `--refresh` to wait for fresh WAPI data, `-s/--sort FIELD` to sort by `vlan_id`, `name`, `network_view`, `networks`, or `comment`, and `-C/--columns LIST` to print selected columns. |
+| `ib vlan search KEYWORD` | Search VLANs by id, name, network view, network, or comment. Add `--refresh` to wait for fresh WAPI data. |
+| `ib vlan show VLAN` | Show one VLAN (by id or name) and the networks/containers assigned to it. Use `--network-view` when a VLAN id is ambiguous across views. |
+| `ib vlan use VLAN` | Set the active VLAN for the current shell session (mirrors `ib net view use`). |
+| `ib vlan create VLAN_ID NAME` | Unsupported on stock NIOS WAPI; VLANs are managed via network device discovery. Returns a clear error. |
+| `ib vlan edit VLAN` | Unsupported on stock NIOS WAPI. Returns a clear error. |
+| `ib vlan delete VLAN` | Unsupported on stock NIOS WAPI. Returns a clear error. |
+
 Common examples:
 
 ```bash
@@ -241,6 +255,9 @@ ib net view list
 ib net list prod --network-view default
 ib net address 192.0.2.10 --network-view default
 ib net next-ip 192.0.2.0/24 -n 3
+ib vlan list --network-view default
+ib vlan show 123
+ib vlan search Users
 ib dns create host app 192.0.2.10 -c "Application host"
 ib dns create ptr 192.0.2.10 app.example.com
 ib dns create ns child ns1.example.com
@@ -253,11 +270,13 @@ ib dns delete a app
 
 `ib dns zone list` supports the same output control pattern for zones. `--type` filters zone formats `FORWARD`, `IPV4`, or `IPV6`; `--sort` accepts `zone`, `view`, `format`, `ns_group`, or `comment`; and `--columns` selects from the same zone fields. Use `--view` to list zones from another DNS view; `--zone` and `-z` are not accepted by this command.
 
-`ib net list` and `ib net search` are read-only IPAM workflows. Without `--network-view`, they build one merged dataset from unscoped WAPI `network` and `networkcontainer` results plus both object types for each discovered IPAM network view, then de-duplicate by type, CIDR, and network view so every network and container can be displayed. Add `--network-view` to limit the request to one view. Search text matches type, CIDR, network view, assigned VLAN ID, assigned VLAN name, and comment. A CIDR-field match also includes related parent and child networks or containers in the same network view, but list/search only display network or container objects returned by Infoblox or the selected cache; covered child CIDRs are not synthesized. Existing IPAM cache rows are returned immediately even after normal SWR expiry, and table output prints a note when a background refresh is queued; use `--refresh` when the command must wait for fresh WAPI data. Default output prints `network`, `type`, `assigned_vlan`, `assigned_vlan_name`, and `comment`, with the network first and the type second. Table output color-codes the `network` CIDR by prefix size and the `type` column so `NETWORK` and `CONTAINER` rows are visually distinct. Add `-s` or `--sort` to sort by `network`, `type`, `network_view`, `assigned_vlan`, `assigned_vlan_name`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `network`, `type`, `network_view`, `assigned_vlan`, `assigned_vlan_name`, and `comment`.
+`ib net list` and `ib net search` are read-only IPAM workflows. Without `--network-view`, they build one merged dataset from unscoped WAPI `network` and `networkcontainer` results plus both object types for each discovered IPAM network view, then de-duplicate by type, CIDR, and network view so every network and container can be displayed. Add `--network-view` to limit the request to one view. Search text matches type, CIDR, network view, assigned VLAN ID, assigned VLAN name, and comment. The `assigned_vlan` and `assigned_vlan_name` columns are flattened from the real WAPI `vlans` array on each network/container row, so VLANs render even though NIOS has no flat `assigned_vlan` return field. A CIDR-field match also includes related parent and child networks or containers in the same network view, but list/search only display network or container objects returned by Infoblox or the selected cache; covered child CIDRs are not synthesized. Existing IPAM cache rows are returned immediately even after normal SWR expiry, and table output prints a note when a background refresh is queued; use `--refresh` when the command must wait for fresh WAPI data. Default output prints `network`, `type`, `assigned_vlan`, `assigned_vlan_name`, and `comment`, with the network first and the type second. Table output color-codes the `network` CIDR by prefix size and the `type` column so `NETWORK` and `CONTAINER` rows are visually distinct. Add `-s` or `--sort` to sort by `network`, `type`, `network_view`, `assigned_vlan`, `assigned_vlan_name`, or `comment`; a blank `--sort` sorts by network, and a leading minus sorts descending. Add `-C` or `--columns` to select from `network`, `type`, `network_view`, `assigned_vlan`, `assigned_vlan_name`, and `comment`.
 
 `ib net show`, `ib net next-ip`, and the compatibility `ib dns next-ip` path resolve both networks and containers; when the same CIDR exists as both, the container is preferred. `ib net next-ip` can use cached rows for the object lookup, while `ib dns next-ip` performs a live read-only object lookup. Both send the `next_available_ip` function call to the primary server. `ib dns next-ip` remains available for existing scripts, but `ib net next-ip` is the IPAM-oriented command.
 
 All `ib net` table output prints a compact current-context footer with only the active profile and row count. JSON and CSV keep plain row-only values.
+
+`ib vlan list` and `ib vlan search` are read-only VLAN workflows. Stock NIOS WAPI does not expose a top-level VLAN object, so `ib` derives VLAN rows from the `vlans` array on `network` and `networkcontainer` objects, flattening one row per distinct `(vlan_id, network_view)` and collecting the assigned CIDRs. Default output prints `vlan_id`, `name`, `networks`, and `comment`; `network_view` is hidden by default but selectable. Add `--network-view` to scope to one IPAM view, `--refresh` to wait for fresh WAPI data, `-s/--sort` to sort by `vlan_id`, `name`, `network_view`, `networks`, or `comment`, and `-C/--columns` to select columns. `ib vlan show VLAN` accepts a VLAN id or name and lists its assigned networks. `ib vlan use VLAN` writes an active-VLAN session file for the current shell, mirroring `ib net view use`; set `IB_VLAN` to override programmatically. `ib vlan create`, `edit`, and `delete` are provided for ergonomic parity but return a clear error on stock NIOS because VLANs are managed via network device discovery, not WAPI CRUD. VLAN data reuses the IPAM cache plumbing: a `vlans` cache kind holds flattened rows with SWR + background refresh and lease-protected refresh subprocesses, and `ib config cache status` reports VLAN entry counts.
 
 `ib dns delete TYPE NAME` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records of that type match, interactive table mode shows a Huh select list so one record can be chosen.
 

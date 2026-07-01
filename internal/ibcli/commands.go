@@ -264,6 +264,160 @@ func (a *App) netCommand() *cobra.Command {
 	return cmd
 }
 
+func (a *App) vlanCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "vlan",
+		Short: "Manage Infoblox VLANs",
+	}
+	cmd.AddCommand(a.vlanListCommand())
+	cmd.AddCommand(a.vlanSearchCommand())
+	cmd.AddCommand(a.vlanShowCommand())
+	cmd.AddCommand(a.vlanUseCommand())
+	cmd.AddCommand(a.vlanCreateCommand())
+	cmd.AddCommand(a.vlanEditCommand())
+	cmd.AddCommand(a.vlanDeleteCommand())
+	return cmd
+}
+
+func (a *App) vlanListCommand() *cobra.Command {
+	var networkView string
+	var sortRaw string
+	var columnsRaw string
+	var refresh bool
+	cmd := &cobra.Command{
+		Use:               "list [SEARCH]",
+		Short:             "List VLANs derived from IPAM networks and containers",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: zoneListArgCompletion,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			vlanSort, err := parseVLANSort(sortRaw, cmd.Flags().Changed("sort"))
+			if err != nil {
+				return err
+			}
+			columns, err := parseVLANColumns(columnsRaw)
+			if err != nil {
+				return err
+			}
+			search := ""
+			if len(args) > 0 {
+				search = args[0]
+			}
+			return a.runVLANList(search, networkView, vlanSort, columns, refresh)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh VLAN cache before listing")
+	addVLANSortFlag(cmd, &sortRaw)
+	addVLANColumnsFlag(cmd, &columnsRaw)
+	return cmd
+}
+
+func (a *App) vlanSearchCommand() *cobra.Command {
+	var networkView string
+	var sortRaw string
+	var columnsRaw string
+	var refresh bool
+	cmd := &cobra.Command{
+		Use:               "search KEYWORD",
+		Short:             "Search VLANs by id, name, network view, network, or comment",
+		Args:              exactArgsOrUsage(1),
+		ValidArgsFunction: completeFlagsAfterArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			vlanSort, err := parseVLANSort(sortRaw, cmd.Flags().Changed("sort"))
+			if err != nil {
+				return err
+			}
+			columns, err := parseVLANColumns(columnsRaw)
+			if err != nil {
+				return err
+			}
+			return a.runVLANSarch(args[0], networkView, vlanSort, columns, refresh)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh VLAN cache before searching")
+	addVLANSortFlag(cmd, &sortRaw)
+	addVLANColumnsFlag(cmd, &columnsRaw)
+	return cmd
+}
+
+func (a *App) vlanShowCommand() *cobra.Command {
+	var networkView string
+	cmd := &cobra.Command{
+		Use:               "show VLAN",
+		Short:             "Show VLAN details and assigned networks",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.vlanArgCompletion,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runVLANShow(args[0], networkView)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the VLAN lookup")
+	return cmd
+}
+
+func (a *App) vlanUseCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "use VLAN",
+		Short: "Set the active VLAN for this shell session",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runVLANUse(args[0])
+		},
+	}
+	return cmd
+}
+
+func (a *App) vlanCreateCommand() *cobra.Command {
+	var comment string
+	var networkView string
+	cmd := &cobra.Command{
+		Use:   "create VLAN_ID NAME",
+		Short: "Create a VLAN (unsupported on stock NIOS WAPI)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runVLANCreate(args[0], args[1], networkView, comment)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the VLAN")
+	cmd.Flags().StringVarP(&comment, "comment", "c", "", "VLAN comment")
+	return cmd
+}
+
+func (a *App) vlanEditCommand() *cobra.Command {
+	var name string
+	var comment string
+	var networkView string
+	cmd := &cobra.Command{
+		Use:   "edit VLAN",
+		Short: "Edit a VLAN (unsupported on stock NIOS WAPI)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runVLANEdit(args[0], name, comment, networkView)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the VLAN")
+	cmd.Flags().StringVar(&name, "name", "", "new VLAN name")
+	cmd.Flags().StringVarP(&comment, "comment", "c", "", "new VLAN comment")
+	return cmd
+}
+
+func (a *App) vlanDeleteCommand() *cobra.Command {
+	var networkView string
+	var skipConfirm bool
+	cmd := &cobra.Command{
+		Use:   "delete VLAN",
+		Short: "Delete a VLAN (unsupported on stock NIOS WAPI)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runVLANDelete(args[0], networkView)
+		},
+	}
+	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the VLAN")
+	cmd.Flags().BoolVarP(&skipConfirm, "yes", "y", false, "skip delete confirmation prompt")
+	return cmd
+}
+
 func (a *App) netViewCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "view", Short: "Manage IPAM network views"}
 	cmd.AddCommand(&cobra.Command{
@@ -811,6 +965,16 @@ func addNetSortFlag(cmd *cobra.Command, target *string) {
 func addNetworkColumnsFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVarP(target, "columns", "C", "", "network output columns, comma-separated")
 	_ = cmd.RegisterFlagCompletionFunc("columns", networkColumnFlagCompletion)
+}
+
+func addVLANSortFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "sort", "s", "", "sort VLANs by field: vlan_id, name, network_view, networks, or comment; prefix with - for descending")
+	_ = cmd.RegisterFlagCompletionFunc("sort", vlanSortFlagCompletion)
+}
+
+func addVLANColumnsFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "columns", "C", "", "VLAN output columns, comma-separated")
+	_ = cmd.RegisterFlagCompletionFunc("columns", vlanColumnFlagCompletion)
 }
 
 func (a *App) dnsDeleteCommand() *cobra.Command {
