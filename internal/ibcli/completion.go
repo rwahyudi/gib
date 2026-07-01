@@ -716,6 +716,7 @@ func commandZoneFlag(cmd *cobra.Command) string {
 var vlanSortDescriptions = map[string]string{
 	"vlan_id":      "VLAN ID",
 	"name":         "VLAN name",
+	"parent":       "VLAN parent",
 	"network_view": "IPAM network view",
 	"networks":     "assigned networks",
 	"comment":      "VLAN comment",
@@ -724,6 +725,7 @@ var vlanSortDescriptions = map[string]string{
 var vlanColumnDescriptions = map[string]string{
 	"vlan_id":      "VLAN ID",
 	"name":         "VLAN name",
+	"parent":       "VLAN parent",
 	"network_view": "IPAM network view",
 	"networks":     "assigned networks",
 	"comment":      "VLAN comment",

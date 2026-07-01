@@ -22,13 +22,25 @@ const (
 )
 
 var (
-	vlanOutputColumns           = []string{"vlan_id", "name", "networks", "comment"}
-	vlanSelectableOutputColumns = []string{"vlan_id", "name", "network_view", "networks", "comment"}
-	vlanDetailOutputColumns     = []string{"vlan_id", "name", "network_view", "networks", "comment"}
-	vlanSortFields              = []string{"vlan_id", "name", "network_view", "networks", "comment"}
+	vlanOutputColumns           = []string{"vlan_id", "name", "parent", "networks", "comment"}
+	vlanSelectableOutputColumns = []string{"vlan_id", "name", "parent", "network_view", "networks", "comment"}
+	vlanDetailOutputColumns     = []string{"vlan_id", "name", "parent", "network_view", "networks", "comment"}
+	vlanSortFields              = []string{"vlan_id", "name", "parent", "network_view", "networks", "comment"}
 
 	vlanIDColor = lipgloss.Color("#22c55e")
 )
+
+// vlanColumnHeaders maps VLAN field names to display headers. VLAN is always
+// uppercased so "vlan_id" renders as "VLAN ID" rather than the generic
+// titleCaseFields output "Vlan Id".
+var vlanColumnHeaders = map[string]string{
+	"vlan_id":      "VLAN ID",
+	"name":         "VLAN Name",
+	"parent":       "VLAN Parent",
+	"network_view": "Network View",
+	"networks":     "Networks",
+	"comment":      "Comment",
+}
 
 type VLANSort struct {
 	Enabled bool
@@ -74,8 +86,9 @@ func flattenVLANFields(raw any) (assignedVLAN string, assignedVLANName string, e
 }
 
 type vlanEntry struct {
-	ID   string
-	Name string
+	ID     string
+	Name   string
+	Parent string
 }
 
 func parseVLANEntry(item any) (vlanEntry, bool) {
@@ -86,10 +99,11 @@ func parseVLANEntry(item any) (vlanEntry, bool) {
 			id = cleanString(typed["id"])
 		}
 		name := cleanString(typed["name"])
+		parent := cleanString(typed["parent"])
 		if id == "" && name == "" {
 			return vlanEntry{}, false
 		}
-		return vlanEntry{ID: normalizeVLANID(id), Name: name}, true
+		return vlanEntry{ID: normalizeVLANID(id), Name: name, Parent: parent}, true
 	case string:
 		text := strings.TrimSpace(typed)
 		if text == "" {
@@ -131,7 +145,7 @@ func vlanRowsFromNetworkObjects(networks []map[string]any, containers []map[stri
 	ordered := make([]vlanKey, 0)
 	rows := map[vlanKey]*map[string]any{}
 
-	addVLAN := func(id, name, networkView, cidr string) {
+	addVLAN := func(id, name, parent, networkView, cidr string) {
 		id = normalizeVLANID(id)
 		if id == "" {
 			return
@@ -142,11 +156,15 @@ func vlanRowsFromNetworkObjects(networks []map[string]any, containers []map[stri
 			if cleanString((*existing)["name"]) == "" && name != "" {
 				(*existing)["name"] = name
 			}
+			if cleanString((*existing)["parent"]) == "" && parent != "" {
+				(*existing)["parent"] = parent
+			}
 			return
 		}
 		row := map[string]any{
 			"vlan_id":      id,
 			"name":         name,
+			"parent":       parent,
 			"network_view": networkView,
 			"networks":     []string{cidr},
 			"comment":      "",
@@ -160,7 +178,7 @@ func vlanRowsFromNetworkObjects(networks []map[string]any, containers []map[stri
 		cidr := cleanString(item["network"])
 		_, _, entries := flattenVLANFields(item["vlans"])
 		for _, entry := range entries {
-			addVLAN(entry.ID, entry.Name, networkView, cidr)
+			addVLAN(entry.ID, entry.Name, entry.Parent, networkView, cidr)
 		}
 	}
 	for _, container := range containers {
@@ -194,6 +212,7 @@ func vlanOutputRow(vlan map[string]any) map[string]any {
 	return map[string]any{
 		"vlan_id":      cleanString(vlan["vlan_id"]),
 		"name":         cleanString(vlan["name"]),
+		"parent":       cleanString(vlan["parent"]),
 		"network_view": cleanString(vlan["network_view"]),
 		"networks":     joinVLANNetworks(vlan["networks"]),
 		"comment":      cleanString(vlan["comment"]),
@@ -393,6 +412,7 @@ func filterVLANs(vlans []map[string]any, search string) []map[string]any {
 		values := []string{
 			cleanString(vlan["vlan_id"]),
 			cleanString(vlan["name"]),
+			cleanString(vlan["parent"]),
 			cleanString(vlan["network_view"]),
 			joinVLANNetworks(vlan["networks"]),
 			cleanString(vlan["comment"]),
@@ -434,6 +454,8 @@ func compareVLANRows(left map[string]any, right map[string]any, field string, de
 		result = compareVLANID(cleanString(left["vlan_id"]), cleanString(right["vlan_id"]))
 	case "name":
 		result = compareCaseInsensitiveText(cleanString(left["name"]), cleanString(right["name"]))
+	case "parent":
+		result = compareCaseInsensitiveText(cleanString(left["parent"]), cleanString(right["parent"]))
 	case "network_view":
 		result = compareCaseInsensitiveText(cleanString(left["network_view"]), cleanString(right["network_view"]))
 	case "networks":
@@ -544,6 +566,18 @@ func selectVLANOutputColumns(row map[string]any, columns []string) map[string]an
 	return selected
 }
 
+func vlanHeaders(fields []string) []string {
+	headers := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if header, ok := vlanColumnHeaders[field]; ok {
+			headers = append(headers, header)
+			continue
+		}
+		headers = append(headers, titleCaseFields([]string{field})[0])
+	}
+	return headers
+}
+
 func (a *App) emitVLANRows(title string, columns []string, rows []map[string]any) error {
 	displayRows := make([][]string, 0, len(rows))
 	for _, row := range rows {
@@ -553,7 +587,7 @@ func (a *App) emitVLANRows(title string, columns []string, rows []map[string]any
 		}
 		displayRows = append(displayRows, display)
 	}
-	fmt.Fprintln(a.Stdout, renderTable(title, titleCaseFields(columns), displayRows))
+	fmt.Fprintln(a.Stdout, renderTable(title, vlanHeaders(columns), displayRows))
 	a.printVLANTableFooter(len(rows))
 	return nil
 }
@@ -584,7 +618,7 @@ func vlanTableValue(field string, row map[string]any) string {
 }
 
 func vlanDetailTableRows(fields []string, row map[string]any) [][]string {
-	labels := titleCaseFields(fields)
+	labels := vlanHeaders(fields)
 	rows := make([][]string, 0, len(fields))
 	for i, field := range fields {
 		rows = append(rows, []string{labels[i], vlanTableValue(field, row)})

@@ -284,35 +284,35 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib vlan":
 		return sectionWithRows("VLAN Usage", [][]string{
 			{"source", "VLANs are derived from the vlans array on IPAM networks and containers"},
-			{"list", "ib vlan list [SEARCH] lists VLANs with assigned networks"},
-			{"search", "ib vlan search KEYWORD matches id, name, network view, network, or comment"},
+			{"list", "ib vlan list [SEARCH] lists VLANs with parent, name, and assigned networks"},
+			{"search", "ib vlan search KEYWORD matches id, name, parent, network view, network, or comment"},
 			{"details", "ib vlan show VLAN displays one VLAN and its assigned networks"},
 			{"use", "ib vlan use VLAN sets the active VLAN for the current shell session"},
 			{"writes", "create/edit/delete are unsupported on stock NIOS WAPI; VLANs are managed via network device discovery"},
 		})
 	case "ib vlan list":
 		return sectionWithRows("VLAN List Usage", [][]string{
-			{"search", "optional positional search matches id, name, network view, network, or comment"},
+			{"search", "optional positional search matches id, name, parent, network view, network, or comment"},
 			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
 			{"cache", "expired cache is shown immediately; --refresh waits for fresh WAPI data"},
 			{"sort", "-s vlan_id or --sort=-name sorts by field; blank --sort uses vlan_id"},
-			{"columns", "-C vlan_id,name,networks,comment prints selected output columns"},
+			{"columns", "-C vlan_id,name,parent,networks,comment prints selected output columns"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib vlan search":
 		return sectionWithRows("VLAN Search Usage", [][]string{
-			{"keyword", "matches id, name, network view, network, or comment"},
+			{"keyword", "matches id, name, parent, network view, network, or comment"},
 			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
 			{"cache", "expired cache is shown immediately; --refresh waits for fresh WAPI data"},
 			{"sort", "-s vlan_id or --sort=-name sorts by field"},
-			{"columns", "-C vlan_id,name,networks,comment prints selected output columns"},
+			{"columns", "-C vlan_id,name,parent,networks,comment prints selected output columns"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib vlan show":
 		return sectionWithRows("VLAN Details Usage", [][]string{
-			{"vlan", "VLAN id or name such as 123 or Users"},
+			{"vlan", "VLAN id or name such as 4 or VLAN_4"},
 			{"view", "--network-view chooses the IPAM network view when a VLAN is ambiguous"},
-			{"shows", "vlan id, name, network view, assigned networks, and comment when available"},
+			{"shows", "VLAN ID, VLAN name, VLAN parent, network view, assigned networks, and comment when available"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib vlan use":
