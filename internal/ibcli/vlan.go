@@ -167,14 +167,28 @@ func parseVLANRef(raw string) (id, name, parent string, ok bool) {
 	if len(segments) < 3 {
 		return "", "", "", false
 	}
-	parent = strings.TrimSpace(segments[0])
+	parent = normalizeVLANRefSegment(segments[0])
 	id = strings.TrimSpace(segments[len(segments)-1])
 	// Middle segments form the VLAN name; join in case the name contains "/".
-	name = strings.TrimSpace(strings.Join(segments[1:len(segments)-1], "/"))
+	name = normalizeVLANRefSegment(strings.Join(segments[1:len(segments)-1], "/"))
 	if id == "" {
 		return "", "", "", false
 	}
 	return id, name, parent, true
+}
+
+// normalizeVLANRefSegment URL-unescapes a VLAN ref display path segment and
+// trims whitespace. WAPI encodes spaces as %20 in the view and name segments,
+// e.g. "VMC%20Prd" decodes to "VMC Prd".
+func normalizeVLANRefSegment(raw string) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return ""
+	}
+	if unescaped, err := url.PathUnescape(text); err == nil {
+		text = unescaped
+	}
+	return strings.TrimSpace(text)
 }
 
 func normalizeVLANID(raw string) string {
