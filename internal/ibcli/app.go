@@ -66,7 +66,7 @@ var (
 var (
 	// Release tooling overrides these values with ldflags. Source builds keep a
 	// usable version and fall back to the executable timestamp for the build date.
-	Version   = "0.3.7"
+	Version   = "0.4.0"
 	BuildDate = ""
 )
 
