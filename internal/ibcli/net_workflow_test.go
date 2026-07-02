@@ -187,6 +187,138 @@ func TestNetListIncludesAssignedVLANColumnsByDefault(t *testing.T) {
 	}
 }
 
+func TestNetListWithExtAttrsColumn(t *testing.T) {
+	var networkReturnFields string
+	var containerReturnFields string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			networkReturnFields = r.URL.Query().Get("_return_fields")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{
+						"network":      "192.0.2.0/24",
+						"network_view": "default",
+						"extattrs": map[string]any{
+							"Site": map[string]any{"value": "NYC"},
+						},
+						"comment": "Production hosts",
+					},
+				},
+			})
+		case networkContainerObject:
+			containerReturnFields = r.URL.Query().Get("_return_fields")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{
+						"network":      "192.0.0.0/16",
+						"network_view": "default",
+						"extattrs": map[string]any{
+							"Site": map[string]any{"value": "NYC"},
+						},
+						"comment": "Production container",
+					},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default", "--columns", "network,extattrs"}); err != nil {
+		t.Fatalf("net list: %v\nstdout:\n%s", err, stdout.String())
+	}
+	for _, fields := range []string{networkReturnFields, containerReturnFields} {
+		if !strings.Contains(fields, "extattrs") {
+			t.Fatalf("_return_fields = %q, want extattrs field", fields)
+		}
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 2 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	if got, want := cleanString(rows[0]["extattrs"]), "Site=NYC"; got != want {
+		t.Fatalf("container extattrs = %q, want %q; row=%#v", got, want, rows[0])
+	}
+	if got, want := strings.Join(sortedKeys(rows[0]), ","), "extattrs,network"; got != want {
+		t.Fatalf("selected columns = %q, want %q; row=%#v", got, want, rows[0])
+	}
+}
+
+func TestNetListDefaultColumnsExcludeExtAttrs(t *testing.T) {
+	var networkReturnFields string
+	var containerReturnFields string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			networkReturnFields = r.URL.Query().Get("_return_fields")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{
+						"network":      "192.0.2.0/24",
+						"network_view": "default",
+						"extattrs": map[string]any{
+							"Site": map[string]any{"value": "NYC"},
+						},
+						"comment": "Production hosts",
+					},
+				},
+			})
+		case networkContainerObject:
+			containerReturnFields = r.URL.Query().Get("_return_fields")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{
+						"network":      "192.0.0.0/16",
+						"network_view": "default",
+						"extattrs": map[string]any{
+							"Site": map[string]any{"value": "NYC"},
+						},
+						"comment": "Production container",
+					},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "list", "--network-view", "default"}); err != nil {
+		t.Fatalf("net list: %v\nstdout:\n%s", err, stdout.String())
+	}
+	for _, fields := range []string{networkReturnFields, containerReturnFields} {
+		if !strings.Contains(fields, "extattrs") {
+			t.Fatalf("_return_fields = %q, want extattrs field", fields)
+		}
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode networks: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 2 {
+		t.Fatalf("network rows = %#v", rows)
+	}
+	if _, ok := rows[0]["extattrs"]; ok {
+		t.Fatalf("extattrs should not be in default columns: %#v", rows[0])
+	}
+	if got, want := strings.Join(sortedKeys(rows[0]), ","), "assigned_vlan,assigned_vlan_name,comment,network,type"; got != want {
+		t.Fatalf("default columns = %q, want %q; row=%#v", got, want, rows[0])
+	}
+}
+
 func TestNetListFallsBackWhenAssignedVLANFieldsUnsupported(t *testing.T) {
 	networkRequests := 0
 	containerRequests := 0
@@ -1300,6 +1432,64 @@ func TestNetAddressShowsIPv4AddressDetails(t *testing.T) {
 	}
 }
 
+func TestNetAddressWithExtAttrs(t *testing.T) {
+	var gotReturnFields string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case ipv4AddressObject:
+			gotReturnFields = r.URL.Query().Get("_return_fields")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"ip_address":   "192.0.2.10",
+					"network":      "192.0.2.0/24",
+					"network_view": "default",
+					"status":       "USED",
+					"types":        []any{"HOST", "DHCP"},
+					"names":        []any{"app.example.com"},
+					"mac_address":  "00:11:22:33:44:55",
+					"lease_state":  "ACTIVE",
+					"comment":      "Application host",
+					"extattrs": map[string]any{
+						"Owner": map[string]any{"value": "John"},
+					},
+				}},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"network": "192.0.0.0/16", "network_view": "default"},
+					{"network": "192.0.2.0/25", "network_view": "default"},
+				},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "address", "192.0.2.10", "--network-view", "default"}); err != nil {
+		t.Fatalf("net address: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if !strings.Contains(gotReturnFields, "extattrs") {
+		t.Fatalf("_return_fields = %q, want extattrs field", gotReturnFields)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode addresses: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 1 {
+		t.Fatalf("address rows = %#v", rows)
+	}
+	row := rows[0]
+	if got, want := cleanString(row["extattrs"]), "Owner=John"; got != want {
+		t.Fatalf("extattrs = %q, want %q: %#v", got, want, row)
+	}
+}
+
 func TestNetNextIPUsesCachedNetworkLookupButLiveFunction(t *testing.T) {
 	var primaryRequests []string
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1435,4 +1625,352 @@ func TestNetNextIPRoutesLookupToReadAndFunctionToPrimary(t *testing.T) {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
 	assertJSONNextIPRows(t, stdout.String(), []string{"192.0.2.20"}, "192.0.2.0/24", "default")
+}
+
+func TestFlattenExtAttrs(t *testing.T) {
+	// Standard WAPI EA format
+	got := flattenExtAttrs(map[string]any{
+		"Site":  map[string]any{"value": "NYC"},
+		"Owner": map[string]any{"value": "John"},
+	})
+	want := "Owner=John, Site=NYC" // sorted by key
+	if got != want {
+		t.Fatalf("flattenExtAttrs = %q, want %q", got, want)
+	}
+
+	// Nil input
+	if got := flattenExtAttrs(nil); got != "" {
+		t.Fatalf("flattenExtAttrs(nil) = %q, want empty", got)
+	}
+
+	// Empty map
+	if got := flattenExtAttrs(map[string]any{}); got != "" {
+		t.Fatalf("flattenExtAttrs(empty) = %q, want empty", got)
+	}
+
+	// Non-map input
+	if got := flattenExtAttrs("string"); got != "" {
+		t.Fatalf("flattenExtAttrs(string) = %q, want empty", got)
+	}
+
+	// Multi-valued EA
+	got = flattenExtAttrs(map[string]any{
+		"Tags": map[string]any{"value": []any{"a", "b"}},
+	})
+	want = "Tags=a, b"
+	if got != want {
+		t.Fatalf("flattenExtAttrs multi-valued = %q, want %q", got, want)
+	}
+}
+
+func TestExtractExtAttrValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		input any
+		want  string
+	}{
+		{"string value", map[string]any{"value": "NYC"}, "NYC"},
+		{"multi value", map[string]any{"value": []any{"a", "b"}}, "a, b"},
+		{"nil", nil, ""},
+		{"bare string", "bare", "bare"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractExtAttrValue(tt.input); got != tt.want {
+				t.Fatalf("extractExtAttrValue(%v) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtAttrsDetailRows(t *testing.T) {
+	// Two EAs, sorted by key
+	rows := extAttrsDetailRows(map[string]any{
+		"Site":  map[string]any{"value": "NYC"},
+		"Owner": map[string]any{"value": "John"},
+	})
+	want := [][]string{{"Owner", "John"}, {"Site", "NYC"}}
+	if len(rows) != len(want) {
+		t.Fatalf("extAttrsDetailRows len = %d, want %d", len(rows), len(want))
+	}
+	for i, row := range rows {
+		if row[0] != want[i][0] || row[1] != want[i][1] {
+			t.Fatalf("row %d = %v, want %v", i, row, want[i])
+		}
+	}
+
+	// Nil input
+	if rows := extAttrsDetailRows(nil); rows != nil {
+		t.Fatalf("extAttrsDetailRows(nil) = %v, want nil", rows)
+	}
+
+	// Empty map
+	if rows := extAttrsDetailRows(map[string]any{}); rows != nil {
+		t.Fatalf("extAttrsDetailRows(empty) = %v, want nil", rows)
+	}
+}
+
+func TestNetShowTableWithExtAttrs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":         "network/ref",
+					"network":      "192.0.2.0/24",
+					"network_view": "default",
+					"comment":      "Production",
+					"extattrs": map[string]any{
+						"Site":  map[string]any{"value": "NYC"},
+						"Owner": map[string]any{"value": "John"},
+					},
+				}},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	app.Output = tableOutput
+	if err := app.Execute([]string{"net", "show", "192.0.2.0/24", "--network-view", "default"}); err != nil {
+		t.Fatalf("net show: %v\n%s", err, stdout.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"Site", "NYC", "Owner", "John"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("net show table missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestNetShowJSONWithExtAttrs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":         "network/ref",
+					"network":      "192.0.2.0/24",
+					"network_view": "default",
+					"comment":      "Production",
+					"extattrs": map[string]any{
+						"Site":  map[string]any{"value": "NYC"},
+						"Owner": map[string]any{"value": "John"},
+					},
+				}},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "show", "192.0.2.0/24", "--network-view", "default"}); err != nil {
+		t.Fatalf("net show: %v\n%s", err, stdout.String())
+	}
+	var row map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &row); err != nil {
+		t.Fatalf("decode show: %v\n%s", err, stdout.String())
+	}
+	extattrs, ok := row["extattrs"].(map[string]any)
+	if !ok {
+		t.Fatalf("extattrs not a map: %#v", row["extattrs"])
+	}
+	site, ok := extattrs["Site"].(map[string]any)
+	if !ok {
+		t.Fatalf("extattrs.Site not a map: %#v", extattrs["Site"])
+	}
+	if site["value"] != "NYC" {
+		t.Fatalf("extattrs.Site.value = %v, want NYC", site["value"])
+	}
+}
+
+func TestNetShowCSVWithExtAttrs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":         "network/ref",
+					"network":      "192.0.2.0/24",
+					"network_view": "default",
+					"comment":      "Production",
+					"extattrs": map[string]any{
+						"Site":  map[string]any{"value": "NYC"},
+						"Owner": map[string]any{"value": "John"},
+					},
+				}},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "csv", "net", "show", "192.0.2.0/24", "--network-view", "default"}); err != nil {
+		t.Fatalf("net show: %v\n%s", err, stdout.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "extattrs") {
+		t.Fatalf("csv missing extattrs header:\n%s", output)
+	}
+	if !strings.Contains(output, "Owner=John, Site=NYC") {
+		t.Fatalf("csv missing expected extattrs value:\n%s", output)
+	}
+}
+
+func TestNetShowNoExtAttrs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		switch trimWAPIPath(r.URL.Path) {
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":         "network/ref",
+					"network":      "192.0.2.0/24",
+					"network_view": "default",
+					"comment":      "Production",
+				}},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{},
+			})
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	app.Output = tableOutput
+	if err := app.Execute([]string{"net", "show", "192.0.2.0/24", "--network-view", "default"}); err != nil {
+		t.Fatalf("net show: %v\n%s", err, stdout.String())
+	}
+	output := stdout.String()
+	for _, unwanted := range []string{"Site", "NYC", "Owner", "John"} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("net show table should not contain %q when no extattrs present:\n%s", unwanted, output)
+		}
+	}
+}
+
+func TestNetSearchMatchesExtAttrs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch trimWAPIPath(r.URL.Path) {
+		case networkViewObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{
+						"network":      "192.0.2.0/24",
+						"network_view": "default",
+						"comment":      "Production",
+						"extattrs": map[string]any{
+							"Site":  map[string]any{"value": "NYC"},
+							"Owner": map[string]any{"value": "John"},
+						},
+					},
+				},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+
+	// Search for EA value "NYC"
+	if err := app.Execute([]string{"-o", "json", "net", "search", "NYC"}); err != nil {
+		t.Fatalf("net search NYC: %v\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row for NYC search, got %d", len(rows))
+	}
+
+	// Search for EA value "John"
+	stdout.Reset()
+	if err := app.Execute([]string{"-o", "json", "net", "search", "John"}); err != nil {
+		t.Fatalf("net search John: %v\n%s", err, stdout.String())
+	}
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row for John search, got %d", len(rows))
+	}
+}
+
+func TestNetSearchNoEAMatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch trimWAPIPath(r.URL.Path) {
+		case networkViewObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		case networkObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{
+						"network":      "192.0.2.0/24",
+						"network_view": "default",
+						"comment":      "Production",
+						"extattrs": map[string]any{
+							"Site": map[string]any{"value": "NYC"},
+						},
+					},
+				},
+			})
+		case networkContainerObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "net", "search", "Chicago"}); err != nil {
+		t.Fatalf("net search Chicago: %v\n%s", err, stdout.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &rows); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout.String())
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 rows for Chicago search, got %d", len(rows))
+	}
 }

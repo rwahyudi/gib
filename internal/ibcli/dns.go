@@ -25,7 +25,7 @@ import (
 
 const (
 	allRecordsReturnFields  = "name,type,view,zone,ttl,comment,address,record"
-	baseNetworkReturnFields = "network,network_view,comment"
+	baseNetworkReturnFields = "network,network_view,comment,extattrs"
 	// networkReturnFields requests the real WAPI `vlans` array field. Stock NIOS
 	// exposes VLAN metadata on network/networkcontainer rows via `vlans`, not the
 	// flat assigned_vlan/assigned_vlan_name fields that earlier releases assumed.
@@ -704,7 +704,7 @@ func isUnsupportedNetworkVLANFieldsError(err error) bool {
 	}
 	text := strings.ToLower(wapiErr.Text)
 	return strings.Contains(text, "unknown argument/field") &&
-		(strings.Contains(text, "vlans") || strings.Contains(text, "assigned_vlan") || strings.Contains(text, "assigned_vlan_name"))
+		(strings.Contains(text, "vlans") || strings.Contains(text, "assigned_vlan") || strings.Contains(text, "assigned_vlan_name") || strings.Contains(text, "extattrs"))
 }
 
 func findNetworkObject(client *WapiClient, network string, networkView string) (map[string]any, error) {

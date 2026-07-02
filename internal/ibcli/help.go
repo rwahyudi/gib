@@ -240,22 +240,22 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		})
 	case "ib net list":
 		return sectionWithRows("Network List Usage", [][]string{
-			{"search", "optional positional search matches type, CIDR, view, VLAN, or comment"},
+			{"search", "optional positional search matches type, CIDR, view, VLAN, comment, or extensible attributes"},
 			{"cidr", "CIDR matches include related parent and child networks or containers in the same view"},
 			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
 			{"cache", "expired cache is shown immediately; --refresh waits for fresh WAPI data"},
 			{"sort", "-s network or --sort=-comment sorts by field; blank --sort uses network"},
-			{"columns", "-C network,type,assigned_vlan,comment prints selected output columns"},
+			{"columns", "-C network,type,extattrs prints selected columns (extattrs shows Name=Value, ...)"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib net search":
 		return sectionWithRows("Network Search Usage", [][]string{
-			{"keyword", "matches type, CIDR, view, VLAN, or comment"},
+			{"keyword", "matches type, CIDR, view, VLAN, comment, or extensible attributes"},
 			{"cidr", "CIDR matches include related parent and child networks or containers in the same view"},
 			{"view", "omit --network-view to scan all IPAM views, or set it to one view"},
 			{"cache", "expired cache is shown immediately; --refresh waits for fresh WAPI data"},
 			{"sort", "-s network_view or --sort=-network sorts by field"},
-			{"columns", "-C network,type,assigned_vlan,comment prints selected output columns"},
+			{"columns", "-C network,type,extattrs prints selected columns (extattrs shows Name=Value, ...)"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib net show":
@@ -263,13 +263,14 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"network", "IPv4 CIDR such as 192.0.2.0/24"},
 			{"view", "--network-view chooses the IPAM network view when a CIDR is ambiguous"},
 			{"type", "shows whether the object is a network or container"},
+			{"extattrs", "extensible attributes appear as individual field rows"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib net address":
 		return sectionWithRows("Address Details Usage", [][]string{
 			{"ip", "IPv4 address such as 192.0.2.10"},
 			{"view", "--network-view narrows the lookup to one IPAM network view"},
-			{"shows", "network, parent container, status, types, names, MAC, lease state, and comment when available"},
+			{"shows", "network, parent container, status, types, names, MAC, lease state, comment, and extensible attributes when available"},
 			{"formats", "-o table, -o json, or -o csv"},
 		})
 	case "ib net next-ip":

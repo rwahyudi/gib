@@ -1,6 +1,7 @@
 package ibcli
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -15,7 +16,7 @@ import (
 
 const (
 	networkViewReturnFields = "name,comment"
-	ipv4AddressReturnFields = "ip_address,network,network_view,status,types,names,mac_address,lease_state,usage,comment"
+	ipv4AddressReturnFields = "ip_address,network,network_view,status,types,names,mac_address,lease_state,usage,comment,extattrs"
 	defaultNetSortField     = "network"
 	netCacheKindViews       = "network_views"
 	netCacheKindNetworks    = "networks"
@@ -28,9 +29,9 @@ const (
 var (
 	networkViewOutputColumns       = []string{"name", "comment"}
 	networkOutputColumns           = []string{"network", "type", "assigned_vlan", "assigned_vlan_name", "comment"}
-	networkSelectableOutputColumns = []string{"network", "type", "network_view", "assigned_vlan", "assigned_vlan_name", "comment"}
+	networkSelectableOutputColumns = []string{"network", "type", "network_view", "assigned_vlan", "assigned_vlan_name", "comment", "extattrs"}
 	networkDetailOutputColumns     = []string{"network", "type", "network_view", "assigned_vlan", "assigned_vlan_name", "comment"}
-	ipv4AddressOutputColumns       = []string{"ip", "network", "container", "network_view", "status", "types", "names", "mac_address", "lease_state", "comment"}
+	ipv4AddressOutputColumns       = []string{"ip", "network", "container", "network_view", "status", "types", "names", "mac_address", "lease_state", "comment", "extattrs"}
 	netNextIPOutputColumns         = []string{"network", "type", "ip"}
 	netSortFields                  = []string{"network", "type", "network_view", "assigned_vlan", "assigned_vlan_name", "comment"}
 	ipamTypeColors                 = map[string]lipgloss.Color{
@@ -224,12 +225,21 @@ func (a *App) runNetShow(network string, networkView string) error {
 	}
 	row := networkDetailRow(matchedNetwork)
 	title := ipamObjectTitle(row)
+	rawExtAttrs := matchedNetwork["extattrs"]
 	if a.isTableOutput() {
-		fmt.Fprintln(a.Stdout, renderTable(title, []string{"Field", "Value"}, networkDetailTableRows(networkDetailOutputColumns, row)))
+		detailRows := networkDetailTableRows(networkDetailOutputColumns, row)
+		detailRows = append(detailRows, extAttrsDetailRows(rawExtAttrs)...)
+		fmt.Fprintln(a.Stdout, renderTable(title, []string{"Field", "Value"}, detailRows))
 		a.printNetTableFooter(1)
 		return nil
 	}
-	return a.emitObject(title, networkDetailOutputColumns, row)
+	if a.Output == jsonOutput {
+		row["extattrs"] = rawExtAttrs
+		encoder := json.NewEncoder(a.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(row)
+	}
+	return a.emitRows(title, append(append([]string{}, networkDetailOutputColumns...), "extattrs"), []map[string]any{row})
 }
 
 func (a *App) runNetAddress(address string, networkView string) error {
@@ -668,6 +678,7 @@ func filterNetworks(networks []map[string]any, search string) []map[string]any {
 			cleanString(network["assigned_vlan"]),
 			cleanString(network["assigned_vlan_name"]),
 			cleanString(network["comment"]),
+			flattenExtAttrs(network["extattrs"]),
 		}
 		cidrMatches := networkCIDRPrefixHierarchyExpansionEnabled(search) && networkCIDRContainsSearchPrefix(cidr, search)
 		if searchValuesMatch(values, search, false, false) || cidrMatches {
@@ -779,6 +790,7 @@ func networkObjectRow(item map[string]any, itemType string) map[string]any {
 		"assigned_vlan":      assignedVLAN,
 		"assigned_vlan_name": assignedVLANName,
 		"comment":            cleanString(item["comment"]),
+		"extattrs":           item["extattrs"],
 	}
 }
 
@@ -790,6 +802,7 @@ func networkOutputRow(network map[string]any) map[string]any {
 		"assigned_vlan":      cleanString(network["assigned_vlan"]),
 		"assigned_vlan_name": cleanString(network["assigned_vlan_name"]),
 		"comment":            cleanString(network["comment"]),
+		"extattrs":           flattenExtAttrs(network["extattrs"]),
 	}
 }
 
@@ -801,6 +814,7 @@ func networkDetailRow(network map[string]any) map[string]any {
 		"assigned_vlan":      cleanString(network["assigned_vlan"]),
 		"assigned_vlan_name": cleanString(network["assigned_vlan_name"]),
 		"comment":            cleanString(network["comment"]),
+		"extattrs":           flattenExtAttrs(network["extattrs"]),
 	}
 }
 
@@ -932,6 +946,7 @@ func ipv4AddressOutputRow(item map[string]any) map[string]any {
 		"mac_address":  cleanString(item["mac_address"]),
 		"lease_state":  cleanString(item["lease_state"]),
 		"comment":      cleanString(item["comment"]),
+		"extattrs":     flattenExtAttrs(item["extattrs"]),
 	}
 }
 
@@ -1160,4 +1175,53 @@ func stringValues(value any) []string {
 		}
 		return []string{text}
 	}
+}
+
+func flattenExtAttrs(raw any) string {
+	extAttrs, ok := raw.(map[string]any)
+	if !ok || len(extAttrs) == 0 {
+		return ""
+	}
+	keys := sortedKeys(extAttrs)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value := extractExtAttrValue(extAttrs[key])
+		if value != "" {
+			parts = append(parts, key+"="+value)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func extractExtAttrValue(raw any) string {
+	if raw == nil {
+		return ""
+	}
+	if m, ok := raw.(map[string]any); ok {
+		v := m["value"]
+		if s, ok := v.(string); ok {
+			return s
+		}
+		if slice, ok := v.([]any); ok {
+			return strings.Join(stringValues(slice), ", ")
+		}
+		return cleanString(v)
+	}
+	return cleanString(raw)
+}
+
+func extAttrsDetailRows(rawExtAttrs any) [][]string {
+	extAttrs, ok := rawExtAttrs.(map[string]any)
+	if !ok || len(extAttrs) == 0 {
+		return nil
+	}
+	keys := sortedKeys(extAttrs)
+	rows := make([][]string, 0, len(keys))
+	for _, key := range keys {
+		value := extractExtAttrValue(extAttrs[key])
+		if value != "" {
+			rows = append(rows, []string{key, value})
+		}
+	}
+	return rows
 }

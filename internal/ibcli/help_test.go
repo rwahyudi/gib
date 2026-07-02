@@ -311,7 +311,7 @@ func TestNetHelpShowsIPAMOptions(t *testing.T) {
 				"omit --network-view to scan all IPAM views, or set it to one view",
 				"expired cache is shown immediately; --refresh waits for fresh WAPI data",
 				"-s network or --sort=-comment sorts by field",
-				"-C network,type,assigned_vlan,comment prints selected output columns",
+				"-C network,type,extattrs prints selected columns (extattrs shows Name=Value, ...)",
 				"--network-view STRING",
 				"--refresh",
 				"-C, --columns STRING",
@@ -360,6 +360,61 @@ func TestNetHelpShowsIPAMOptions(t *testing.T) {
 		}
 		if strings.Contains(output, "--zone STRING") || strings.Contains(output, "--view STRING") {
 			t.Fatalf("%v help output contains DNS context flags:\n%s", tt.args, output)
+		}
+	}
+}
+
+func TestNetHelpMentionsExtAttrs(t *testing.T) {
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{
+			args: []string{"net", "list", "--help"},
+			want: []string{
+				"Network List Usage",
+				"optional positional search matches type, CIDR, view, VLAN, comment, or extensible attributes",
+				"-C network,type,extattrs prints selected columns (extattrs shows Name=Value, ...)",
+			},
+		},
+		{
+			args: []string{"net", "search", "--help"},
+			want: []string{
+				"Network Search Usage",
+				"matches type, CIDR, view, VLAN, comment, or extensible attributes",
+				"-C network,type,extattrs prints selected columns (extattrs shows Name=Value, ...)",
+			},
+		},
+		{
+			args: []string{"net", "show", "--help"},
+			want: []string{
+				"Network Details Usage",
+				"extensible attributes appear as individual field rows",
+			},
+		},
+		{
+			args: []string{"net", "address", "--help"},
+			want: []string{
+				"Address Details Usage",
+				"network, parent container, status, types, names, MAC, lease state, comment, and extensible attributes when available",
+			},
+		},
+	}
+	for _, tt := range tests {
+		app := testApp(t)
+		var stdout bytes.Buffer
+		app.Stdout = &stdout
+		app.Stderr = &bytes.Buffer{}
+		app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+		if err := app.Execute(tt.args); err != nil {
+			t.Fatalf("%v help: %v", tt.args, err)
+		}
+		output := stdout.String()
+		for _, want := range tt.want {
+			if !strings.Contains(output, want) {
+				t.Fatalf("%v help output missing %q:\n%s", tt.args, want, output)
+			}
 		}
 	}
 }

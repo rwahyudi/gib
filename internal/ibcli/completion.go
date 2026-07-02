@@ -668,6 +668,7 @@ var networkColumnDescriptions = map[string]string{
 	"assigned_vlan":      "assigned VLAN ID",
 	"assigned_vlan_name": "assigned VLAN name",
 	"comment":            "network comment",
+	"extattrs":           "extensible attributes (Name=Value, ...)",
 }
 
 func networkColumnFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

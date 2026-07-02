@@ -112,6 +112,9 @@ Badger keys are grouped by prefixes. `zones` caches authoritative zone list
 payloads per profile and view. `records` stores `/allrecords` payloads per
 profile, view, and zone. `network_views`, `networks`,
 `network_containers`, and `ipv4_addresses` store IPAM read payloads.
+IPAM cache rows include extensible attributes (`extattrs`) when the WAPI returns them.
+Extensible attributes are cached alongside other network, container, and address fields,
+and are available immediately from cache for `net list`, `net search`, `net show`, and `net address` output.
 `record_refresh_locks` and `net_refresh_locks` prevent duplicate background
 refreshes for the same cache scope.
 
