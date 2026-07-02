@@ -182,7 +182,7 @@ func TestNetListIncludesAssignedVLANColumnsByDefault(t *testing.T) {
 	if got, want := cleanString(rows[0]["assigned_vlan_name"]), "Server-Core"; got != want {
 		t.Fatalf("container assigned_vlan_name = %q, want %q; row=%#v", got, want, rows[0])
 	}
-	if got, want := strings.Join(sortedKeys(rows[0]), ","), "assigned_vlan,assigned_vlan_name,comment,network,type"; got != want {
+	if got, want := strings.Join(sortedKeys(rows[0]), ","), "assigned_vlan,assigned_vlan_name,comment,extattrs,network,type"; got != want {
 		t.Fatalf("default columns = %q, want %q; row=%#v", got, want, rows[0])
 	}
 }
@@ -253,7 +253,7 @@ func TestNetListWithExtAttrsColumn(t *testing.T) {
 	}
 }
 
-func TestNetListDefaultColumnsExcludeExtAttrs(t *testing.T) {
+func TestNetListDefaultColumnsIncludeExtAttrs(t *testing.T) {
 	var networkReturnFields string
 	var containerReturnFields string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -311,10 +311,10 @@ func TestNetListDefaultColumnsExcludeExtAttrs(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("network rows = %#v", rows)
 	}
-	if _, ok := rows[0]["extattrs"]; ok {
-		t.Fatalf("extattrs should not be in default columns: %#v", rows[0])
+	if _, ok := rows[0]["extattrs"]; !ok {
+		t.Fatalf("extattrs should be in default columns: %#v", rows[0])
 	}
-	if got, want := strings.Join(sortedKeys(rows[0]), ","), "assigned_vlan,assigned_vlan_name,comment,network,type"; got != want {
+	if got, want := strings.Join(sortedKeys(rows[0]), ","), "assigned_vlan,assigned_vlan_name,comment,extattrs,network,type"; got != want {
 		t.Fatalf("default columns = %q, want %q; row=%#v", got, want, rows[0])
 	}
 }
@@ -521,7 +521,7 @@ func TestDefaultNetworkColumnsPutNetworkBeforeType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse default network columns: %v", err)
 	}
-	if got, want := strings.Join(columns, ","), "network,type,assigned_vlan,assigned_vlan_name,comment"; got != want {
+	if got, want := strings.Join(columns, ","), "network,type,assigned_vlan,assigned_vlan_name,comment,extattrs"; got != want {
 		t.Fatalf("default network columns = %q, want %q", got, want)
 	}
 }
@@ -1972,5 +1972,26 @@ func TestNetSearchNoEAMatch(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("expected 0 rows for Chicago search, got %d", len(rows))
+	}
+}
+
+func TestStyledExtAttrs(t *testing.T) {
+	if got := styledExtAttrs(""); got != "" {
+		t.Fatalf("styledExtAttrs(empty) = %q, want empty", got)
+	}
+
+	got := styledExtAttrs("Site=NYC")
+	if !strings.Contains(got, "Site") || !strings.Contains(got, "NYC") {
+		t.Fatalf("styledExtAttrs(Site=NYC) = %q, missing key or value", got)
+	}
+
+	got = styledExtAttrs("Owner=John, Site=NYC")
+	if !strings.Contains(got, "Owner") || !strings.Contains(got, "John") || !strings.Contains(got, "Site") || !strings.Contains(got, "NYC") {
+		t.Fatalf("styledExtAttrs multi = %q, missing keys or values", got)
+	}
+
+	got = styledExtAttrs("barevalue")
+	if got != "barevalue" {
+		t.Fatalf("styledExtAttrs(barevalue) = %q, want barevalue", got)
 	}
 }

@@ -28,7 +28,7 @@ const (
 
 var (
 	networkViewOutputColumns       = []string{"name", "comment"}
-	networkOutputColumns           = []string{"network", "type", "assigned_vlan", "assigned_vlan_name", "comment"}
+	networkOutputColumns           = []string{"network", "type", "assigned_vlan", "assigned_vlan_name", "comment", "extattrs"}
 	networkSelectableOutputColumns = []string{"network", "type", "network_view", "assigned_vlan", "assigned_vlan_name", "comment", "extattrs"}
 	networkDetailOutputColumns     = []string{"network", "type", "network_view", "assigned_vlan", "assigned_vlan_name", "comment"}
 	ipv4AddressOutputColumns       = []string{"ip", "network", "container", "network_view", "status", "types", "names", "mac_address", "lease_state", "comment", "extattrs"}
@@ -871,6 +871,8 @@ func networkTableValue(field string, row map[string]any) string {
 		return styledNetworkCIDR(stringify(row[field]))
 	case "type":
 		return styledIPAMType(stringify(row[field]))
+	case "extattrs":
+		return styledExtAttrs(stringify(row[field]))
 	default:
 		return stringify(row[field])
 	}
@@ -924,6 +926,25 @@ func styledNetworkCIDR(cidr string) string {
 		return label
 	}
 	return lipgloss.NewStyle().Foreground(color).Render(label)
+}
+
+// styledExtAttrs color-codes the EA keys (Name=) in a flattened extattrs string
+// like "Site=NYC, Owner=John" so keys are visually distinct from values.
+func styledExtAttrs(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#a78bfa"))
+	parts := strings.Split(text, ", ")
+	for i, part := range parts {
+		if eq := strings.Index(part, "="); eq >= 0 {
+			key := part[:eq]
+			value := part[eq+1:]
+			parts[i] = keyStyle.Render(key) + "=" + value
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func ipamObjectTitle(row map[string]any) string {
