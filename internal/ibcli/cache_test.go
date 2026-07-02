@@ -76,7 +76,7 @@ func TestCacheStatusAndClear(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stat vlog file: %v", err)
 		}
-		if info.Size() > 2<<20 {
+		if info.Size() > cacheValueLogFileSize*2 {
 			t.Fatalf("cache clear left large vlog %s at %d bytes", match, info.Size())
 		}
 	}
