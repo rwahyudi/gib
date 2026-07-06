@@ -2576,19 +2576,15 @@ func (a *App) deleteManagedPTRForAddress(profile Profile, client *WapiClient, ad
 	if ptrdname == "" {
 		return "", cliError("old PTR target name is required")
 	}
-	lookupClient := primaryReadClient(client)
-	reverseZone, err := reverseZoneForIP(lookupClient, address)
+	reverseZone, targetMatches, err := managedPTRMatchesForDelete(primaryReadClient(client), address, ptrdname)
 	if err != nil {
 		return "", err
 	}
-	matches, err := ptrMatchesInZone(lookupClient, address, reverseZone)
-	if err != nil {
-		return "", err
-	}
-	var targetMatches []TypedRecord
-	for _, match := range matches {
-		if strings.EqualFold(cleanDNSName(recordValue("ptr", match.Item)), ptrdname) {
-			targetMatches = append(targetMatches, match)
+	if len(targetMatches) == 0 && client.ReadServer != "" && client.ReadServer != client.Server {
+		readReverseZone, readTargetMatches, readErr := managedPTRMatchesForDelete(client, address, ptrdname)
+		if readErr == nil {
+			reverseZone = readReverseZone
+			targetMatches = readTargetMatches
 		}
 	}
 	if len(targetMatches) == 0 {
@@ -2608,6 +2604,24 @@ func (a *App) deleteManagedPTRForAddress(profile Profile, client *WapiClient, ad
 	a.auditDNSPTRSideEffect(profile, client, "delete", address, ptrdname, reverseZone, &targetMatches[0])
 	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 	return reverseZone, nil
+}
+
+func managedPTRMatchesForDelete(client *WapiClient, address netip.Addr, ptrdname string) (string, []TypedRecord, error) {
+	reverseZone, err := reverseZoneForIP(client, address)
+	if err != nil {
+		return "", nil, err
+	}
+	matches, err := ptrMatchesInZone(client, address, reverseZone)
+	if err != nil {
+		return "", nil, err
+	}
+	var targetMatches []TypedRecord
+	for _, match := range matches {
+		if strings.EqualFold(cleanDNSName(recordValue("ptr", match.Item)), ptrdname) {
+			targetMatches = append(targetMatches, match)
+		}
+	}
+	return reverseZone, targetMatches, nil
 }
 
 func primaryReadClient(client *WapiClient) *WapiClient {

@@ -2,6 +2,7 @@ package ibcli
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -471,6 +472,7 @@ func TestDNSEditCNAMEQualifiesShortTarget(t *testing.T) {
 func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	var primaryRequests []string
 	reverseZone := "2.0.192.in-addr.arpa"
+	ptrRef := "record:ptr/" + base64.RawURLEncoding.EncodeToString([]byte("dns.bind_ptr$._default.arpa.in-addr.192.0.2.10.app.example.com")) + ":10.2.0.192.in-addr.arpa/default"
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
 		switch {
@@ -483,17 +485,16 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 				},
 			})
 		case r.Method == http.MethodGet && trimWAPIPath(r.URL.Path) == "record:ptr":
-			if r.URL.Query().Get("ipv4addr") != "192.0.2.10" {
+			switch {
+			case r.URL.Query().Get("ipv4addr") == "192.0.2.10":
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+			case r.URL.Query().Get("name") == "10.2.0.192.in-addr.arpa":
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+			default:
 				t.Fatalf("unexpected PTR lookup query: %s", r.URL.RawQuery)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
-				"_ref":     "record:ptr/ref",
-				"ipv4addr": "192.0.2.10",
-				"ptrdname": "app.example.com",
-				"zone":     reverseZone,
-			}}})
-		case r.Method == http.MethodDelete && trimWAPIPath(r.URL.Path) == "record:ptr/ref":
-			_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "record:ptr/ref"})
+		case r.Method == http.MethodDelete && trimWAPIPath(r.URL.Path) == ptrRef:
+			_ = json.NewEncoder(w).Encode(map[string]any{"_ref": ptrRef})
 		default:
 			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
 		}
@@ -501,7 +502,39 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	defer primary.Close()
 
 	var readRequests []string
-	read := recordLookupServer(t, &readRequests)
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
+		object := trimWAPIPath(r.URL.Path)
+		readRequests = append(readRequests, r.Method+" "+object)
+		switch {
+		case object == "record:a" && r.URL.Query().Get("name") == "app.example.com":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref":     "record:a/ref",
+					"name":     "app.example.com",
+					"ipv4addr": "192.0.2.10",
+					"view":     "default",
+					"zone":     "example.com",
+				}},
+			})
+		case object == zoneObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"fqdn": reverseZone, "view": "default", "zone_format": "IPV4"},
+				},
+			})
+		case object == "record:ptr" && (r.URL.Query().Get("ipv4addr") == "192.0.2.10" || r.URL.Query().Get("name") == "10.2.0.192.in-addr.arpa"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"_ref":     ptrRef,
+				"ptrdname": "app.example.com",
+				"zone":     reverseZone,
+			}}})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		}
+	}))
 	defer read.Close()
 
 	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
@@ -525,11 +558,11 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 
-	if strings.Join(primaryRequests, ",") != "DELETE record:a/ref,GET zone_auth,GET record:ptr,DELETE record:ptr/ref" {
+	if strings.Join(primaryRequests, ",") != "DELETE record:a/ref,GET zone_auth,GET record:ptr,GET record:ptr,DELETE "+ptrRef {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
-	if len(readRequests) == 0 {
-		t.Fatalf("expected record lookup requests on read server")
+	if !containsString(readRequests, "GET record:ptr") {
+		t.Fatalf("expected fallback PTR lookup on read server; requests = %#v", readRequests)
 	}
 	assertRecordCacheInvalidated(t, app, profile, "example.com")
 	assertRecordCacheInvalidated(t, app, profile, reverseZone)

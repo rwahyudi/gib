@@ -96,6 +96,8 @@ During `ib config new` and `ib config edit`, DNS View and Default DNS Zone are o
 
 `ib dns delete a` and `ib dns delete aaaa` remove a matching PTR record from the discovered reverse zone after the forward record delete succeeds. Keep the forward and PTR cleanup paths aligned with create/edit PTR side-effect auditing and reverse-zone cache refreshes.
 
+PTR cleanup after A/AAAA delete probes the primary first, then falls back to the configured read endpoint when the primary does not return a matching PTR. This handles appliances where direct PTR delete can find the reverse record via the read endpoint while an immediate primary lookup after forward delete is empty or missing address fields.
+
 For interactive table output, `ib dns search` uses a Bubble Tea progress view on stderr while the search is running. The view shows the search stage, configured worker count, completed zones, match count, and each worker's current zone/cache source. The final record table is still printed normally on stdout after the progress view exits.
 
 For persistent troubleshooting output, `--debug` disables transient spinner/progress views and prints timestamped command, WAPI, cache, and search timing lines on stderr while leaving stdout reserved for table, JSON, or CSV output. `IB_SEARCH_DEBUG=1` and `IB_CACHE_DEBUG=1` remain as compatibility switches for per-zone search cache source lines.

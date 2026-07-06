@@ -3738,9 +3738,37 @@ func ptrMatchesInZoneByParams(client *WapiClient, address netip.Addr, reverseZon
 		if zone := cleanString(item["zone"]); zone != "" && !reverseZonesEquivalent(zone, reverseZone) {
 			continue
 		}
+		if !ptrRecordMatchesAddress(item, address) {
+			continue
+		}
 		matches = append(matches, TypedRecord{Type: "ptr", Item: item})
 	}
 	return matches, nil
+}
+
+func ptrRecordMatchesAddress(item map[string]any, address netip.Addr) bool {
+	if value := reverseRecordAddress(item); value != "" {
+		return value == address.String()
+	}
+	return ptrRefMatchesAddress(cleanString(item["_ref"]), address)
+}
+
+func ptrRefMatchesAddress(ref string, address netip.Addr) bool {
+	if ref == "" {
+		return false
+	}
+	for _, token := range strings.FieldsFunc(ref, func(r rune) bool {
+		return r == '/' || r == ':' || r == ',' || r == ' ' || r == '	'
+	}) {
+		decoded, ok := decodeReferenceToken(strings.Trim(token, `"'`))
+		if !ok {
+			continue
+		}
+		if strings.Contains(strings.ToLower(decoded), "."+strings.ToLower(address.String())+".") {
+			return true
+		}
+	}
+	return false
 }
 
 func reverseZonesEquivalent(left string, right string) bool {
