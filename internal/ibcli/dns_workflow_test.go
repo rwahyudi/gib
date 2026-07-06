@@ -482,6 +482,18 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 					{"fqdn": reverseZone, "view": "default", "zone_format": "IPV4"},
 				},
 			})
+		case r.Method == http.MethodGet && trimWAPIPath(r.URL.Path) == "record:ptr":
+			if r.URL.Query().Get("ipv4addr") != "192.0.2.10" {
+				t.Fatalf("unexpected PTR lookup query: %s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"_ref":     "record:ptr/ref",
+				"ipv4addr": "192.0.2.10",
+				"ptrdname": "app.example.com",
+				"zone":     reverseZone,
+			}}})
+		case r.Method == http.MethodDelete && trimWAPIPath(r.URL.Path) == "record:ptr/ref":
+			_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "record:ptr/ref"})
 		default:
 			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
 		}
@@ -513,7 +525,7 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 
-	if strings.Join(primaryRequests, ",") != "DELETE record:a/ref" {
+	if strings.Join(primaryRequests, ",") != "DELETE record:a/ref,GET zone_auth,GET record:ptr,DELETE record:ptr/ref" {
 		t.Fatalf("primary requests = %#v", primaryRequests)
 	}
 	if len(readRequests) == 0 {

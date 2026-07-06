@@ -2682,36 +2682,30 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 		}
 		return err
 	}
+	var ptrAddress netip.Addr
+	ptrName := target
+	syncPTR := ptrManagedRecordType(record.Type)
+	if syncPTR {
+		ptrAddress, err = managedPTRAddress(record.Type, nil, record.Item)
+		if err != nil {
+			return err
+		}
+	}
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return err
 	}
 	a.auditDNSRecordDelete(profile, client, record, target)
 	a.queueRecordCacheRefreshAfterWrite(profile, cleanString(record.Item["zone"]))
-	a.queueManagedPTRCacheRefreshAfterDelete(profile, client, record)
+	if syncPTR {
+		if _, err := a.deleteManagedPTRForAddress(profile, client, ptrAddress, ptrName); err != nil {
+			return cliError("deleted %s record %s, but PTR cleanup failed: %v", strings.ToUpper(record.Type), target, err)
+		}
+	}
 	if !a.isTableOutput() {
 		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", strings.ToUpper(record.Type), target, cleanString(record.Item["zone"]), client.View, "deleted DNS record"))
 	}
 	a.PrintSuccess("SUCCESS: deleted " + strings.ToUpper(record.Type) + " record " + target)
 	return nil
-}
-
-func (a *App) queueManagedPTRCacheRefreshAfterDelete(profile Profile, client *WapiClient, record TypedRecord) {
-	if !ptrManagedRecordType(record.Type) {
-		return
-	}
-	// Forward A/AAAA deletes can also make reverse data stale when the matching
-	// PTR is managed outside this request path. Keep the reverse-zone cache on
-	// the same clear-and-refresh path as direct PTR writes, but do not fail the
-	// already-completed delete if the reverse zone cannot be resolved.
-	address, err := managedPTRAddress(record.Type, nil, record.Item)
-	if err != nil {
-		return
-	}
-	reverseZone, err := a.reverseZoneForIPForCacheRefresh(profile, primaryReadClient(client), address)
-	if err != nil {
-		return
-	}
-	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
 }
 
 func (a *App) selectDuplicateDeleteRecord(target string, matches []TypedRecord) (TypedRecord, error) {

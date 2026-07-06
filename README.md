@@ -207,7 +207,7 @@ behavior, see [Performance & Caching](docs/performance-caching.md).
 | `ib dns next-ip NETWORK` | Compatibility path for next available IPv4 address lookup against a network or container. Prefer `ib net next-ip NETWORK` for IPAM work. |
 | `ib dns create TYPE NAME VALUE` | Create a DNS record, for example `ib dns create host app 192.0.2.10 -c "Application host"`. For PTR, use `ib dns create ptr IP_ADDRESS PTR_TARGET`; the reverse zone is auto-detected unless `--zone` is supplied. For NS, use `ib dns create ns CHILD_ZONE NS_HOST` to create an Infoblox delegated zone with delegate address `255.255.255.255`. |
 | `ib dns edit TYPE NAME [VALUE]` | Edit an existing DNS record. |
-| `ib dns delete TYPE NAME [ZONE]` | Delete a DNS record; prompts for confirmation unless `-y` is used. |
+| `ib dns delete TYPE NAME [ZONE]` | Delete a DNS record; A/AAAA deletes also remove the matching PTR record when present. Prompts for confirmation unless `-y` is used. |
 | `ib dns view list` | List DNS views. |
 | `ib dns view use VIEW` | Set the active DNS view for the current shell session. |
 | `ib dns zone create ZONE` | Create an authoritative DNS zone. |
@@ -278,7 +278,7 @@ All `ib net` table output prints a compact current-context footer with only the 
 
 `ib vlan list` and `ib vlan search` are read-only VLAN workflows. Stock NIOS WAPI does not expose a top-level VLAN object, so `ib` derives VLAN rows from the `vlans` array on `network` and `networkcontainer` objects, flattening one row per distinct `(vlan_id, network_view)` and collecting the assigned CIDRs. Each VLAN entry's `parent` (the VLAN view/group it belongs to) is included as a column. Default output prints `vlan_id`, `name`, `parent`, `networks`, and `comment`; `network_view` is hidden by default but selectable. Add `--network-view` to scope to one IPAM view, `--refresh` to wait for fresh WAPI data, `-s/--sort` to sort by `vlan_id`, `name`, `parent`, `network_view`, `networks`, or `comment`, and `-C/--columns` to select columns. `ib vlan show VLAN` accepts a VLAN id or name and lists its assigned networks. `ib vlan use VLAN` writes an active-VLAN session file for the current shell, mirroring `ib net view use`; set `IB_VLAN` to override programmatically. `ib vlan create`, `edit`, and `delete` are provided for ergonomic parity but return a clear error on stock NIOS because VLANs are managed via network device discovery, not WAPI CRUD. VLAN data reuses the IPAM cache plumbing: a `vlans` cache kind holds flattened rows with SWR + background refresh and lease-protected refresh subprocesses, and `ib config cache status` reports VLAN entry counts.
 
-`ib dns delete TYPE NAME` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. If multiple records of that type match, interactive table mode shows a Huh select list so one record can be chosen.
+`ib dns delete TYPE NAME` prompts before deleting. Use `-y` or `--yes` to skip the confirmation. Deleting an A/AAAA record also removes the matching PTR record in the discovered reverse zone when present. If multiple records of that type match, interactive table mode shows a Huh select list so one record can be chosen.
 
 #### Output Controls
 
