@@ -2486,6 +2486,50 @@ func ptrManagedRecordType(recordType string) bool {
 	}
 }
 
+func ptrDeleteManagedRecordType(recordType string) bool {
+	switch strings.ToLower(recordType) {
+	case "a", "aaaa", "host":
+		return true
+	default:
+		return false
+	}
+}
+
+func managedPTRAddresses(recordType string, value *string, item map[string]any) ([]netip.Addr, error) {
+	if value != nil {
+		address, err := managedPTRAddressFromValue(recordType, *value)
+		if err != nil {
+			return nil, err
+		}
+		return []netip.Addr{address}, nil
+	}
+	if strings.ToLower(recordType) != "host" {
+		address, err := managedPTRAddress(recordType, nil, item)
+		if err != nil {
+			return nil, err
+		}
+		return []netip.Addr{address}, nil
+	}
+
+	var addresses []netip.Addr
+	seen := map[netip.Addr]bool{}
+	for _, key := range []string{"ipv4addrs", "ipv6addrs"} {
+		for _, nested := range mapSliceFromAny(item[key]) {
+			for _, nestedKey := range []string{"ipv4addr", "ipv6addr"} {
+				address, err := netip.ParseAddr(cleanString(nested[nestedKey]))
+				if err == nil && !seen[address] {
+					seen[address] = true
+					addresses = append(addresses, address)
+				}
+			}
+		}
+	}
+	if len(addresses) == 0 {
+		return nil, cliError("HOST record does not include an IP address before PTR can be managed")
+	}
+	return addresses, nil
+}
+
 func managedPTRAddress(recordType string, value *string, item map[string]any) (netip.Addr, error) {
 	if value != nil {
 		return managedPTRAddressFromValue(recordType, *value)
@@ -2696,11 +2740,11 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 		}
 		return err
 	}
-	var ptrAddress netip.Addr
+	var ptrAddresses []netip.Addr
 	ptrName := target
-	syncPTR := ptrManagedRecordType(record.Type)
+	syncPTR := ptrDeleteManagedRecordType(record.Type)
 	if syncPTR {
-		ptrAddress, err = managedPTRAddress(record.Type, nil, record.Item)
+		ptrAddresses, err = managedPTRAddresses(record.Type, nil, record.Item)
 		if err != nil {
 			return err
 		}
@@ -2711,8 +2755,10 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 	a.auditDNSRecordDelete(profile, client, record, target)
 	a.queueRecordCacheRefreshAfterWrite(profile, cleanString(record.Item["zone"]))
 	if syncPTR {
-		if _, err := a.deleteManagedPTRForAddress(profile, client, ptrAddress, ptrName); err != nil {
-			return cliError("deleted %s record %s, but PTR cleanup failed: %v", strings.ToUpper(record.Type), target, err)
+		for _, ptrAddress := range ptrAddresses {
+			if _, err := a.deleteManagedPTRForAddress(profile, client, ptrAddress, ptrName); err != nil {
+				return cliError("deleted %s record %s, but PTR cleanup failed: %v", strings.ToUpper(record.Type), target, err)
+			}
 		}
 	}
 	if !a.isTableOutput() {

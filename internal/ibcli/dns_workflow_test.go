@@ -570,6 +570,90 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 	assertRecordRefreshQueued(t, refreshes, reverseZone)
 }
 
+func TestDNSDeleteHostDeletesRelatedPTRAndRefreshesReverseCache(t *testing.T) {
+	var primaryRequests []string
+	reverseZone := "2.0.192.in-addr.arpa"
+	ptrRef := "record:ptr/host-ref"
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		switch {
+		case r.Method == http.MethodDelete && trimWAPIPath(r.URL.Path) == "record:host/ref":
+			_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "record:host/ref"})
+		case r.Method == http.MethodGet && trimWAPIPath(r.URL.Path) == zoneObject:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"fqdn": reverseZone, "view": "default", "zone_format": "IPV4"},
+				},
+			})
+		case r.Method == http.MethodGet && trimWAPIPath(r.URL.Path) == "record:ptr":
+			if r.URL.Query().Get("ipv4addr") != "192.0.2.10" && r.URL.Query().Get("name") != "10.2.0.192.in-addr.arpa" {
+				t.Fatalf("unexpected PTR lookup query: %s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"_ref":     ptrRef,
+				"ipv4addr": "192.0.2.10",
+				"ptrdname": "app.example.com",
+				"zone":     reverseZone,
+			}}})
+		case r.Method == http.MethodDelete && trimWAPIPath(r.URL.Path) == ptrRef:
+			_ = json.NewEncoder(w).Encode(map[string]any{"_ref": ptrRef})
+		default:
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer primary.Close()
+
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
+		object := trimWAPIPath(r.URL.Path)
+		switch {
+		case object == "record:host" && r.URL.Query().Get("name") == "app.example.com":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{{
+					"_ref": "record:host/ref",
+					"name": "app.example.com",
+					"ipv4addrs": []map[string]any{{
+						"host":     "app.example.com",
+						"ipv4addr": "192.0.2.10",
+					}},
+					"view": "default",
+					"zone": "example.com",
+				}},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		}
+	}))
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	if err := app.writeCachedZones(profile, []map[string]any{{"fqdn": reverseZone, "zone_format": "IPV4", "view": "default"}}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, reverseZone, "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "10", "address": "192.0.2.10", "ptrdname": "app.example.com", "zone": reverseZone},
+	}, time.Now()); err != nil {
+		t.Fatalf("write reverse record cache: %v", err)
+	}
+	refreshes := captureRecordRefreshes(app)
+
+	if err := app.Execute([]string{"dns", "delete", "host", "app", "-y"}); err != nil {
+		t.Fatalf("delete host: %v", err)
+	}
+
+	if strings.Join(primaryRequests, ",") != "DELETE record:host/ref,GET zone_auth,GET record:ptr,DELETE "+ptrRef {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordCacheInvalidated(t, app, profile, reverseZone)
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+	assertRecordRefreshQueued(t, refreshes, reverseZone)
+}
+
 func TestDNSDeleteRejectsMissingType(t *testing.T) {
 	app := testApp(t)
 	var stderr bytes.Buffer

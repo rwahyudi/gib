@@ -64,7 +64,7 @@ global_group = ibusers
 
 `completion_cache_prefetch` controls whether cache-backed shell completion can start background cache refresh helpers. The default is `true`; accepted values include `true`/`false`, `enabled`/`disabled`, `yes`/`no`, and `on`/`off`. When enabled, zone, record, and network CIDR completion starts the matching lease-protected refresh helper if the selected cache row is missing or stale. Cheap completions such as root commands, flags, output formats, columns, sorts, and record types do not open Badger. PTR delete completion skips the current forward-zone record refresh and reads cached reverse-zone PTR rows. When disabled, completion only reads whatever is already in the selected cache: stale cached zone names, record names, or network CIDRs can still be offered, missing cache returns no dynamic candidates for that attempt, and completion does not start detached refresh subprocesses.
 
-`audit_logging_enabled` controls write-action audit logging. The default is `false`. When enabled, `ib` emits JSON Lines events only after successful create, edit, and delete actions for DNS records, DNS zones, PTR side effects, and config profiles. Read, list, search, cache, completion, and failed/cancelled actions are not audited. Each event includes UTC `ts`, `local_time`, `timezone`, app, event type, host, OS user, profile, action, operation, target type, target, result, and redacted data.
+`audit_logging_enabled` controls write-action audit logging. The default is `false`. When enabled, `ib` emits JSON Lines events only after successful create, edit, and delete actions for DNS records, DNS zones, PTR side effects from A/AAAA/host workflows, and config profiles. Read, list, search, cache, completion, and failed/cancelled actions are not audited. Each event includes UTC `ts`, `local_time`, `timezone`, app, event type, host, OS user, profile, action, operation, target type, target, result, and redacted data.
 
 `audit_logging_method` selects the audit sink. Linux supports `file` and `syslog`; Windows supports `windows_eventlog` and `file`; other platforms support `file`. The method prompt uses a `huh` select in interactive terminals and keeps the same indentation as other config prompts in fallback mode. File logging writes one JSON object per line to `audit_log_file`, defaulting to `~/.ib/audit.jsonl` for local profiles and `/etc/ib/audit.jsonl` for Linux global profiles. Selecting `file` warns that users with write access can modify or remove local log entries, offers a back-out to audit method selection, and opens the chosen path for append/create before saving. Audit sink failures print a warning and do not fail the already-completed write action.
 
@@ -94,9 +94,9 @@ During `ib config new` and `ib config edit`, DNS View and Default DNS Zone are o
 
 ## DNS Search Progress
 
-`ib dns delete a` and `ib dns delete aaaa` remove a matching PTR record from the discovered reverse zone after the forward record delete succeeds. Keep the forward and PTR cleanup paths aligned with create/edit PTR side-effect auditing and reverse-zone cache refreshes.
+`ib dns delete a`, `ib dns delete aaaa`, and `ib dns delete host` remove related PTR records from discovered reverse zones after the forward/host delete succeeds. Keep the forward/host and PTR cleanup paths aligned with create/edit PTR side-effect auditing and reverse-zone cache refreshes.
 
-PTR cleanup after A/AAAA delete probes the primary first, then falls back to the configured read endpoint when the primary does not return a matching PTR. This handles appliances where direct PTR delete can find the reverse record via the read endpoint while an immediate primary lookup after forward delete is empty or missing address fields.
+PTR cleanup after A/AAAA/host delete probes the primary first, then falls back to the configured read endpoint when the primary does not return a matching PTR. This handles appliances where direct PTR delete can find the reverse record via the read endpoint while an immediate primary lookup after forward/host delete is empty or missing address fields.
 
 For interactive table output, `ib dns search` uses a Bubble Tea progress view on stderr while the search is running. The view shows the search stage, configured worker count, completed zones, match count, and each worker's current zone/cache source. The final record table is still printed normally on stdout after the progress view exits.
 
@@ -176,7 +176,7 @@ Successful DNS zone create/delete operations clear and refresh the zone-list cac
 
 Zone record data is cached under the `records` key prefix per profile, DNS view, and zone.
 
-Successful `ib dns create`, `ib dns edit`, and `ib dns delete` operations remove the affected zone's record-cache row and synchronously launch the detached refresh subprocess when no matching refresh lease is active. The write command does not wait for `/allrecords`; the subprocess repopulates the cache in the background. A/AAAA workflows that create, update, or may indirectly delete PTR records queue refreshes for both the forward zone and the reverse zone; when an A/AAAA edit moves to a new address, `ib` also removes the old matching PTR before refreshing the old reverse-zone cache.
+Successful `ib dns create`, `ib dns edit`, and `ib dns delete` operations remove the affected zone's record-cache row and synchronously launch the detached refresh subprocess when no matching refresh lease is active. The write command does not wait for `/allrecords`; the subprocess repopulates the cache in the background. A/AAAA workflows that create, update, or may indirectly delete PTR records, plus host deletes that remove related PTR records, queue refreshes for both the forward zone and the reverse zone; when an A/AAAA edit moves to a new address, `ib` also removes the old matching PTR before refreshing the old reverse-zone cache.
 
 When a command queries zone records:
 
