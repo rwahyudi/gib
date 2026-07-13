@@ -2285,6 +2285,26 @@ func normalizeUniqueZoneNames(zoneNames []string) []string {
 	return normalized
 }
 
+func (a *App) sortZonesByCachedRecordCount(profile Profile, zoneNames []string) []string {
+	zones := append([]string(nil), zoneNames...)
+	counts := make(map[string]int, len(zones))
+	for _, zoneName := range zones {
+		entry, err := a.readCachedRecords(profile, zoneName)
+		if err == nil && entry.CacheFound {
+			counts[zoneName] = len(entry.Rows)
+		}
+	}
+	sort.SliceStable(zones, func(i, j int) bool {
+		left := zones[i]
+		right := zones[j]
+		if counts[left] != counts[right] {
+			return counts[left] > counts[right]
+		}
+		return left < right
+	})
+	return zones
+}
+
 func (a *App) startRecordCacheRevalidation(profile Profile, zoneName string) error {
 	done := a.debugPhase("cache records revalidate dispatch", df("profile", cacheProfileName(profile)), df("view", strings.TrimSpace(profile.DNSView)), df("zone", zoneName))
 	acquired, err := a.tryAcquireRecordRefreshLease(profile, zoneName, time.Now(), recordRefreshLeaseTTL)
@@ -2361,6 +2381,7 @@ func (a *App) startRecordCacheRevalidationBatch(profile Profile, zoneNames []str
 		a.debugEvent("cache records revalidate batch skipped", df("reason", "leases active"), df("zones", len(zones)))
 		return nil
 	}
+	acquired = a.sortZonesByCachedRecordCount(profile, acquired)
 	if a.backgroundRecordBatchRevalidator != nil {
 		if err := a.backgroundRecordBatchRevalidator(profile, acquired); err != nil {
 			for _, zoneName := range acquired {

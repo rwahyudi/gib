@@ -2316,8 +2316,114 @@ func TestSearchAcrossZonesBatchesDeferredStaleRevalidation(t *testing.T) {
 	default:
 		t.Fatalf("batch revalidation was not queued")
 	}
-	sort.Strings(batch)
+	sort.Strings(batch) // Membership check only; order is covered by the largest-first tests.
 	if strings.Join(batch, ",") != "one.example.com,two.example.com" {
+		t.Fatalf("batch zones = %#v", batch)
+	}
+}
+
+func TestSearchAcrossZonesBatchesDeferredStaleRevalidationLargestFirst(t *testing.T) {
+	zones := []map[string]any{
+		{"fqdn": "small.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "large.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "medium.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "stale cache should satisfy this search", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedZones(profile, zones, now); err != nil {
+		t.Fatalf("write cached zones: %v", err)
+	}
+	cachedRows := map[string]int{
+		"small.example.com":  1,
+		"large.example.com":  5,
+		"medium.example.com": 3,
+	}
+	for _, zone := range zones {
+		zoneName := cleanString(zone["fqdn"])
+		rows := make([]map[string]any, 0, cachedRows[zoneName])
+		for i := 0; i < cachedRows[zoneName]; i++ {
+			rows = append(rows, map[string]any{
+				"type":    "HOST_IPV4ADDR",
+				"name":    fmt.Sprintf("test-%d.%s", i, zoneName),
+				"address": fmt.Sprintf("192.0.2.%d", i+1),
+				"zone":    zoneName,
+			})
+		}
+		if err := app.writeCachedRecordsEntry(profile, zoneName, "2026050801", rows, now.Add(-time.Hour).Unix(), now.Add(time.Hour).Unix()); err != nil {
+			t.Fatalf("write stale cached records for %s: %v", zoneName, err)
+		}
+	}
+	app.backgroundRecordRevalidator = func(profile Profile, zone string) error {
+		t.Fatalf("unexpected per-zone background revalidation for %s", zone)
+		return nil
+	}
+	batches := make(chan []string, 1)
+	app.backgroundRecordBatchRevalidator = func(profile Profile, zones []string) error {
+		batches <- append([]string(nil), zones...)
+		return nil
+	}
+
+	records, err := app.collectSearchResults(profile, testWapiClient(server), SearchOptions{Keyword: "test", Global: true})
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	if len(records) != 9 {
+		t.Fatalf("records = %d, want 9: %#v", len(records), records)
+	}
+
+	var batch []string
+	select {
+	case batch = <-batches:
+	default:
+		t.Fatalf("batch revalidation was not queued")
+	}
+	if strings.Join(batch, ",") != "large.example.com,medium.example.com,small.example.com" {
+		t.Fatalf("batch zones = %#v", batch)
+	}
+}
+
+func TestStartRecordCacheRevalidationBatchSortsAcquiredZonesLargestFirst(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	rowsForZone := map[string]int{
+		"zero.example.com":  0,
+		"three.example.com": 3,
+		"one.example.com":   1,
+	}
+	for zoneName, count := range rowsForZone {
+		rows := make([]map[string]any, 0, count)
+		for i := 0; i < count; i++ {
+			rows = append(rows, map[string]any{
+				"type":    "HOST_IPV4ADDR",
+				"name":    fmt.Sprintf("host-%d.%s", i, zoneName),
+				"address": fmt.Sprintf("192.0.2.%d", i+1),
+				"zone":    zoneName,
+			})
+		}
+		if err := app.writeCachedRecords(profile, zoneName, "2026050801", rows, now); err != nil {
+			t.Fatalf("write cached records for %s: %v", zoneName, err)
+		}
+	}
+
+	batches := make(chan []string, 1)
+	app.backgroundRecordBatchRevalidator = func(profile Profile, zones []string) error {
+		batches <- append([]string(nil), zones...)
+		return nil
+	}
+
+	if err := app.startRecordCacheRevalidationBatch(profile, []string{"zero.example.com", "three.example.com", "one.example.com"}); err != nil {
+		t.Fatalf("start batch revalidation: %v", err)
+	}
+
+	batch := <-batches
+	if strings.Join(batch, ",") != "three.example.com,one.example.com,zero.example.com" {
 		t.Fatalf("batch zones = %#v", batch)
 	}
 }

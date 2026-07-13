@@ -12,7 +12,7 @@ worker pool.
 | Cache scope | DNS rows are keyed by profile, DNS view, and zone. IPAM rows are keyed by profile plus network view or IP. |
 | Freshness | Fresh until `cached_at + cache_ttl`; `fresh_until` is not stored. |
 | Stale window | Record and targeted IPAM rows can be served stale until `stale_expires_at`; IPAM list/search can serve older cached rows by default. |
-| Revalidation | Stale rows return immediately; DNS rows renew locally when cached zone serials match, otherwise background refresh starts are lease-protected and batched for multi-zone search. |
+| Revalidation | Stale rows return immediately; DNS rows renew locally when cached zone serials match, otherwise background refresh starts are lease-protected and batched for multi-zone search, with batch dispatch ordered by descending cached record count. |
 | IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. |
 | Read endpoint | GET requests use `read_server` when configured; high-parallel DNS search can spread a configured share back to primary. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
@@ -42,7 +42,9 @@ SOA serials: when the zone serial matches the record-cache serial, `ib` renews
 the stale record row locally and avoids both a per-zone serial HTTP request and
 a detached refresh helper. Stale multi-zone rows that still need background
 revalidation are handed to one batch helper instead of one helper process per
-zone. `ib net list` and `ib net search` prefer latency even
+zone; before dispatch, leased zones are sorted by descending cached record count
+with a lexical zone-name tie-breaker so the largest cached zones enter the
+helper worker pool first. `ib net list` and `ib net search` prefer latency even
 more aggressively: when network-view, network, or container cache rows exist,
 they return those rows even after SWR expiry and queue a background refresh. Use
 `--refresh` on those commands when the command must block for fresh WAPI data.
@@ -85,9 +87,11 @@ server.
 
 For a global search, `ib` first loads the searchable zone list, filters out
 secondary zones, preloads matching record-cache rows with one Badger handle,
-and then assigns zones to workers. Each worker uses the preloaded row when it is
-fresh or inside the SWR window, then falls back to the per-zone cache/WAPI path
-only for missing or expired rows. Each per-zone record load:
+and then assigns zones to search workers. Each worker uses the preloaded row
+when it is fresh or inside the SWR window, then falls back to the per-zone
+cache/WAPI path only for missing or expired rows. Stale rows queued for batch
+revalidation after the search are dispatched to the hidden refresh helper in
+largest-cached-zone-first order. Each per-zone record load:
 
 1. Use the preloaded Badger row, or open the Badger cache when a fallback is required.
 2. Read the zone's `records` key.
