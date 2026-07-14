@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export LC_ALL=C
+
 target="THIRD_PARTY_LICENSES.md"
 check=false
 if [[ "${1:-}" == "--check" ]]; then
