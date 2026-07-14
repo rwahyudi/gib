@@ -4,3 +4,4 @@
 *-vendor.tar.bz2
 /ib
 /dist/
+.hermes/
