@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="430" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+  <title id="title">ib operational workflow</title>
+  <desc id="desc">Diagram of ib routing reads to a validated read endpoint, writes to the primary Grid Master, and serving large searches through Badger cache and bounded workers.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08111f"/>
+      <stop offset="1" stop-color="#101827"/>
+    </linearGradient>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+      .heading { fill: #f8fafc; font-size: 34px; font-weight: 800; letter-spacing: -0.8px; }
+      .sub { fill: #94a3b8; font-size: 16px; }
+      .label { fill: #e2e8f0; font-size: 19px; font-weight: 700; }
+      .body { fill: #cbd5e1; font-size: 15px; }
+      .small { fill: #94a3b8; font-size: 13px; }
+      .card { fill: #0b1220; stroke: #263244; stroke-width: 1.3; }
+      .blue { stroke: #38bdf8; }
+      .green { stroke: #22c55e; }
+      .amber { stroke: #fbbf24; }
+      .red { stroke: #f87171; }
+      .arrow { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowhead); }
+    </style>
+    <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="430" rx="26" fill="url(#bg)"/>
+  <text x="54" y="62" class="heading">Operational model</text>
+  <text x="54" y="92" class="sub">One CLI keeps human output compact while preserving script-safe JSON and CSV.</text>
+
+  <g transform="translate(54 134)">
+    <rect width="240" height="116" rx="16" class="card blue"/>
+    <text x="22" y="34" class="label">Shell context</text>
+    <text x="22" y="63" class="body mono">profile + view + zone</text>
+    <text x="22" y="88" class="small">defaults, env, or one-command flags</text>
+  </g>
+
+  <path d="M310 192 H348" class="arrow" stroke="#64748b"/>
+
+  <g transform="translate(364 112)">
+    <rect width="216" height="276" rx="18" class="card"/>
+    <text x="24" y="38" class="label">ib command</text>
+    <text x="24" y="70" class="body mono">dns list/search</text>
+    <text x="24" y="96" class="body mono">dns create/edit/delete</text>
+    <text x="24" y="122" class="body mono">net list/next-ip</text>
+    <text x="24" y="148" class="body mono">vlan list/show</text>
+    <line x1="24" y1="174" x2="192" y2="174" stroke="#263244"/>
+    <text x="24" y="206" class="small">Cobra commands</text>
+    <text x="24" y="230" class="small">Lipgloss tables</text>
+    <text x="24" y="254" class="small">machine output untouched</text>
+  </g>
+
+  <path d="M598 164 H682" class="arrow" stroke="#38bdf8"/>
+  <path d="M598 250 H682" class="arrow" stroke="#22c55e"/>
+  <path d="M598 336 H682" class="arrow" stroke="#fbbf24"/>
+
+  <g transform="translate(700 110)">
+    <rect width="278" height="84" rx="16" class="card blue"/>
+    <text x="20" y="34" class="label">Validated read GCM</text>
+    <text x="20" y="60" class="body">GETs can use the read endpoint.</text>
+  </g>
+
+  <g transform="translate(700 216)">
+    <rect width="278" height="84" rx="16" class="card green"/>
+    <text x="20" y="34" class="label">Primary Grid Master</text>
+    <text x="20" y="60" class="body">POST, PUT, DELETE, next-IP stay primary.</text>
+  </g>
+
+  <g transform="translate(700 322)">
+    <rect width="278" height="66" rx="16" class="card amber"/>
+    <text x="20" y="34" class="label">Badger cache</text>
+    <text x="20" y="55" class="body">SWR records, IPAM, and VLAN rows.</text>
+  </g>
+
+  <path d="M994 355 C1014 355 1000 284 1032 284" class="arrow" stroke="#fbbf24"/>
+  <path d="M994 152 C1014 152 1000 250 1032 250" class="arrow" stroke="#38bdf8"/>
+
+  <g transform="translate(1046 216)">
+    <rect width="100" height="104" rx="16" fill="#151a26" stroke="#475569"/>
+    <text x="24" y="36" class="label mono">rows</text>
+    <text x="18" y="64" class="small">tables</text>
+    <text x="18" y="84" class="small">json / csv</text>
+  </g>
+</svg>

@@ -8,7 +8,7 @@ When changing one of those flows, update the nearby code comment in the same pat
 
 ## README Maintenance
 
-The README includes a concise product blurb, bullet-point Features section, module table, global-switch summary, library links, and security-scanner links. Keep it in sync when adding or removing major CLI behavior, but avoid duplicating the detailed command reference.
+The README uses a designed first screen, proof preview, install paths, first-run setup, daily workflow table, output controls, operational model, and a concise command map. Keep it in sync when adding or removing major CLI behavior, but avoid re-expanding it into a duplicated command reference; prefer generated `ib <module> --help` for command-specific detail.
 
 ## Security Scanning
 
