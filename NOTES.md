@@ -88,7 +88,7 @@ Before username and password entry, `ib config new` and `ib config edit` try una
 
 `ib config new` and `ib config edit` Step 05 (`Read Endpoint`) automatically discovers Grid Master Candidates from the primary Grid Master. Candidates with Read-Only API disabled are reported with an indented green `INFO:` line and are not saved. Candidates with Read-Only API enabled must pass their own TLS reachability/trust check and a direct WAPI GET probe before being saved as `read_server`; accepting an untrusted candidate certificate saves `read_server_verify_ssl = false` without changing the primary `verify_ssl`. If no candidate exists or no candidate passes the checks, `read_server` is left blank so both reads and writes use the primary server.
 
-When `read_server` is set, the WAPI client routes GET requests to the GCM read endpoint and keeps POST, PUT, and DELETE requests on the primary server.
+When `read_server` is set, the WAPI client routes GET requests to the GCM read endpoint using that endpoint's `read_server_verify_ssl` setting, and keeps POST, PUT, and DELETE requests on the primary server using primary `verify_ssl`.
 
 During `ib config new` and `ib config edit`, DNS View and Default DNS Zone are only prompted when there are multiple choices. If Infoblox returns exactly one DNS view, that view is selected automatically. If exactly one eligible primary forward zone remains after filtering out secondary zones, that zone is selected automatically.
 

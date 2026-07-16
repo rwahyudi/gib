@@ -22,7 +22,7 @@ It is built for daily record and network tasks: compact tables for humans, plain
 - Work in the right DNS context from saved defaults, shell-session view/zone state, environment variables, or one-command `--view` and `--zone` overrides.
 - List, search, create, edit, and delete DNS records with type filters, exclusions, sorting, selected columns, duplicate selection, and confirmation.
 - Read IPAM network views, IPv4 networks and containers, addresses, VLAN assignments, and next available IPs.
-- Route read-only GET requests to a validated Grid Master Candidate while keeping POST, PUT, DELETE, and next-IP function calls on the primary Grid Master.
+- Route read-only GET requests to a validated Grid Master Candidate with separate TLS trust while keeping POST, PUT, DELETE, and next-IP function calls on the primary Grid Master.
 - Use Badger-backed zone, record, IPAM, and VLAN caches with bounded workers and stale-while-revalidate refreshes.
 - Generate dynamic shell completion for profiles, views, zones, records, networks, record types, flags, columns, and output formats.
 - Emit optional JSON Lines audit events for successful DNS/config writes while keeping read workflows quiet.
@@ -98,7 +98,7 @@ ib dns zone use example.com
 ib dns list
 ```
 
-Profiles store the primary server, auto-detected WAPI version, optional validated GCM read endpoint, credentials, DNS view, default zone, and audit logging settings. Passwords are encrypted at rest. Unix builds use a key file; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles.
+Profiles store the primary server, primary TLS trust, auto-detected WAPI version, optional validated GCM read endpoint plus `read_server_verify_ssl`, credentials, DNS view, default zone, and audit logging settings. Passwords are encrypted at rest. Unix builds use a key file; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles.
 
 Local profiles live under `~/.ib/`. On Linux, `sudo ib config new --global-config [PROFILE]` creates a shared profile under `/etc/ib/`; normal commands merge `/etc/ib/config` with `~/.ib/config` so user-local metadata can select a global profile without copying secrets.
 

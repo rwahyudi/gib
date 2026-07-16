@@ -8,8 +8,9 @@ ib \- operator-focused Infoblox DNS CLI
 .B ib
 is a command line interface for managing Infoblox DNS and IPAM records from the shell.
 It supports profile setup, encrypted credentials, DNS view and zone context,
-record workflows, IPAM network lookup, cache inspection, next available IP
-lookup, optional write-action audit logging, and shell completion.
+record workflows, read-only Grid Master Candidate routing with separate TLS
+trust, IPAM network lookup, cache inspection, next available IP lookup, optional
+write-action audit logging, and shell completion.
 .SH COMMANDS
 .TP
 .B ib config
@@ -50,7 +51,9 @@ context.
 Print the version number and AEST build date.
 .TP
 .B ib config new --default
-Create a default Infoblox profile and optionally enable audit logging.
+Create a default Infoblox profile, validate primary TLS trust, optionally save a
+Grid Master Candidate read endpoint with its own TLS trust setting, and
+optionally enable audit logging.
 .TP
 .B ib config use PROFILE
 Set the local default profile override. PROFILE may be local or a merged Linux
@@ -132,7 +135,8 @@ Search VLANs by id, name, network view, network, or comment.
 .SH FILES
 .TP
 .I ~/.ib/config
-Local profile configuration with encrypted password tokens.
+Local profile configuration with encrypted password tokens, primary server TLS
+trust, and optional read_server/read_server_verify_ssl routing settings.
 .TP
 .I ~/.ib/key
 Unix key file for legacy \fBenc:v1\fR profile password tokens. Native Windows
@@ -145,7 +149,8 @@ Local DNS/IPAM cache directory.
 Default local JSON Lines audit log file when file audit logging is enabled.
 .TP
 .I /etc/ib/config
-Linux global profile configuration. Normal commands merge this file with local
+Linux global profile configuration. It can store the same primary/read endpoint
+TLS trust settings as local profiles. Normal commands merge this file with local
 config; local profiles and metadata override matching global names. Missing or
 unreadable global config is skipped silently.
 .TP
