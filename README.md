@@ -108,7 +108,7 @@ Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, audi
 
 | Workflow | Start with | Notes |
 | --- | --- | --- |
-| Configure access | `ib config new --default` | Validates server reachability, TLS trust, credentials, WAPI version, DNS defaults, and optional audit logging. |
+| Configure access | `ib config new --default` | Validates server reachability, primary/read-endpoint TLS trust, credentials, WAPI version, DNS defaults, and optional audit logging. |
 | List records | `ib dns list` | Uses the current DNS view/zone unless `--view` or `--zone` is supplied. |
 | Search records | `ib dns search app` | Add `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
 | Create records | `ib dns create host app 192.0.2.10 -c "Application host"` | Type-first syntax keeps A, AAAA, CNAME, host, MX, NS, PTR, SRV, and TXT workflows consistent. |
@@ -152,7 +152,7 @@ DNS record fields include `type`, `name`, `value`, `zone`, `ttl`, and `comment`.
 
 `cmd/ib/main.go` starts the Cobra CLI and hands behavior to `internal/ibcli`. Profile loading decrypts the stored password, resolves the current DNS view/zone, and builds the WAPI client.
 
-When a profile has a validated `read_server`, read-only GET requests can use that endpoint. Create, update, delete, and next-IP function calls always use the primary Grid Master.
+When a profile has a validated `read_server`, read-only GET requests can use that endpoint with its own `read_server_verify_ssl` setting. Create, update, delete, and next-IP function calls always use the primary Grid Master.
 
 Zone, record, IPAM, and VLAN rows are cached in `~/.ib/cache.badger/` for local profiles or `/etc/ib/cache.badger/` for Linux global profiles. Record and IPAM freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` can be returned immediately while refresh work runs in the background. Large DNS searches use bounded workers, reuse cache rows, and batch stale multi-zone record revalidation.
 

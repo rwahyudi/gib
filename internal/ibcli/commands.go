@@ -1445,8 +1445,10 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	step++
 	// read_server is saved only after a direct read-only GET probe succeeds.
 	// Otherwise leaving it blank keeps every request on the primary server.
-	readServer, _ := a.promptReadServer(probe, current.ReadServer)
+	readServer, readServerVerifySSL, _ := a.promptReadServer(probe, current.ReadServer)
 	probe.ReadServer = readServer
+	probe.ReadServerVerifySSL = readServerVerifySSL
+	probe.readServerVerifySSLSet = true
 	a.printConfigureStep(step, "DNS View", "Pick the default DNS view for DNS commands.")
 	step++
 	dnsView := current.DNSView
@@ -1485,16 +1487,18 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 
 	oldProfile, profileExists := profiles[selected]
 	savedProfile := Profile{
-		Name:        selected,
-		Server:      server,
-		ReadServer:  readServer,
-		Username:    username,
-		Password:    password,
-		WAPIVersion: wapiVersion,
-		DNSView:     dnsView,
-		DefaultZone: defaultZone,
-		VerifySSL:   verifySSL,
-		Timeout:     probe.Timeout,
+		Name:                   selected,
+		Server:                 server,
+		ReadServer:             readServer,
+		ReadServerVerifySSL:    readServerVerifySSL,
+		readServerVerifySSLSet: true,
+		Username:               username,
+		Password:               password,
+		WAPIVersion:            wapiVersion,
+		DNSView:                dnsView,
+		DefaultZone:            defaultZone,
+		VerifySSL:              verifySSL,
+		Timeout:                probe.Timeout,
 	}.complete()
 	profiles[selected] = savedProfile
 	if makeDefault || len(profiles) == 1 {
@@ -1914,11 +1918,11 @@ func compareWAPIVersionParts(left, right []int) int {
 	return 0
 }
 
-func (a *App) promptReadServer(profile Profile, _ string) (string, bool) {
+func (a *App) promptReadServer(profile Profile, _ string) (string, bool, bool) {
 	candidates, disabled, err := gcmReadServers(a.newClient(profile))
 	if err != nil {
 		a.printConfigureInfo("INFO: could not discover Grid Master Candidates; read queries will use the primary server: " + err.Error())
-		return "", true
+		return "", true, true
 	}
 	if len(disabled) > 0 {
 		for _, host := range disabled {
@@ -1927,17 +1931,21 @@ func (a *App) promptReadServer(profile Profile, _ string) (string, bool) {
 	}
 	if len(candidates) == 0 {
 		a.printConfigureInfo("INFO: no usable Grid Master Candidate found; read queries will use the primary server.")
-		return "", true
+		return "", true, true
 	}
 	declined := false
 	for _, candidate := range candidates {
-		if err := a.testReadServer(profile, candidate); err != nil {
+		readServerVerifySSL, ok := a.promptReadServerTLS(candidate, profile.Timeout)
+		if !ok {
+			continue
+		}
+		if err := a.testReadServer(profile, candidate, readServerVerifySSL); err != nil {
 			a.printConfigureInfo("INFO: Grid Master Candidate " + candidate + " failed read-only API probe and will not be used: " + err.Error())
 			continue
 		}
 		useCandidate, err := a.gum.Confirm("Use "+candidate+" for read-only DNS queries?", true)
 		if err != nil {
-			return "", true
+			return "", true, true
 		}
 		if !useCandidate {
 			declined = true
@@ -1945,19 +1953,43 @@ func (a *App) promptReadServer(profile Profile, _ string) (string, bool) {
 			continue
 		}
 		a.printConfigureInfo("INFO: read-only GET requests will use Grid Master Candidate " + candidate + ".")
-		return candidate, true
+		return candidate, readServerVerifySSL, true
 	}
 	if declined {
 		a.printConfigureInfo("INFO: no Grid Master Candidate was selected; read queries will use the primary server.")
-		return "", true
+		return "", true, true
 	}
 	a.printConfigureInfo("INFO: no Grid Master Candidate passed read-only API probe; read queries will use the primary server.")
-	return "", true
+	return "", true, true
 }
 
-func (a *App) testReadServer(profile Profile, readServer string) error {
+func (a *App) promptReadServerTLS(readServer string, timeoutSeconds int) (bool, bool) {
+	verifySSL, err := a.validateServerReachability(readServer, timeoutSeconds)
+	if err == nil {
+		return verifySSL, true
+	}
+	if certErr, ok := err.(*untrustedTLSCertificateError); ok {
+		a.printUntrustedCertificate(certErr)
+		trust, promptErr := a.gum.Confirm("Trust this Grid Master Candidate HTTPS certificate for read-only queries?", false)
+		if promptErr != nil {
+			return true, false
+		}
+		if trust {
+			a.printConfigureWarning("WARNING: SSL verification will be disabled for this read endpoint.")
+			return false, true
+		}
+		a.printConfigureWarning("WARNING: Grid Master Candidate certificate was not trusted; checking the next candidate.")
+		return true, false
+	}
+	a.printConfigureInfo("INFO: Grid Master Candidate " + readServer + " is not reachable and will not be used: " + err.Error())
+	return true, false
+}
+
+func (a *App) testReadServer(profile Profile, readServer string, readServerVerifySSL bool) error {
 	probe := profile
 	probe.ReadServer = readServer
+	probe.ReadServerVerifySSL = readServerVerifySSL
+	probe.readServerVerifySSLSet = true
 	client := a.newClient(probe)
 	params := url.Values{"_return_fields": []string{"name"}, "_max_results": []string{"1"}}
 	_, err := client.Request(http.MethodGet, gridObject, params, nil)

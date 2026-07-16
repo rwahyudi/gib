@@ -34,16 +34,18 @@ const (
 )
 
 type Profile struct {
-	Name        string
-	Server      string
-	ReadServer  string
-	Username    string
-	Password    string
-	WAPIVersion string
-	DNSView     string
-	DefaultZone string
-	VerifySSL   bool
-	Timeout     int
+	Name                   string
+	Server                 string
+	ReadServer             string
+	ReadServerVerifySSL    bool
+	readServerVerifySSLSet bool
+	Username               string
+	Password               string
+	WAPIVersion            string
+	DNSView                string
+	DefaultZone            string
+	VerifySSL              bool
+	Timeout                int
 }
 
 type ConfigSettings struct {
@@ -245,6 +247,10 @@ func normalizeProfileName(profileName string) (string, error) {
 }
 
 func (p Profile) complete() Profile {
+	if !p.readServerVerifySSLSet {
+		p.ReadServerVerifySSL = true
+		p.readServerVerifySSLSet = true
+	}
 	if p.WAPIVersion == "" {
 		p.WAPIVersion = defaultWAPIVersion
 	}
@@ -260,33 +266,50 @@ func (p Profile) complete() Profile {
 func (p Profile) values() map[string]string {
 	p = p.complete()
 	return map[string]string{
-		"server":       p.Server,
-		"read_server":  p.ReadServer,
-		"username":     p.Username,
-		"password":     p.Password,
-		"wapi_version": p.WAPIVersion,
-		"dns_view":     p.DNSView,
-		"default_zone": p.DefaultZone,
-		"verify_ssl":   strconv.FormatBool(p.VerifySSL),
-		"timeout":      strconv.Itoa(p.Timeout),
+		"server":                 p.Server,
+		"read_server":            p.ReadServer,
+		"read_server_verify_ssl": strconv.FormatBool(p.ReadServerVerifySSL),
+		"username":               p.Username,
+		"password":               p.Password,
+		"wapi_version":           p.WAPIVersion,
+		"dns_view":               p.DNSView,
+		"default_zone":           p.DefaultZone,
+		"verify_ssl":             strconv.FormatBool(p.VerifySSL),
+		"timeout":                strconv.Itoa(p.Timeout),
 	}
 }
 
 func profileFromValues(name string, values map[string]string) Profile {
 	timeout, _ := strconv.Atoi(strings.TrimSpace(values["timeout"]))
+	readServerVerifySSL, readServerVerifySSLSet := parseBoolWithSet(values["read_server_verify_ssl"], true)
 	profile := Profile{
-		Name:        name,
-		Server:      values["server"],
-		ReadServer:  values["read_server"],
-		Username:    values["username"],
-		Password:    values["password"],
-		WAPIVersion: values["wapi_version"],
-		DNSView:     values["dns_view"],
-		DefaultZone: values["default_zone"],
-		VerifySSL:   parseBool(values["verify_ssl"], true),
-		Timeout:     timeout,
+		Name:                   name,
+		Server:                 values["server"],
+		ReadServer:             values["read_server"],
+		ReadServerVerifySSL:    readServerVerifySSL,
+		readServerVerifySSLSet: readServerVerifySSLSet,
+		Username:               values["username"],
+		Password:               values["password"],
+		WAPIVersion:            values["wapi_version"],
+		DNSView:                values["dns_view"],
+		DefaultZone:            values["default_zone"],
+		VerifySSL:              parseBool(values["verify_ssl"], true),
+		Timeout:                timeout,
 	}
 	return profile.complete()
+}
+
+func parseBoolWithSet(value string, fallback bool) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "y", "on":
+		return true, true
+	case "0", "false", "no", "n", "off":
+		return false, true
+	case "":
+		return fallback, false
+	default:
+		return fallback, false
+	}
 }
 
 func parseBool(value string, fallback bool) bool {
@@ -629,7 +652,7 @@ func (a *App) writeConfigProfilesWithSettingsMode(defaultProfile string, profile
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	keys := []string{"server", "read_server", "username", "password", "wapi_version", "dns_view", "default_zone", "verify_ssl", "timeout"}
+	keys := []string{"server", "read_server", "read_server_verify_ssl", "username", "password", "wapi_version", "dns_view", "default_zone", "verify_ssl", "timeout"}
 	for _, name := range names {
 		profile := profiles[name].complete()
 		encryptedPassword, err := a.encryptPassword(profile.Password)

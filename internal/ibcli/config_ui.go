@@ -181,6 +181,7 @@ func renderConfigSuccessPanel(profile Profile, isDefault bool) string {
 		{"field": "Default", "value": defaultLabel},
 		{"field": "Server", "value": profile.Server},
 		{"field": "Read endpoint", "value": readServer},
+		{"field": "Read endpoint SSL", "value": yesNo(profile.complete().ReadServerVerifySSL)},
 		{"field": "DNS view", "value": profile.DNSView},
 		{"field": "Default zone", "value": defaultZone},
 		{"field": "Verify SSL", "value": yesNo(profile.VerifySSL)},

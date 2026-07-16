@@ -294,16 +294,17 @@ func auditSensitiveKey(key string) bool {
 func profileAuditValues(profile Profile) map[string]any {
 	profile = profile.complete()
 	values := map[string]any{
-		"name":         profile.Name,
-		"server":       profile.Server,
-		"read_server":  profile.ReadServer,
-		"username":     profile.Username,
-		"password":     profile.Password,
-		"wapi_version": profile.WAPIVersion,
-		"dns_view":     profile.DNSView,
-		"default_zone": profile.DefaultZone,
-		"verify_ssl":   profile.VerifySSL,
-		"timeout":      profile.Timeout,
+		"name":                   profile.Name,
+		"server":                 profile.Server,
+		"read_server":            profile.ReadServer,
+		"read_server_verify_ssl": profile.ReadServerVerifySSL,
+		"username":               profile.Username,
+		"password":               profile.Password,
+		"wapi_version":           profile.WAPIVersion,
+		"dns_view":               profile.DNSView,
+		"default_zone":           profile.DefaultZone,
+		"verify_ssl":             profile.VerifySSL,
+		"timeout":                profile.Timeout,
 	}
 	return redactAuditData(values)
 }

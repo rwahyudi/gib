@@ -127,7 +127,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 				{"cache", "ib config cache status|clear"},
 			}),
 			sectionWithRows("Profile Details", [][]string{
-				{"prompts", "server reachability/TLS trust, unauth/auth WAPI discovery, validated credentials, auto GCM read endpoint, DNS view, default zone, audit logging"},
+				{"prompts", "server reachability/TLS trust, unauth/auth WAPI discovery, validated credentials, auto GCM read endpoint/TLS trust, DNS view, default zone, audit logging"},
 				{"storage", storage},
 				{"key", key},
 				{"password", credentialProtectionDescription()},

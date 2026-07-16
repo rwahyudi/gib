@@ -73,6 +73,7 @@ func writePlainTestConfig(t *testing.T, path string, defaultProfile string, prof
 		builder.WriteString("[profile:" + name + "]\n")
 		builder.WriteString("server = " + profile.Server + "\n")
 		builder.WriteString("read_server = " + profile.ReadServer + "\n")
+		builder.WriteString("read_server_verify_ssl = " + fmt.Sprint(profile.complete().ReadServerVerifySSL) + "\n")
 		builder.WriteString("username = " + profile.Username + "\n")
 		builder.WriteString("password = " + profile.Password + "\n")
 		builder.WriteString("wapi_version = " + profile.WAPIVersion + "\n")
@@ -192,6 +193,26 @@ func TestProfileCompleteUsesDefaultTimeout(t *testing.T) {
 	profile := Profile{}.complete()
 	if profile.Timeout != 15 {
 		t.Fatalf("timeout = %d, want 15", profile.Timeout)
+	}
+}
+
+func TestProfileReadServerVerifySSLDefaultsAndParsesFalse(t *testing.T) {
+	profile := Profile{}.complete()
+	if !profile.ReadServerVerifySSL {
+		t.Fatalf("default read_server_verify_ssl = false, want true")
+	}
+
+	profile = profileFromValues("default", map[string]string{
+		"server":                 "https://infoblox.example",
+		"read_server":            "https://gcm.example",
+		"read_server_verify_ssl": "false",
+		"verify_ssl":             "true",
+	})
+	if profile.ReadServerVerifySSL {
+		t.Fatalf("parsed read_server_verify_ssl = true, want false")
+	}
+	if !profile.readServerVerifySSLSet {
+		t.Fatalf("readServerVerifySSLSet = false, want true")
 	}
 }
 
@@ -2393,7 +2414,7 @@ func TestPromptReadServerClearsCurrentWhenDiscoveryHasNoCandidates(t *testing.T)
 		VerifySSL:   true,
 		Timeout:     defaultTimeoutSeconds,
 	}
-	selected, changed := app.promptReadServer(profile, "https://readonly.example")
+	selected, _, changed := app.promptReadServer(profile, "https://readonly.example")
 	if !changed || selected != "" {
 		t.Fatalf("selected=%q changed=%v, want explicit clear", selected, changed)
 	}
@@ -2431,7 +2452,7 @@ func TestPromptReadServerClearsCurrentWhenReadOnlyAPIDisabled(t *testing.T) {
 		VerifySSL:   true,
 		Timeout:     defaultTimeoutSeconds,
 	}
-	selected, changed := app.promptReadServer(profile, "https://readonly.example")
+	selected, _, changed := app.promptReadServer(profile, "https://readonly.example")
 	if !changed || selected != "" {
 		t.Fatalf("selected=%q changed=%v, want explicit clear", selected, changed)
 	}
@@ -2449,7 +2470,7 @@ func TestPromptReadServerClearsCurrentWhenReadOnlyAPIDisabled(t *testing.T) {
 
 func TestPromptReadServerUsesFirstGCMWithWorkingReadOnlyAPI(t *testing.T) {
 	var probeRequests int
-	gcm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	gcm := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/grid") {
 			http.NotFound(w, r)
 			return
@@ -2477,6 +2498,7 @@ func TestPromptReadServerUsesFirstGCMWithWorkingReadOnlyAPI(t *testing.T) {
 	app.Stdout = &stdout
 	app.Stderr = &stderr
 	app.Stdin = strings.NewReader("y\n")
+	trustTLSServer(t, app, gcm)
 	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
 	profile := Profile{
 		Name:        defaultProfileName,
@@ -2489,9 +2511,12 @@ func TestPromptReadServerUsesFirstGCMWithWorkingReadOnlyAPI(t *testing.T) {
 		Timeout:     defaultTimeoutSeconds,
 	}
 
-	selected, changed := app.promptReadServer(profile, "")
+	selected, readServerVerifySSL, changed := app.promptReadServer(profile, "")
 	if !changed || selected != gcm.URL {
 		t.Fatalf("selected=%q changed=%v, want %q", selected, changed, gcm.URL)
+	}
+	if !readServerVerifySSL {
+		t.Fatalf("read_server_verify_ssl = false, want true")
 	}
 	if probeRequests != 1 {
 		t.Fatalf("read-only probe requests = %d, want 1", probeRequests)
@@ -2502,6 +2527,119 @@ func TestPromptReadServerUsesFirstGCMWithWorkingReadOnlyAPI(t *testing.T) {
 	}
 	if !strings.Contains(output, "INFO: read-only GET requests will use Grid Master Candidate "+gcm.URL+".") {
 		t.Fatalf("success info line missing:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestPromptReadServerPromptsForUntrustedGCMCertificate(t *testing.T) {
+	var probeRequests int
+	gcm := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/grid") {
+			http.NotFound(w, r)
+			return
+		}
+		probeRequests++
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "grid"}})
+	}))
+	defer gcm.Close()
+
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/member") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{
+				{"host_name": gcm.URL, "master_candidate": true, "enable_ro_api_access": true},
+			},
+		})
+	}))
+	defer primary.Close()
+
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader("y\ny\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	profile := Profile{
+		Name:        defaultProfileName,
+		Server:      primary.URL,
+		Username:    "admin",
+		Password:    "secret",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		VerifySSL:   true,
+		Timeout:     defaultTimeoutSeconds,
+	}
+
+	selected, readServerVerifySSL, changed := app.promptReadServer(profile, "")
+	if !changed || selected != gcm.URL {
+		t.Fatalf("selected=%q changed=%v, want %q", selected, changed, gcm.URL)
+	}
+	if readServerVerifySSL {
+		t.Fatalf("read_server_verify_ssl = true, want false after trusting untrusted candidate certificate")
+	}
+	if probeRequests != 1 {
+		t.Fatalf("read-only probe requests = %d, want 1", probeRequests)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"Trust this Grid Master Candidate HTTPS certificate for read-only queries? [y/N]",
+		"WARNING: SSL verification will be disabled for this read endpoint.",
+		"Use " + gcm.URL + " for read-only DNS queries? [Y/n]",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("untrusted candidate output missing %q:\nstdout:\n%s\nstderr:\n%s", want, output, stderr.String())
+		}
+	}
+}
+
+func TestPromptReadServerSkipsUntrustedGCMCertificateWhenDeclined(t *testing.T) {
+	gcm := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("read-only API should not be probed when candidate certificate is declined")
+	}))
+	defer gcm.Close()
+
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/member") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{
+				{"host_name": gcm.URL, "master_candidate": true, "enable_ro_api_access": true},
+			},
+		})
+	}))
+	defer primary.Close()
+
+	app := testApp(t)
+	var stdout, stderr bytes.Buffer
+	app.Stdout = &stdout
+	app.Stderr = &stderr
+	app.Stdin = strings.NewReader("n\n")
+	app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+	profile := Profile{
+		Name:        defaultProfileName,
+		Server:      primary.URL,
+		Username:    "admin",
+		Password:    "secret",
+		WAPIVersion: defaultWAPIVersion,
+		DNSView:     "default",
+		VerifySSL:   true,
+		Timeout:     defaultTimeoutSeconds,
+	}
+
+	selected, readServerVerifySSL, changed := app.promptReadServer(profile, "https://readonly.example")
+	if !changed || selected != "" {
+		t.Fatalf("selected=%q changed=%v, want explicit clear", selected, changed)
+	}
+	if !readServerVerifySSL {
+		t.Fatalf("read_server_verify_ssl = false, want true when no candidate is selected")
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "WARNING: Grid Master Candidate certificate was not trusted; checking the next candidate.") {
+		t.Fatalf("declined certificate warning missing:\nstdout:\n%s\nstderr:\n%s", output, stderr.String())
 	}
 }
 
@@ -2547,7 +2685,7 @@ func TestPromptReadServerClearsCurrentWhenWorkingGCMDeclined(t *testing.T) {
 		Timeout:     defaultTimeoutSeconds,
 	}
 
-	selected, changed := app.promptReadServer(profile, "https://readonly.example")
+	selected, _, changed := app.promptReadServer(profile, "https://readonly.example")
 	if !changed || selected != "" {
 		t.Fatalf("selected=%q changed=%v, want explicit clear", selected, changed)
 	}
@@ -2601,7 +2739,7 @@ func TestPromptReadServerClearsCurrentWhenGCMProbeFails(t *testing.T) {
 		Timeout:     defaultTimeoutSeconds,
 	}
 
-	selected, changed := app.promptReadServer(profile, "https://readonly.example")
+	selected, _, changed := app.promptReadServer(profile, "https://readonly.example")
 	if !changed || selected != "" {
 		t.Fatalf("selected=%q changed=%v, want explicit clear", selected, changed)
 	}

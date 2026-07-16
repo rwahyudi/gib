@@ -29,33 +29,30 @@ func (e *WapiError) Error() string {
 type WapiClient struct {
 	Server            string
 	ReadServer        string
+	ReadVerifySSL     bool
 	WAPIVersion       string
 	Username          string
 	Password          string
 	View              string
 	ForcePrimaryReads bool
 	httpClient        *http.Client
+	readHTTPClient    *http.Client
 	debug             func(string, ...debugField)
 }
 
 const minWAPIIdleConns = 32
 
 func (a *App) newClient(profile Profile) *WapiClient {
+	profile = profile.complete()
 	timeout := profile.Timeout
 	if timeout == 0 {
 		timeout = defaultTimeoutSeconds
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	a.tuneWAPITransport(transport)
-	if !profile.VerifySSL || a.tlsRootCAs != nil {
-		tlsConfig := &tls.Config{}
-		if !profile.VerifySSL {
-			tlsConfig.InsecureSkipVerify = true // #nosec G402 -- operator-controlled Infoblox profile setting
-		}
-		if a.tlsRootCAs != nil {
-			tlsConfig.RootCAs = a.tlsRootCAs
-		}
-		transport.TLSClientConfig = tlsConfig
+
+	httpClient := a.newWAPIHTTPClient(profile.VerifySSL, timeout)
+	readHTTPClient := httpClient
+	if profile.ReadServer != "" && profile.ReadServerVerifySSL != profile.VerifySSL {
+		readHTTPClient = a.newWAPIHTTPClient(profile.ReadServerVerifySSL, timeout)
 	}
 
 	// read_server is intentionally optional. When config did not find a usable
@@ -65,17 +62,35 @@ func (a *App) newClient(profile Profile) *WapiClient {
 		readServer = profile.Server
 	}
 	return &WapiClient{
-		Server:      profile.Server,
-		ReadServer:  readServer,
-		WAPIVersion: strings.TrimLeft(profile.WAPIVersion, "/"),
-		Username:    profile.Username,
-		Password:    profile.Password,
-		View:        profile.DNSView,
-		httpClient: &http.Client{
-			Timeout:   time.Duration(timeout) * time.Second,
-			Transport: transport,
-		},
-		debug: a.debugEvent,
+		Server:         profile.Server,
+		ReadServer:     readServer,
+		ReadVerifySSL:  profile.ReadServerVerifySSL,
+		WAPIVersion:    strings.TrimLeft(profile.WAPIVersion, "/"),
+		Username:       profile.Username,
+		Password:       profile.Password,
+		View:           profile.DNSView,
+		httpClient:     httpClient,
+		readHTTPClient: readHTTPClient,
+		debug:          a.debugEvent,
+	}
+}
+
+func (a *App) newWAPIHTTPClient(verifySSL bool, timeoutSeconds int) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	a.tuneWAPITransport(transport)
+	if !verifySSL || a.tlsRootCAs != nil {
+		tlsConfig := &tls.Config{}
+		if !verifySSL {
+			tlsConfig.InsecureSkipVerify = true // #nosec G402 -- operator-controlled Infoblox profile setting
+		}
+		if a.tlsRootCAs != nil {
+			tlsConfig.RootCAs = a.tlsRootCAs
+		}
+		transport.TLSClientConfig = tlsConfig
+	}
+	return &http.Client{
+		Timeout:   time.Duration(timeoutSeconds) * time.Second,
+		Transport: transport,
 	}
 }
 
@@ -158,6 +173,10 @@ func (c *WapiClient) request(method, objectPath string, params url.Values, paylo
 	if method == http.MethodGet && c.ReadServer != "" && base == c.ReadServer {
 		target = "read"
 	}
+	httpClient := c.httpClient
+	if target == "read" && c.readHTTPClient != nil {
+		httpClient = c.readHTTPClient
+	}
 	endpoint := c.endpoint(base, objectPath, params)
 	started := time.Now()
 	c.debugEvent("wapi start", df("method", method), df("object", objectPath), df("target", target), df("params", safeWAPIParamSummary(params)), df("payload", payload != nil))
@@ -182,7 +201,7 @@ func (c *WapiClient) request(method, objectPath string, params url.Values, paylo
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		wrapped := cliError("cannot reach Infoblox: %v", err)
 		c.debugEvent("wapi error", df("method", method), df("object", objectPath), df("target", target), df("duration", time.Since(started)), df("error", wrapped.Error()))

@@ -14,7 +14,7 @@ worker pool.
 | Stale window | Record and targeted IPAM rows can be served stale until `stale_expires_at`; IPAM list/search can serve older cached rows by default. |
 | Revalidation | Stale rows return immediately; DNS rows renew locally when cached zone serials match, otherwise background refresh starts are lease-protected and batched for multi-zone search, with batch dispatch ordered by descending cached record count. |
 | IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. |
-| Read endpoint | GET requests use `read_server` when configured; high-parallel DNS search can spread a configured share back to primary. |
+| Read endpoint | GET requests use `read_server` when configured, with `read_server_verify_ssl` controlling that endpoint's TLS verification; high-parallel DNS search can spread a configured share back to primary. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
 | Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`. |
 | Connections | The WAPI HTTP client keeps an idle connection pool sized from `dns_search_worker_limit` for better TLS reuse. |
@@ -73,8 +73,10 @@ helpers.
 ![Nord read/write and worker cache flow](assets/cache-workers.svg)
 
 Read-only traffic can use a Grid Master Candidate when `ib config new/edit`
-finds one that supports read-only WAPI access. Writes never use that endpoint:
-create, edit, delete, and zone mutation commands stay on the primary Grid Master.
+finds one that supports read-only WAPI access and passes its own TLS trust check.
+The saved `read_server_verify_ssl` value applies only to that read endpoint.
+Writes never use that endpoint: create, edit, delete, and zone mutation commands
+stay on the primary Grid Master.
 When `dns_search_worker_limit` is greater than 10 and `read_server` is distinct
 from the primary server, global DNS search assigns `dns_search_primary_read_percent`
 of record-loading workers to primary GETs and leaves the other workers on the
