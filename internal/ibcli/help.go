@@ -348,6 +348,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 	case "ib dns delete":
 		return sectionWithRows("Delete Record Usage", [][]string{
 			{"forward", "ib dns delete <type> <record-name> [zone]"},
+			{"lookup", "forward record names match case-insensitively"},
 			{"ptr", "ib dns delete ptr <ip-address>"},
 			{"confirm", "prompts before deleting; use -y to skip"},
 			{"duplicates", "interactive table mode prompts you to choose one matching record"},

@@ -2416,7 +2416,7 @@ func (a *App) runDNSEdit(recordNameValue, requestedType string, value *string, z
 	if err != nil {
 		return err
 	}
-	target, matches, allMatches, err := a.findForwardRecords(profile, client, recordNameValue, zone)
+	target, matches, allMatches, err := a.findForwardRecords(profile, client, recordNameValue, zone, false)
 	if err != nil {
 		return err
 	}
@@ -2739,7 +2739,7 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 	if err != nil {
 		return err
 	}
-	target, matches, allMatches, err := a.findForwardRecords(profile, client, recordName, zone)
+	target, matches, allMatches, err := a.findForwardRecords(profile, client, recordName, zone, true)
 	if err != nil {
 		return err
 	}

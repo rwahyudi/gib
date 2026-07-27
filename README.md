@@ -112,7 +112,7 @@ Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, audi
 | List records | `ib dns list` | Uses the current DNS view/zone unless `--view` or `--zone` is supplied. |
 | Search records | `ib dns search app` | Add `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
 | Create records | `ib dns create host app 192.0.2.10 -c "Application host"` | Type-first syntax keeps A, AAAA, CNAME, host, MX, NS, PTR, SRV, and TXT workflows consistent. |
-| Edit or delete records | `ib dns edit host app 192.0.2.20` | Deletes prompt for confirmation unless `-y` is used. |
+| Edit or delete records | `ib dns edit host app 192.0.2.20` | Deletes match forward DNS names case-insensitively and prompt for confirmation unless `-y` is used. |
 | Read IPAM | `ib net list prod --network-view default` | Lists or searches IPv4 networks and containers, including assigned VLAN fields when WAPI supports them. |
 | Find addresses | `ib net next-ip 192.0.2.0/24 -n 3` | Resolves networks and containers, then asks the primary server for current next-IP results. |
 | Inspect VLANs | `ib vlan list --network-view default` | Derives VLAN rows from IPAM network/container metadata; stock NIOS has no VLAN CRUD WAPI. |

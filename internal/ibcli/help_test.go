@@ -199,6 +199,7 @@ func TestDNSDeleteHelpShowsConfirmationSkip(t *testing.T) {
 		"Delete Record Usage",
 		"ib dns delete <type> <record-name> [zone]",
 		"ib dns delete a app",
+		"forward record names match case-insensitively",
 		"prompts before deleting; use -y to skip",
 		"-y, --yes",
 		"skip delete confirmation prompt",

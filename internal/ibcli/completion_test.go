@@ -877,7 +877,7 @@ func TestDNSDeleteCompletesRecordTypesThenRecordNames(t *testing.T) {
 	}
 
 	stdout.Reset()
-	if err := app.Execute([]string{"__complete", "dns", "delete", "a", "ap"}); err != nil {
+	if err := app.Execute([]string{"__complete", "dns", "delete", "a", "AP"}); err != nil {
 		t.Fatalf("record completion: %v", err)
 	}
 	output = stdout.String()

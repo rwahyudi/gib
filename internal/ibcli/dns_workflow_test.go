@@ -545,7 +545,7 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 		object := trimWAPIPath(r.URL.Path)
 		readRequests = append(readRequests, r.Method+" "+object)
 		switch {
-		case object == "record:a" && r.URL.Query().Get("name") == "app.example.com":
+		case object == "record:a" && r.URL.Query().Get("name~") == "^"+caseInsensitiveLiteralPattern("APP.EXAMPLE.COM")+"$":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{{
 					"_ref":     "record:a/ref",
@@ -590,7 +590,7 @@ func TestDNSDeleteWorkflowReadsFromReadServerAndWritesPrimary(t *testing.T) {
 		return false, nil
 	}
 
-	if err := app.Execute([]string{"dns", "delete", "a", "app", "-y"}); err != nil {
+	if err := app.Execute([]string{"dns", "delete", "a", "APP", "EXAMPLE.COM", "-y"}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -645,7 +645,7 @@ func TestDNSDeleteHostDeletesRelatedPTRAndRefreshesReverseCache(t *testing.T) {
 		}
 		object := trimWAPIPath(r.URL.Path)
 		switch {
-		case object == "record:host" && r.URL.Query().Get("name") == "app.example.com":
+		case object == "record:host" && nameLookupMatches(r, "app.example.com"):
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{{
 					"_ref": "record:host/ref",
@@ -918,7 +918,7 @@ func TestDNSDeleteCNAMELookupOmitsUnsupportedReturnFields(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"text": "Unknown argument/field: '" + unsupported + "'"})
 			return
 		}
-		if object == "record:cname" && r.URL.Query().Get("name") == "cnametest2.example.com" {
+		if object == "record:cname" && nameLookupMatches(r, "cnametest2.example.com") {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{{
 					"_ref":      "record:cname/ref",
@@ -1884,6 +1884,10 @@ func emptyReadServer(t *testing.T) *httptest.Server {
 	}))
 }
 
+func nameLookupMatches(r *http.Request, name string) bool {
+	return r.URL.Query().Get("name") == name || r.URL.Query().Get("name~") == "^"+caseInsensitiveLiteralPattern(name)+"$"
+}
+
 func recordLookupServer(t *testing.T, requests *[]string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1892,7 +1896,7 @@ func recordLookupServer(t *testing.T, requests *[]string) *httptest.Server {
 		}
 		object := trimWAPIPath(r.URL.Path)
 		*requests = append(*requests, r.Method+" "+object)
-		if object == "record:a" && r.URL.Query().Get("name") == "app.example.com" {
+		if object == "record:a" && nameLookupMatches(r, "app.example.com") {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": []map[string]any{{
 					"_ref":     "record:a/ref",
@@ -1916,7 +1920,7 @@ func duplicateRecordLookupServer(t *testing.T, requests *[]string) *httptest.Ser
 		}
 		object := trimWAPIPath(r.URL.Path)
 		*requests = append(*requests, r.Method+" "+object)
-		if r.URL.Query().Get("name") != "app.example.com" {
+		if !nameLookupMatches(r, "app.example.com") {
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
 			return
 		}
