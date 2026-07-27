@@ -16,7 +16,7 @@ worker pool.
 | IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. |
 | Read endpoint | GET requests use `read_server` when configured, with `read_server_verify_ssl` controlling that endpoint's TLS verification; high-parallel DNS search can spread a configured share back to primary. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
-| Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`. |
+| Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`; the active/root zone is submitted first, then remaining zones descend by cached record count. |
 | Connections | The WAPI HTTP client keeps an idle connection pool sized from `dns_search_worker_limit` for better TLS reuse. |
 
 Default tuning in the profile config `[meta]` section:

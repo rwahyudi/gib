@@ -26,7 +26,7 @@ Before every release, scrutinize the README installation sections against the re
 
 Search should avoid repeatedly opening the Badger cache while scanning many zones. Keep cache directory setup and Windows ACL hardening cheap per process/path; otherwise native Windows search pays repeated filesystem security overhead for every zone worker.
 
-Multi-zone search should preload record-cache rows for the selected zones with one Badger handle before worker fan-out. This keeps native Windows search from repeatedly opening the cache directory for fresh rows; missing or expired rows still fall back to the normal per-zone cache/WAPI path.
+Multi-zone search should preload record-cache rows for the selected zones with one Badger handle before worker fan-out. This keeps native Windows search from repeatedly opening the cache directory for fresh rows; missing or expired rows still fall back to the normal per-zone cache/WAPI path. Global search submits the active DNS zone first when it is in scope, then submits remaining zones by descending cached record count with lexical zone-name tie-breaking; scoped recursive search prioritizes its resolved root zone the same way.
 
 Use Badger LSM-only cache options, a small value-log file size, and best-effort value-log GC on open so `.vlog` files mostly remain write-ahead logs instead of accumulating rewritten cache payloads. `ib config cache clear` should close, remove, and recreate the selected Badger cache scope so storage files, including `.vlog` value-log files, are removed rather than leaving large active value logs behind after row deletion. Keep that storage tuning in sync with any future cache backend or payload-size changes.
 

@@ -1861,6 +1861,70 @@ func TestSearchAcrossZonesFetchesRecordsInParallel(t *testing.T) {
 	}
 }
 
+func TestGlobalSearchPrioritizesCurrentZoneThenCachedRecordCount(t *testing.T) {
+	zones := []map[string]any{
+		{"fqdn": "zulu.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "small.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "alpha.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "current.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+		{"fqdn": "large.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}
+	app := testApp(t)
+	writeConfigForSettings(t, app, ConfigSettings{DNSSearchWorkerLimit: 1})
+	profile := Profile{Name: defaultProfileName, DNSView: "default", DefaultZone: "current.example.com"}
+	now := time.Now()
+	if err := app.writeCachedZones(profile, zones, now); err != nil {
+		t.Fatalf("write cached zones: %v", err)
+	}
+	for zoneName, count := range map[string]int{
+		"alpha.example.com":   0,
+		"current.example.com": 1,
+		"large.example.com":   4,
+		"small.example.com":   2,
+		"zulu.example.com":    0,
+	} {
+		rows := make([]map[string]any, count)
+		for i := range rows {
+			rows[i] = map[string]any{
+				"type":    "HOST_IPV4ADDR",
+				"name":    fmt.Sprintf("record-%d.%s", i, zoneName),
+				"address": "192.0.2.10",
+				"zone":    zoneName,
+			}
+		}
+		if err := app.writeCachedRecords(profile, zoneName, "2026072801", rows, now); err != nil {
+			t.Fatalf("write cached records for %s: %v", zoneName, err)
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected WAPI request: %s %s", r.Method, r.URL)
+	}))
+	defer server.Close()
+
+	var eventsMu sync.Mutex
+	var started []string
+	_, err := app.collectSearchResults(profile, testWapiClient(server), SearchOptions{
+		Global: true,
+		Progress: func(event SearchProgressEvent) {
+			if event.Kind != searchProgressWorkerStart {
+				return
+			}
+			eventsMu.Lock()
+			started = append(started, event.Zone)
+			eventsMu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("collect search results: %v", err)
+	}
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	if got, want := strings.Join(started, ","), "current.example.com,large.example.com,small.example.com,alpha.example.com,zulu.example.com"; got != want {
+		t.Fatalf("job order = %q, want %q", got, want)
+	}
+}
+
 func TestSearchProgressReportsWorkerEvents(t *testing.T) {
 	zones := []map[string]any{
 		{"fqdn": "one.example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
@@ -2099,7 +2163,7 @@ func TestSearchZoneRecordBatchesSplitsWorkerGETsBetweenPrimaryAndReadServer(t *t
 			"soa_serial_number": "2026061001",
 		})
 	}
-	batches, err := app.searchZoneRecordBatches(profile, client, zones, false, nil)
+	batches, err := app.searchZoneRecordBatches(profile, client, zones, false, nil, "")
 	if err != nil {
 		t.Fatalf("search zone batches: %v", err)
 	}

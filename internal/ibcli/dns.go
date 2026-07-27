@@ -2989,6 +2989,10 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 	}
 	inferredZone := ""
 	inferred := false
+	preferredZone := ""
+	if options.Global {
+		preferredZone, _ = a.resolveDNSZone(profile, "")
+	}
 	if options.Zone == "" {
 		var relativeName string
 		inferredZone, relativeName, inferred = inferSearchFQDNZone(options.Keyword, zones)
@@ -3013,6 +3017,7 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 			}
 		}
 		zones = filterSearchZones(zones, rootZone, options.Recursive)
+		preferredZone = rootZone
 	}
 	reportSearchProgress(options.Progress, SearchProgressEvent{Kind: searchProgressStage, Stage: "Loading zone records", TotalZones: len(zones)})
 	typeFilter := map[string]bool{}
@@ -3022,7 +3027,7 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 		}
 		typeFilter[strings.ToLower(item)] = true
 	}
-	batches, err := a.searchZoneRecordBatches(profile, client, zones, false, options.Progress)
+	batches, err := a.searchZoneRecordBatches(profile, client, zones, false, options.Progress, preferredZone)
 	if err != nil {
 		return nil, err
 	}
@@ -3066,7 +3071,7 @@ func (a *App) listRecordsForZone(profile Profile, client *WapiClient, zoneName s
 	if err != nil {
 		return nil, err
 	}
-	batches, err := a.searchZoneRecordBatches(profile, client, zones, enrich, nil)
+	batches, err := a.searchZoneRecordBatches(profile, client, zones, enrich, nil, zoneName)
 	if err != nil {
 		return nil, err
 	}
@@ -3095,7 +3100,7 @@ func (a *App) listRecordsForReverseCIDRScope(profile Profile, client *WapiClient
 	if len(scopeZones) == 0 {
 		return nil, false, nil
 	}
-	batches, err := a.searchZoneRecordBatches(profile, client, scopeZones, enrich, nil)
+	batches, err := a.searchZoneRecordBatches(profile, client, scopeZones, enrich, nil, "")
 	if err != nil {
 		return nil, true, err
 	}
@@ -3142,7 +3147,7 @@ func recordsFromZoneRecordBatches(batches []zoneRecordBatch) []TypedRecord {
 	return records
 }
 
-func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones []map[string]any, enrich bool, progress SearchProgressFunc) ([]zoneRecordBatch, error) {
+func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones []map[string]any, enrich bool, progress SearchProgressFunc, preferredZone string) ([]zoneRecordBatch, error) {
 	if len(zones) == 0 {
 		reportSearchProgress(progress, SearchProgressEvent{Kind: searchProgressStage, Stage: "No searchable zones"})
 		return nil, nil
@@ -3169,6 +3174,7 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 		zoneNames = append(zoneNames, cleanString(zone["fqdn"]))
 	}
 	prefetchedRecords := a.readCachedRecordsForZones(profile, zoneNames)
+	zones = prioritizeZoneRecordJobs(zones, preferredZone, prefetchedRecords)
 
 	workerCount := a.dnsSearchWorkerLimit()
 	if len(zones) < workerCount {
@@ -3272,6 +3278,29 @@ func (a *App) searchZoneRecordBatches(profile Profile, client *WapiClient, zones
 		batches = append(batches, *batch)
 	}
 	return batches, nil
+}
+
+func prioritizeZoneRecordJobs(zones []map[string]any, preferredZone string, prefetchedRecords map[string]cachedPayload) []map[string]any {
+	prioritized := append([]map[string]any(nil), zones...)
+	preferredZone = normalizeCacheZone(preferredZone)
+	// Serve the active search zone promptly, then use cached size to keep the
+	// worker pool busy with the most expensive known zones first.
+	sort.SliceStable(prioritized, func(i, j int) bool {
+		leftName := cleanString(prioritized[i]["fqdn"])
+		rightName := cleanString(prioritized[j]["fqdn"])
+		leftPreferred := preferredZone != "" && normalizeCacheZone(leftName) == preferredZone
+		rightPreferred := preferredZone != "" && normalizeCacheZone(rightName) == preferredZone
+		if leftPreferred != rightPreferred {
+			return leftPreferred
+		}
+		leftCount := len(prefetchedRecords[normalizeCacheZone(leftName)].Rows)
+		rightCount := len(prefetchedRecords[normalizeCacheZone(rightName)].Rows)
+		if leftCount != rightCount {
+			return leftCount > rightCount
+		}
+		return strings.ToLower(leftName) < strings.ToLower(rightName)
+	})
+	return prioritized
 }
 
 func searchWorkerClient(client *WapiClient, workerID int, workerCount int, primaryReadPercent int) *WapiClient {
