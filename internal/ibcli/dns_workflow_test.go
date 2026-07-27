@@ -61,6 +61,42 @@ func TestDNSCreateWorkflowPostsToPrimaryWithoutMandatoryTTL(t *testing.T) {
 	assertRecordRefreshQueued(t, refreshes, "example.com")
 }
 
+func TestDNSCreateHostRefreshesReverseRecordCache(t *testing.T) {
+	const reverseZone = "2.0.192.in-addr.arpa"
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "record:host" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode("record:host/ref")
+	}))
+	defer primary.Close()
+
+	read := emptyReadServer(t)
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	if err := app.writeCachedZones(profile, []map[string]any{{"fqdn": reverseZone, "zone_format": "IPV4", "view": "default"}}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, reverseZone, "2026072701", []map[string]any{
+		{"type": "record:ptr", "name": "10", "address": "192.0.2.10", "ptrdname": "old.example.com", "zone": reverseZone},
+	}, time.Now()); err != nil {
+		t.Fatalf("write reverse record cache: %v", err)
+	}
+	refreshes := captureRecordRefreshes(app)
+
+	if err := app.Execute([]string{"dns", "create", "host", "app", "192.0.2.10"}); err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordCacheInvalidated(t, app, profile, reverseZone)
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+	assertRecordRefreshQueued(t, refreshes, reverseZone)
+}
+
 func TestDNSCreateCNAMEQualifiesShortTarget(t *testing.T) {
 	var postPayload map[string]any
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

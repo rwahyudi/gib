@@ -2350,6 +2350,13 @@ func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr 
 	}
 	a.auditDNSRecordCreate(profile, client, recordType, targetName, resolvedZone, payload)
 	a.queueRecordCacheRefreshAfterWrite(profile, resolvedZone)
+	if recordType == "host" {
+		if address, err := netip.ParseAddr(strings.TrimSpace(value)); err == nil {
+			if reverseZone, err := a.reverseZoneForIPForCacheRefresh(profile, client, address); err == nil && reverseZone != "" {
+				a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
+			}
+		}
+	}
 	if noptr && recordType != "a" && recordType != "aaaa" {
 		a.PrintWarning("WARNING: --noptr only applies to A/AAAA workflows and was ignored.")
 	}

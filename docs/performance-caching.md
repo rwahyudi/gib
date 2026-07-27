@@ -132,8 +132,8 @@ displaying data.
 
 Successful record create, edit, and delete operations remove the affected
 zone's record cache row and launch a background revalidation. A/AAAA workflows
-that also update PTR records queue refreshes for both the forward and reverse
-zones.
+that also update PTR records, plus HOST creates, queue refreshes for both the
+forward and reverse zones.
 
 Successful DNS zone create and delete operations refresh the zone-list cache in
 the background. Deleting a zone removes that zone's record cache instead of
