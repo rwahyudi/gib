@@ -85,7 +85,7 @@ if (($env:Path -split ';') -notcontains $binPath) {
 }
 ```
 
-Open a new PowerShell window so the user `PATH` change is loaded, then run `ib config completion windows`. For source builds, see [Build From Source](docs/build-from-source.md). For publishing, see [Release Process](docs/release-process.md).
+Open a new PowerShell window so the user `PATH` change is loaded, then run `ib config completion windows`. For source builds, see [Build From Source](docs/build-from-source.md). For publishing, see [Release Process](docs/release-process.md) and [Release Notes](docs/release-notes.md).
 
 ## First run
 

@@ -26,7 +26,8 @@ need MinGW-w64 for cache support.
 ## Step 1: Choose and Prepare the Version
 
 1. Choose the next semantic version and tag, for example `0.3.5` and `v0.3.5`.
-2. Update versioned source files before tagging:
+2. Create or update `docs/release-notes.md` with the release version, date, and operator-facing changes before tagging.
+3. Update versioned source files before tagging:
 
 ```bash
 rg -n '0\.3\.|gib [0-9]+\.[0-9]+\.[0-9]+|Version:' internal packaging gib.spec README.md docs
@@ -37,10 +38,11 @@ Common files to check are:
 - `gib.spec`: `Version:` and `%changelog`
 - `packaging/man/ib.1`: manual page version string
 - `internal/ibcli/app.go`: source-build fallback `Version`
+- `docs/release-notes.md`: release version, date, and change summary
 
-3. Keep README install commands on stable latest-release URLs unless a release
+4. Keep README install commands on stable latest-release URLs unless a release
    intentionally pins a version.
-4. Confirm the README asset names match `.goreleaser.yaml`:
+5. Confirm the README asset names match `.goreleaser.yaml`:
 
 ```bash
 rg 'releases/latest/download|ib_linux_amd64|ib_windows_amd64|ib_[0-9]+\.[0-9]+\.[0-9]+|releases/download/v[0-9]' README.md
@@ -239,6 +241,7 @@ packaging workflow explicitly changes. Commit only intentional updates to
 ## Final Checklist
 
 - Versioned source files and changelog are updated.
+- Release notes document the release changes.
 - README install commands use stable latest-release URLs and asset names match
   `.goreleaser.yaml`.
 - Local tests, vet, license check, and optional snapshot release pass.
