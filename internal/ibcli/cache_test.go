@@ -582,6 +582,178 @@ func TestRunRecordCacheRevalidateReleasesLeaseOnError(t *testing.T) {
 	}
 }
 
+func TestRunRecordCacheRevalidateReleasesBadgerLockDuringWAPI(t *testing.T) {
+	started := make(chan struct{})
+	continueRequest := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			close(started)
+			<-continueRequest
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"fqdn":              "example.com",
+				"view":              "default",
+				"soa_serial_number": "2026050802",
+			}}})
+		case strings.HasSuffix(r.URL.Path, "/allrecords"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"type":    "HOST_IPV4ADDR",
+				"name":    "live.example.com",
+				"address": "192.0.2.20",
+			}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	profile := writeCompletionProfile(t, app, server.URL)
+	now := time.Now()
+	if err := app.writeCachedRecordsEntry(profile, "example.com", "2026050801", []map[string]any{{"type": "HOST_IPV4ADDR", "name": "cached.example.com", "address": "192.0.2.10"}}, now.Add(-time.Hour).Unix(), now.Add(time.Hour).Unix()); err != nil {
+		t.Fatalf("write stale record cache: %v", err)
+	}
+	acquired, err := app.tryAcquireRecordRefreshLease(profile, "example.com", now, recordRefreshLeaseTTL)
+	if err != nil || !acquired {
+		t.Fatalf("acquire lease = %v, %v", acquired, err)
+	}
+	if err := app.closeCacheDB(app.cachePath()); err != nil {
+		t.Fatalf("close seeded cache DB: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.runRecordCacheRevalidate(profile.Name, profile.DNSView, "example.com")
+	}()
+	<-started
+
+	probe, err := badger.Open(cacheBadgerOptions(app.cachePath()))
+	if err != nil {
+		t.Fatalf("Badger remained locked during WAPI request: %v", err)
+	}
+	if err := probe.Close(); err != nil {
+		t.Fatalf("close Badger probe: %v", err)
+	}
+	close(continueRequest)
+	if err := <-done; err != nil {
+		t.Fatalf("run revalidate: %v", err)
+	}
+}
+
+func TestRunRecordCacheRevalidateBatchKeepsBadgerUnlockedUntilAllWAPICompletes(t *testing.T) {
+	started := make(chan string, 2)
+	oneContinue := make(chan struct{})
+	twoContinue := make(chan struct{})
+	oneAllRecords := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		zone := r.URL.Query().Get("fqdn")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			started <- zone
+			if zone == "one.example.com" {
+				<-oneContinue
+			} else {
+				<-twoContinue
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"fqdn":              zone,
+				"view":              "default",
+				"soa_serial_number": "2026050802",
+			}}})
+		case strings.HasSuffix(r.URL.Path, "/allrecords"):
+			if r.URL.Query().Get("zone") == "one.example.com" {
+				oneAllRecords <- struct{}{}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"type":    "HOST_IPV4ADDR",
+				"name":    "live." + r.URL.Query().Get("zone"),
+				"address": "192.0.2.20",
+			}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	profile := writeCompletionProfile(t, app, server.URL)
+	now := time.Now()
+	for _, zoneName := range []string{"one.example.com", "two.example.com"} {
+		if err := app.writeCachedRecordsEntry(profile, zoneName, "2026050801", []map[string]any{{"type": "HOST_IPV4ADDR", "name": "cached." + zoneName, "address": "192.0.2.10"}}, now.Add(-time.Hour).Unix(), now.Add(time.Hour).Unix()); err != nil {
+			t.Fatalf("write stale record cache for %s: %v", zoneName, err)
+		}
+		acquired, err := app.tryAcquireRecordRefreshLease(profile, zoneName, now, recordRefreshLeaseTTL)
+		if err != nil || !acquired {
+			t.Fatalf("acquire lease for %s = %v, %v", zoneName, acquired, err)
+		}
+	}
+	if err := app.closeCacheDB(app.cachePath()); err != nil {
+		t.Fatalf("close seeded cache DB: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.runRecordCacheRevalidateBatch(profile.Name, profile.DNSView, []string{"one.example.com", "two.example.com"})
+	}()
+	<-started
+	<-started
+	assertBadgerCacheUnlocked(t, app)
+
+	close(oneContinue)
+	<-oneAllRecords
+	assertBadgerCacheUnlocked(t, app)
+
+	close(twoContinue)
+	if err := <-done; err != nil {
+		t.Fatalf("run batch revalidate: %v", err)
+	}
+}
+
+func TestRecordCacheRevalidationPlanDoesNotOverwriteForegroundCacheChange(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: defaultProfileName, DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{{"type": "HOST_IPV4ADDR", "name": "cached.example.com", "address": "192.0.2.10"}}, now); err != nil {
+		t.Fatalf("write cached records: %v", err)
+	}
+	snapshot, err := app.readCachedRecords(profile, "example.com")
+	if err != nil {
+		t.Fatalf("read cache snapshot: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "example.com", "2026050802", []map[string]any{{"type": "HOST_IPV4ADDR", "name": "foreground.example.com", "address": "192.0.2.20"}}, now.Add(time.Second)); err != nil {
+		t.Fatalf("write foreground cache change: %v", err)
+	}
+
+	plan := recordCacheRevalidationPlan{
+		zoneName:    "example.com",
+		snapshot:    snapshot,
+		refreshedAt: now.Add(2 * time.Second),
+		serial:      "2026050803",
+		rows:        []map[string]any{{"type": "HOST_IPV4ADDR", "name": "background.example.com", "address": "192.0.2.30"}},
+	}
+	if err := app.applyRecordCacheRevalidationPlan(profile, plan); err != nil {
+		t.Fatalf("apply revalidation plan: %v", err)
+	}
+	entry, err := app.readCachedRecords(profile, "example.com")
+	if err != nil {
+		t.Fatalf("read cached records: %v", err)
+	}
+	if entry.Serial != "2026050802" || len(entry.Rows) != 1 || cleanString(entry.Rows[0]["name"]) != "foreground.example.com" {
+		t.Fatalf("foreground cache change was overwritten: %#v", entry)
+	}
+}
+
+func assertBadgerCacheUnlocked(t *testing.T, app *App) {
+	t.Helper()
+	probe, err := badger.Open(cacheBadgerOptions(app.cachePath()))
+	if err != nil {
+		t.Fatalf("Badger remained locked during WAPI request: %v", err)
+	}
+	if err := probe.Close(); err != nil {
+		t.Fatalf("close Badger probe: %v", err)
+	}
+}
+
 func TestCachedRecordsForZoneExtendsExpiredCacheWhenSerialMatches(t *testing.T) {
 	var allRecordRequests int
 	server := recordCacheServer(t, "2026050801", []map[string]any{{"type": "HOST_IPV4ADDR", "name": "live.example.com", "address": "192.0.2.20"}}, &allRecordRequests)

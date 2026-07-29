@@ -44,7 +44,10 @@ a detached refresh helper. Stale multi-zone rows that still need background
 revalidation are handed to one batch helper instead of one helper process per
 zone; before dispatch, leased zones are sorted by descending cached record count
 with a lexical zone-name tie-breaker so the largest cached zones enter the
-helper worker pool first. `ib net list` and `ib net search` prefer latency even
+helper worker pool first. The helper snapshots cache rows, releases Badger
+before WAPI serial and `/allrecords` requests, then reopens it only after all
+batch network work completes to apply unchanged snapshots. `ib net list` and
+`ib net search` prefer latency even
 more aggressively: when network-view, network, or container cache rows exist,
 they return those rows even after SWR expiry and queue a background refresh. Use
 `--refresh` on those commands when the command must block for fresh WAPI data.

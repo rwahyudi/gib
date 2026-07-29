@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -2478,73 +2479,148 @@ func (a *App) runRecordCacheRevalidateBatch(profileName string, view string, zon
 	}
 	releaseProfile = profile
 	client := a.newClient(profile)
+	snapshots := make([]cachedPayload, len(zones))
+	for index, zoneName := range zones {
+		entry, err := a.readCachedRecords(profile, zoneName)
+		if err != nil {
+			_ = a.closeCacheDB(a.cachePath())
+			return err
+		}
+		snapshots[index] = entry
+	}
+	// Background WAPI work must not retain Badger's process-wide writer lock.
+	if err := a.closeCacheDB(a.cachePath()); err != nil {
+		return err
+	}
 	workerCount := a.dnsSearchWorkerLimit()
 	if len(zones) < workerCount {
 		workerCount = len(zones)
 	}
-	jobs := make(chan string)
-	errs := make(chan error, len(zones))
+	type job struct {
+		index    int
+		zoneName string
+	}
+	jobs := make(chan job)
+	plans := make(chan recordCacheRevalidationPlan, len(zones))
 	var wg sync.WaitGroup
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for zoneName := range jobs {
-				errs <- a.revalidateRecordCache(profile, client, zoneName)
+			for job := range jobs {
+				plan, err := a.planRecordCacheRevalidation(client, job.zoneName, snapshots[job.index])
+				plan.err = err
+				plans <- plan
 			}
 		}()
 	}
-	for _, zoneName := range zones {
-		jobs <- zoneName
+	for index, zoneName := range zones {
+		jobs <- job{index: index, zoneName: zoneName}
 	}
 	close(jobs)
 	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			return err
+	close(plans)
+	var firstErr error
+	for plan := range plans {
+		if plan.err != nil {
+			if firstErr == nil {
+				firstErr = plan.err
+			}
+			continue
+		}
+		if err := a.applyRecordCacheRevalidationPlan(profile, plan); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
+}
+
+type recordCacheRevalidationPlan struct {
+	zoneName    string
+	snapshot    cachedPayload
+	refreshedAt time.Time
+	serial      string
+	rows        []map[string]any
+	renew       bool
+	invalidate  bool
+	err         error
 }
 
 func (a *App) revalidateRecordCache(profile Profile, client *WapiClient, zoneName string) error {
-	now := time.Now()
 	done := a.debugPhase("cache records revalidate", df("profile", cacheProfileName(profile)), df("view", strings.TrimSpace(profile.DNSView)), df("zone", zoneName))
 	entry, err := a.readCachedRecords(profile, zoneName)
 	if err != nil {
 		done(err)
 		return err
 	}
+	// Do not hold Badger's writer lock while waiting for Infoblox.
+	if err := a.closeCacheDB(a.cachePath()); err != nil {
+		done(err)
+		return err
+	}
+	plan, err := a.planRecordCacheRevalidation(client, zoneName, entry)
+	if err != nil {
+		done(err)
+		return err
+	}
+	err = a.applyRecordCacheRevalidationPlan(profile, plan)
+	done(err)
+	return err
+}
+
+func (a *App) planRecordCacheRevalidation(client *WapiClient, zoneName string, snapshot cachedPayload) (recordCacheRevalidationPlan, error) {
+	plan := recordCacheRevalidationPlan{zoneName: zoneName, snapshot: snapshot, refreshedAt: time.Now()}
 	currentSerial, hasSerial, err := currentZoneSerial(client, zoneName)
 	if err != nil {
 		if isZoneNotFoundError(err) {
-			a.invalidateRecordCache(profile, zoneName)
-			done(nil)
-			return nil
+			plan.invalidate = true
+			return plan, nil
 		}
-		done(err)
-		return err
+		return plan, err
 	}
-	if entry.CacheFound && hasSerial && entry.Serial != "" && entry.Serial == currentSerial {
-		// Nothing changed on Infoblox. Renew timestamps only; the cached payload
-		// remains valid and avoids another large /allrecords download.
-		err := a.renewCachedRecordsAge(profile, zoneName, now, now.Add(a.recordsCacheSWRTTL()))
-		done(err)
-		return err
+	if snapshot.CacheFound && hasSerial && snapshot.Serial != "" && snapshot.Serial == currentSerial {
+		plan.serial = currentSerial
+		plan.renew = true
+		return plan, nil
 	}
 	rows, err := allRecordRowsForZone(client, zoneName, false)
 	if err != nil {
-		done(err)
+		return plan, err
+	}
+	if hasSerial {
+		plan.serial = currentSerial
+	}
+	plan.rows = rows
+	return plan, nil
+}
+
+func (a *App) applyRecordCacheRevalidationPlan(profile Profile, plan recordCacheRevalidationPlan) error {
+	current, err := a.readCachedRecords(profile, plan.zoneName)
+	if err != nil {
 		return err
 	}
-	serial := ""
-	if hasSerial {
-		serial = currentSerial
+	if !recordCacheSnapshotMatches(current, plan.snapshot) {
+		a.debugEvent("cache records revalidate skipped", df("zone", plan.zoneName), df("reason", "cache changed during refresh"))
+		return nil
 	}
-	err = a.writeCachedRecords(profile, zoneName, serial, rows, now)
-	done(err)
-	return err
+	if plan.invalidate {
+		a.deleteRecordCacheEntry(profile, plan.zoneName)
+		return nil
+	}
+	if plan.renew {
+		return a.renewCachedRecordsAge(profile, plan.zoneName, plan.refreshedAt, plan.refreshedAt.Add(a.recordsCacheSWRTTL()))
+	}
+	return a.writeCachedRecords(profile, plan.zoneName, plan.serial, plan.rows, plan.refreshedAt)
+}
+
+func recordCacheSnapshotMatches(current, snapshot cachedPayload) bool {
+	if current.CacheFound != snapshot.CacheFound {
+		return false
+	}
+	if !current.CacheFound {
+		return true
+	}
+	return current.Serial == snapshot.Serial && current.CachedAt == snapshot.CachedAt && current.StaleExpiresAt == snapshot.StaleExpiresAt && reflect.DeepEqual(current.Rows, snapshot.Rows)
 }
 
 type zoneNotFoundError struct {

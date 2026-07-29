@@ -1,5 +1,12 @@
 # Release Notes
 
+## Unreleased
+
+### Cache Reliability
+
+- Detached DNS record-cache revalidation now releases Badger before slow WAPI serial and record requests, reducing lock contention for a repeated global DNS search.
+- Background refresh plans verify that the cached snapshot has not changed before writing, so foreground cache updates are not overwritten by delayed refresh results.
+
 ## v0.4.2 - 2026-07-28
 
 ### DNS and Cache Behavior
