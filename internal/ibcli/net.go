@@ -26,6 +26,19 @@ const (
 	ipamTypeContainer       = "container"
 )
 
+// networkColumnHeaders maps network field names to display headers.
+// VLAN-related fields are uppercased so "assigned_vlan" renders as "VLAN"
+// rather than the generic titleCaseFields output "Assigned Vlan".
+var networkColumnHeaders = map[string]string{
+	"network":            "Network",
+	"type":               "Type",
+	"network_view":       "Network View",
+	"assigned_vlan":      "VLAN",
+	"assigned_vlan_name": "VLAN Name",
+	"comment":            "Comment",
+	"extattrs":           "ExtAttrs",
+}
+
 var (
 	networkViewOutputColumns       = []string{"name", "comment"}
 	networkOutputColumns           = []string{"network", "type", "assigned_vlan", "assigned_vlan_name", "comment", "extattrs"}
@@ -818,6 +831,18 @@ func networkDetailRow(network map[string]any) map[string]any {
 	}
 }
 
+func networkHeaders(fields []string) []string {
+	headers := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if header, ok := networkColumnHeaders[field]; ok {
+			headers = append(headers, header)
+			continue
+		}
+		headers = append(headers, titleCaseFields([]string{field})[0])
+	}
+	return headers
+}
+
 func (a *App) emitNetworkRows(title string, columns []string, rows []map[string]any) error {
 	displayRows := make([][]string, 0, len(rows))
 	for _, row := range rows {
@@ -827,7 +852,7 @@ func (a *App) emitNetworkRows(title string, columns []string, rows []map[string]
 		}
 		displayRows = append(displayRows, display)
 	}
-	fmt.Fprintln(a.Stdout, renderTable(title, titleCaseFields(columns), displayRows))
+	fmt.Fprintln(a.Stdout, renderTable(title, networkHeaders(columns), displayRows))
 	a.printNetTableFooter(len(rows))
 	return nil
 }
@@ -844,7 +869,7 @@ func (a *App) emitNetRows(title string, fields []string, rows []map[string]any) 
 		}
 		displayRows = append(displayRows, display)
 	}
-	fmt.Fprintln(a.Stdout, renderTable(title, titleCaseFields(fields), displayRows))
+	fmt.Fprintln(a.Stdout, renderTable(title, networkHeaders(fields), displayRows))
 	a.printNetTableFooter(len(rows))
 	return nil
 }
@@ -879,7 +904,7 @@ func networkTableValue(field string, row map[string]any) string {
 }
 
 func networkDetailTableRows(fields []string, row map[string]any) [][]string {
-	labels := titleCaseFields(fields)
+	labels := networkHeaders(fields)
 	rows := make([][]string, 0, len(fields))
 	for i, field := range fields {
 		rows = append(rows, []string{labels[i], networkTableValue(field, row)})

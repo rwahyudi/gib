@@ -598,6 +598,14 @@ func TestNetTableOutputStylesObjectTypes(t *testing.T) {
 	}
 }
 
+func TestNetworkHeadersUseVLANLabel(t *testing.T) {
+	headers := networkHeaders([]string{"network", "type", "assigned_vlan", "assigned_vlan_name", "comment"})
+	want := []string{"Network", "Type", "VLAN", "VLAN Name", "Comment"}
+	if got := strings.Join(headers, ","); got != strings.Join(want, ",") {
+		t.Fatalf("network headers = %q, want %q", got, want)
+	}
+}
+
 func TestNetListWithoutNetworkViewQueriesAllViews(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

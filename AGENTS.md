@@ -20,6 +20,26 @@ Use `/tmp` for Go caches in this sandboxed checkout:
 - `env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go build -buildvcs=false -o /home/rwahyudi/bin/ib ./cmd/ib` updates the user-facing command.
 - `gofmt -w <files>` formats edited Go files.
 
+### CRITICAL: ALWAYS INSTALL TO ~/bin/ib AFTER EVERY BUILD
+
+**After EVERY code change — no exceptions — you MUST compile and install the binary to `~/bin/ib`.**
+This is not optional. Do not report "fix complete" without doing this step. The user runs `ib` from their PATH, not `./ib` from the repo.
+
+Mandatory post-edit sequence:
+```
+env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go build -buildvcs=false -o /home/rwahyudi/bin/ib ./cmd/ib
+```
+
+If the copy fails with "Text file busy", remove the old binary first:
+```
+rm /home/rwahyudi/bin/ib && env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go build -buildvcs=false -o /home/rwahyudi/bin/ib ./cmd/ib
+```
+
+Then verify the timestamp:
+```
+/home/rwahyudi/bin/ib -v
+```
+
 For manual checks, prefer focused commands such as `./ib --help`, `./ib dns create --help`, and `./ib dns list`.
 
 ## Coding Style & Naming Conventions
