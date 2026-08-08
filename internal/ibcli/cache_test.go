@@ -103,6 +103,38 @@ func TestCacheBadgerOptionsMinimizeValueLogUse(t *testing.T) {
 	}
 }
 
+func TestCacheScopeDoesNotReuseRowsAcrossServers(t *testing.T) {
+	app := testApp(t)
+	first := Profile{Name: "default", Server: "https://first.example", Username: "first-admin", DNSView: "default"}
+	second := Profile{Name: "default", Server: "https://second.example", DNSView: "default"}
+	if err := app.writeCachedRecords(first, "example.com", "1", []map[string]any{{"name": "first.example.com"}}, time.Now()); err != nil {
+		t.Fatalf("write first cache: %v", err)
+	}
+	entry, err := app.readCachedRecords(first, "example.com")
+	if err != nil {
+		t.Fatalf("read first cache: %v", err)
+	}
+	if !entry.CacheFound || len(entry.Rows) != 1 || entry.Rows[0]["name"] != "first.example.com" {
+		t.Fatalf("first server cache = %#v, want its cached row", entry)
+	}
+	entry, err = app.readCachedRecords(second, "example.com")
+	if err != nil {
+		t.Fatalf("read second cache: %v", err)
+	}
+	if entry.CacheFound {
+		t.Fatalf("second server read first server cache: %#v", entry)
+	}
+	second = first
+	second.Username = "second-admin"
+	entry, err = app.readCachedRecords(second, "example.com")
+	if err != nil {
+		t.Fatalf("read second user cache: %v", err)
+	}
+	if entry.CacheFound {
+		t.Fatalf("second user read first user cache: %#v", entry)
+	}
+}
+
 func TestCacheStatusNormalizesScientificSerial(t *testing.T) {
 	app := testApp(t)
 	profile := Profile{Name: "default", DNSView: "default"}

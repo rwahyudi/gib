@@ -2,7 +2,10 @@ package ibcli
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -27,20 +30,27 @@ func (e *WapiError) Error() string {
 }
 
 type WapiClient struct {
-	Server            string
-	ReadServer        string
-	ReadVerifySSL     bool
-	WAPIVersion       string
-	Username          string
-	Password          string
-	View              string
-	ForcePrimaryReads bool
-	httpClient        *http.Client
-	readHTTPClient    *http.Client
-	debug             func(string, ...debugField)
+	Server             string
+	ReadServer         string
+	ReadVerifySSL      bool
+	TLSFingerprint     string
+	ReadTLSFingerprint string
+	WAPIVersion        string
+	Username           string
+	Password           string
+	View               string
+	ForcePrimaryReads  bool
+	httpClient         *http.Client
+	readHTTPClient     *http.Client
+	debug              func(string, ...debugField)
+	context            context.Context
 }
 
-const minWAPIIdleConns = 32
+const (
+	minWAPIIdleConns = 32
+)
+
+var maxWAPIResponseBytes = 64 << 20
 
 func (a *App) newClient(profile Profile) *WapiClient {
 	profile = profile.complete()
@@ -49,10 +59,10 @@ func (a *App) newClient(profile Profile) *WapiClient {
 		timeout = defaultTimeoutSeconds
 	}
 
-	httpClient := a.newWAPIHTTPClient(profile.VerifySSL, timeout)
+	httpClient := a.newWAPIHTTPClient(profile.VerifySSL, timeout, profile.TLSFingerprint)
 	readHTTPClient := httpClient
-	if profile.ReadServer != "" && profile.ReadServerVerifySSL != profile.VerifySSL {
-		readHTTPClient = a.newWAPIHTTPClient(profile.ReadServerVerifySSL, timeout)
+	if profile.ReadServer != "" && (profile.ReadServerVerifySSL != profile.VerifySSL || profile.ReadTLSFingerprint != profile.TLSFingerprint) {
+		readHTTPClient = a.newWAPIHTTPClient(profile.ReadServerVerifySSL, timeout, profile.ReadTLSFingerprint)
 	}
 
 	// read_server is intentionally optional. When config did not find a usable
@@ -62,26 +72,32 @@ func (a *App) newClient(profile Profile) *WapiClient {
 		readServer = profile.Server
 	}
 	return &WapiClient{
-		Server:         profile.Server,
-		ReadServer:     readServer,
-		ReadVerifySSL:  profile.ReadServerVerifySSL,
-		WAPIVersion:    strings.TrimLeft(profile.WAPIVersion, "/"),
-		Username:       profile.Username,
-		Password:       profile.Password,
-		View:           profile.DNSView,
-		httpClient:     httpClient,
-		readHTTPClient: readHTTPClient,
-		debug:          a.debugEvent,
+		Server:             profile.Server,
+		ReadServer:         readServer,
+		ReadVerifySSL:      profile.ReadServerVerifySSL,
+		TLSFingerprint:     profile.TLSFingerprint,
+		ReadTLSFingerprint: profile.ReadTLSFingerprint,
+		WAPIVersion:        strings.TrimLeft(profile.WAPIVersion, "/"),
+		Username:           profile.Username,
+		Password:           profile.Password,
+		View:               profile.DNSView,
+		httpClient:         httpClient,
+		readHTTPClient:     readHTTPClient,
+		debug:              a.debugEvent,
+		context:            a.requestContext,
 	}
 }
 
-func (a *App) newWAPIHTTPClient(verifySSL bool, timeoutSeconds int) *http.Client {
+func (a *App) newWAPIHTTPClient(verifySSL bool, timeoutSeconds int, fingerprint string) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	a.tuneWAPITransport(transport)
-	if !verifySSL || a.tlsRootCAs != nil {
+	if !verifySSL || a.tlsRootCAs != nil || fingerprint != "" {
 		tlsConfig := &tls.Config{}
-		if !verifySSL {
+		if !verifySSL || fingerprint != "" {
 			tlsConfig.InsecureSkipVerify = true // #nosec G402 -- operator-controlled Infoblox profile setting
+		}
+		if fingerprint != "" {
+			tlsConfig.VerifyPeerCertificate = certificateFingerprintVerifier(fingerprint)
 		}
 		if a.tlsRootCAs != nil {
 			tlsConfig.RootCAs = a.tlsRootCAs
@@ -91,6 +107,20 @@ func (a *App) newWAPIHTTPClient(verifySSL bool, timeoutSeconds int) *http.Client
 	return &http.Client{
 		Timeout:   time.Duration(timeoutSeconds) * time.Second,
 		Transport: transport,
+	}
+}
+
+func certificateFingerprintVerifier(fingerprint string) func([][]byte, [][]*x509.Certificate) error {
+	expected := normalizeCertificateFingerprint(fingerprint)
+	return func(rawCertificates [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCertificates) == 0 {
+			return cliError("TLS peer did not provide a certificate")
+		}
+		sum := sha256.Sum256(rawCertificates[0])
+		if actual := normalizeCertificateFingerprint(fmt.Sprintf("%X", sum[:])); actual != expected {
+			return cliError("TLS certificate fingerprint does not match the configured profile")
+		}
+		return nil
 	}
 }
 
@@ -189,7 +219,7 @@ func (c *WapiClient) request(method, objectPath string, params url.Values, paylo
 		}
 		body = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequest(method, endpoint, body)
+	req, err := http.NewRequestWithContext(c.requestContext(), method, endpoint, body)
 	if err != nil {
 		return nil, err
 	}
@@ -208,8 +238,13 @@ func (c *WapiClient) request(method, objectPath string, params url.Values, paylo
 		return nil, wrapped
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxWAPIResponseBytes)+1))
 	if err != nil {
+		c.debugEvent("wapi error", df("method", method), df("object", objectPath), df("target", target), df("status", resp.StatusCode), df("duration", time.Since(started)), df("error", err.Error()))
+		return nil, err
+	}
+	if len(raw) > maxWAPIResponseBytes {
+		err := cliError("Infoblox WAPI response exceeds the %d MiB limit", maxWAPIResponseBytes>>20)
 		c.debugEvent("wapi error", df("method", method), df("object", objectPath), df("target", target), df("status", resp.StatusCode), df("duration", time.Since(started)), df("error", err.Error()))
 		return nil, err
 	}
@@ -229,6 +264,13 @@ func (c *WapiClient) request(method, objectPath string, params url.Values, paylo
 	}
 	c.debugEvent("wapi done", df("method", method), df("object", objectPath), df("target", target), df("status", resp.StatusCode), df("bytes", len(raw)), df("duration", time.Since(started)))
 	return result, nil
+}
+
+func (c *WapiClient) requestContext() context.Context {
+	if c != nil && c.context != nil {
+		return c.context
+	}
+	return context.Background()
 }
 
 func (c *WapiClient) debugEvent(event string, fields ...debugField) {

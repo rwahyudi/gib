@@ -38,6 +38,7 @@ type Profile struct {
 	Server                 string
 	ReadServer             string
 	ReadServerVerifySSL    bool
+	ReadTLSFingerprint     string
 	readServerVerifySSLSet bool
 	Username               string
 	Password               string
@@ -45,6 +46,7 @@ type Profile struct {
 	DNSView                string
 	DefaultZone            string
 	VerifySSL              bool
+	TLSFingerprint         string
 	Timeout                int
 }
 
@@ -189,7 +191,11 @@ func boolSetting(values map[string]string, key string, fallback bool, missing bo
 }
 
 func (a *App) readConfigSettings() (ConfigSettings, bool, error) {
-	sections, err := readINI(a.ConfigFile)
+	return readConfigSettingsAt(a.currentConfigLocation())
+}
+
+func readConfigSettingsAt(location configLocation) (ConfigSettings, bool, error) {
+	sections, err := readINI(location.File)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return defaultConfigSettings(), true, nil
@@ -269,12 +275,14 @@ func (p Profile) values() map[string]string {
 		"server":                 p.Server,
 		"read_server":            p.ReadServer,
 		"read_server_verify_ssl": strconv.FormatBool(p.ReadServerVerifySSL),
+		"read_tls_fingerprint":   p.ReadTLSFingerprint,
 		"username":               p.Username,
 		"password":               p.Password,
 		"wapi_version":           p.WAPIVersion,
 		"dns_view":               p.DNSView,
 		"default_zone":           p.DefaultZone,
 		"verify_ssl":             strconv.FormatBool(p.VerifySSL),
+		"tls_fingerprint":        p.TLSFingerprint,
 		"timeout":                strconv.Itoa(p.Timeout),
 	}
 }
@@ -287,6 +295,7 @@ func profileFromValues(name string, values map[string]string) Profile {
 		Server:                 values["server"],
 		ReadServer:             values["read_server"],
 		ReadServerVerifySSL:    readServerVerifySSL,
+		ReadTLSFingerprint:     normalizeCertificateFingerprint(values["read_tls_fingerprint"]),
 		readServerVerifySSLSet: readServerVerifySSLSet,
 		Username:               values["username"],
 		Password:               values["password"],
@@ -294,6 +303,7 @@ func profileFromValues(name string, values map[string]string) Profile {
 		DNSView:                values["dns_view"],
 		DefaultZone:            values["default_zone"],
 		VerifySSL:              parseBool(values["verify_ssl"], true),
+		TLSFingerprint:         normalizeCertificateFingerprint(values["tls_fingerprint"]),
 		Timeout:                timeout,
 	}
 	return profile.complete()
@@ -394,6 +404,20 @@ func (a *App) decryptFernetPassword(password string) (string, error) {
 	return decryptFernet(key, password)
 }
 
+func decryptPasswordAt(password string, keyFile string) (string, error) {
+	if strings.HasPrefix(password, encryptedWindowsDPAPIPrefix) {
+		return decryptWindowsDPAPIPassword(password)
+	}
+	if !strings.HasPrefix(password, encryptedPasswordPrefix) {
+		return password, nil
+	}
+	raw, err := os.ReadFile(keyFile)
+	if err != nil {
+		return "", cliError("missing encryption key file at %s; run: ib config new [PROFILE]", keyFile)
+	}
+	return decryptFernet(strings.TrimSpace(string(raw)), password)
+}
+
 func readINI(path string) (map[string]map[string]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -434,7 +458,11 @@ func readINI(path string) (map[string]map[string]string, error) {
 }
 
 func (a *App) readConfigProfiles(decrypt bool) (string, map[string]Profile, bool, error) {
-	sections, err := readINI(a.ConfigFile)
+	return a.readConfigProfilesAt(a.currentConfigLocation(), decrypt)
+}
+
+func (a *App) readConfigProfilesAt(location configLocation, decrypt bool) (string, map[string]Profile, bool, error) {
+	sections, err := readINI(location.File)
 	if err != nil {
 		return "", nil, false, err
 	}
@@ -450,9 +478,9 @@ func (a *App) readConfigProfiles(decrypt bool) (string, map[string]Profile, bool
 		}
 		profile := profileFromValues(name, values)
 		if decrypt && profile.Password != "" {
-			profile.Password, err = a.decryptPassword(profile.Password)
+			profile.Password, err = decryptPasswordAt(profile.Password, location.KeyFile)
 			if err != nil {
-				return "", nil, false, cliError("cannot decrypt password in %s: %v", a.ConfigFile, err)
+				return "", nil, false, cliError("cannot decrypt password in %s: %v", location.File, err)
 			}
 		}
 		profiles[name] = profile
@@ -483,7 +511,7 @@ func (a *App) readConfigProfiles(decrypt bool) (string, map[string]Profile, bool
 	if values, ok := sections["default"]; ok {
 		profile := profileFromValues(defaultProfileName, values)
 		if decrypt && profile.Password != "" {
-			profile.Password, err = a.decryptPassword(profile.Password)
+			profile.Password, err = decryptPasswordAt(profile.Password, location.KeyFile)
 			if err != nil {
 				return "", nil, false, err
 			}
@@ -519,30 +547,22 @@ func (a *App) readConfigFileData(location configLocation, decrypt bool) (configF
 		}
 		return configFileData{}, false, err
 	}
-	var data configFileData
-	err := a.withConfigLocation(location, func() error {
-		defaultProfile, profiles, legacy, err := a.readConfigProfiles(decrypt)
-		if err != nil {
-			return err
-		}
-		settings, settingsMissing, err := a.readConfigSettings()
-		if err != nil {
-			return err
-		}
-		data = configFileData{
-			Location:        location,
-			DefaultProfile:  defaultProfile,
-			Profiles:        profiles,
-			Legacy:          legacy,
-			Settings:        settings,
-			SettingsMissing: settingsMissing,
-		}
-		return nil
-	})
+	defaultProfile, profiles, legacy, err := a.readConfigProfilesAt(location, decrypt)
 	if err != nil {
 		return configFileData{}, true, err
 	}
-	return data, true, nil
+	settings, settingsMissing, err := readConfigSettingsAt(location)
+	if err != nil {
+		return configFileData{}, true, err
+	}
+	return configFileData{
+		Location:        location,
+		DefaultProfile:  defaultProfile,
+		Profiles:        profiles,
+		Legacy:          legacy,
+		Settings:        settings,
+		SettingsMissing: settingsMissing,
+	}, true, nil
 }
 
 func (a *App) readMergedConfig(decrypt bool) (mergedConfigData, error) {
@@ -652,7 +672,7 @@ func (a *App) writeConfigProfilesWithSettingsMode(defaultProfile string, profile
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	keys := []string{"server", "read_server", "read_server_verify_ssl", "username", "password", "wapi_version", "dns_view", "default_zone", "verify_ssl", "timeout"}
+	keys := []string{"server", "read_server", "read_server_verify_ssl", "read_tls_fingerprint", "username", "password", "wapi_version", "dns_view", "default_zone", "verify_ssl", "tls_fingerprint", "timeout"}
 	for _, name := range names {
 		profile := profiles[name].complete()
 		encryptedPassword, err := a.encryptPassword(profile.Password)

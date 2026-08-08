@@ -19,6 +19,7 @@ type Gum struct {
 	out    io.Writer
 	err    io.Writer
 	reader *bufio.Reader
+	eof    bool
 }
 
 var (
@@ -180,6 +181,7 @@ func (g *Gum) fallbackInput(label, defaultValue string, secret bool) (string, er
 	value, err := g.reader.ReadString('\n')
 	if err == io.EOF {
 		fmt.Fprintln(g.out)
+		g.eof = true
 	} else if err != nil {
 		return "", err
 	}
@@ -188,6 +190,10 @@ func (g *Gum) fallbackInput(label, defaultValue string, secret bool) (string, er
 		return defaultValue, nil
 	}
 	return value, nil
+}
+
+func (g *Gum) inputExhausted() bool {
+	return g != nil && g.eof
 }
 
 func (g *Gum) fallbackConfirm(label string, defaultValue bool) (bool, error) {

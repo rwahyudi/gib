@@ -33,6 +33,51 @@ func (a *App) zoneFlagCompletion(cmd *cobra.Command, args []string, toComplete s
 	return a.completeZoneNames(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
+func (a *App) dnsViewCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_, client, err := a.configuredClient()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	// DNS views have no local index, so query the lightweight view endpoint.
+	views, err := queryViewNames(client)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return matchingCompletionNames(views, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func (a *App) networkViewFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	profile, err := a.loadConfig(true)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	entry, err := a.readCachedNetworkViews(profile)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	if !entry.CacheFound {
+		if a.completionCachePrefetchEnabled() {
+			a.startNetCacheRefreshAsync(profile, netCacheKindViews, "", "")
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	if a.completionCachePrefetchEnabled() && !a.cacheEntryFresh(entry, time.Now()) {
+		a.startNetCacheRefreshAsync(profile, netCacheKindViews, "", "")
+	}
+	return matchingCompletionNames(networkViewNames(entry.Rows), toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func matchingCompletionNames(names []string, toComplete string) []string {
+	prefix := strings.ToLower(strings.TrimSpace(toComplete))
+	matches := make([]string, 0, len(names))
+	for _, name := range names {
+		if prefix == "" || strings.HasPrefix(strings.ToLower(name), prefix) {
+			matches = append(matches, name)
+		}
+	}
+	return matches
+}
+
 func (a *App) dnsListArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	args = completionArgsBeforeCurrent(args, toComplete)
 	trimmed := strings.TrimSpace(toComplete)

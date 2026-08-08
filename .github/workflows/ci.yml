@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check Go formatting
+        run: |
+          unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
+          test -z "$unformatted"
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run race tests
+        run: go test -race ./...
+
+      - name: Install static analysis tools
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run staticcheck
+        # Existing intentional compatibility helpers and test fixtures trigger
+        # these style-only checks. Keep the safety and correctness analyzers
+        # enabled while the legacy cleanup is tracked separately.
+        run: '"$(go env GOPATH)/bin/staticcheck" -checks=all,-U1000,-S1030,-SA1019,-SA4006,-ST1000 ./...'
+
+      - name: Check reachable Go vulnerabilities
+        run: '"$(go env GOPATH)/bin/govulncheck" ./...'
+
+      - name: Install packaging smoke-test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y groff rpm shellcheck
+
+      - name: Validate Bash completion and manual page
+        run: |
+          bash -n packaging/bash_completion/ib
+          shellcheck packaging/bash_completion/ib
+          groff -man -Tutf8 packaging/man/ib.1 >/dev/null
+
+      - name: Validate GoReleaser configuration
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+
+      - name: Build and inspect snapshot packages
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+
+      - name: Verify packaged manual pages
+        run: |
+          dpkg-deb --contents dist/*.deb | grep -q 'usr/share/man/man1/ib.1'
+          rpm -qlp dist/*.rpm | grep -qx '/usr/share/man/man1/ib.1'

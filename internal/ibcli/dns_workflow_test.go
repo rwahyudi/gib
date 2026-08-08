@@ -770,7 +770,7 @@ func TestZoneDeleteQueuesZoneRefreshAndClearsRecordCache(t *testing.T) {
 	recordRefreshes := captureRecordRefreshes(app)
 	zoneRefreshes := captureZoneRefreshes(app)
 
-	if err := app.runZoneDelete("old.example.com"); err != nil {
+	if err := app.runZoneDelete("old.example.com", true); err != nil {
 		t.Fatalf("zone delete: %v", err)
 	}
 
@@ -781,6 +781,52 @@ func TestZoneDeleteQueuesZoneRefreshAndClearsRecordCache(t *testing.T) {
 	assertRecordCacheInvalidated(t, app, profile, "old.example.com")
 	assertZoneRefreshQueued(t, zoneRefreshes, "default")
 	assertNoRecordRefreshQueued(t, recordRefreshes)
+}
+
+func TestZoneDeleteRequiresConfirmationInNonInteractiveMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"_ref": "zone_auth/ref", "fqdn": "old.example.com"}}})
+		case r.Method == http.MethodDelete:
+			t.Fatal("unconfirmed zone delete reached primary")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	app, _ := dnsWorkflowApp(t, server.URL, server.URL)
+	err := app.Execute([]string{"dns", "zone", "delete", "old.example.com"})
+	if err == nil || !strings.Contains(err.Error(), "rerun with -y") {
+		t.Fatalf("zone delete error = %v, want confirmation guidance", err)
+	}
+}
+
+func TestZoneDeleteCancellationDoesNotDelete(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/zone_auth"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"_ref": "zone_auth/ref", "fqdn": "old.example.com", "view": "default"}}})
+		case r.Method == http.MethodDelete:
+			t.Fatal("cancelled zone delete reached primary")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app, _ := dnsWorkflowApp(t, server.URL, server.URL)
+	var confirmedZone, confirmedView, confirmedRef string
+	app.zoneDeleteConfirmer = func(zone, view, ref string) (bool, error) {
+		confirmedZone, confirmedView, confirmedRef = zone, view, ref
+		return false, nil
+	}
+	if err := app.Execute([]string{"dns", "zone", "delete", "old.example.com"}); err != nil {
+		t.Fatalf("cancelled zone delete: %v", err)
+	}
+	if confirmedZone != "old.example.com" || confirmedView != "default" || confirmedRef != "zone_auth/ref" {
+		t.Fatalf("confirmation details = %q, %q, %q", confirmedZone, confirmedView, confirmedRef)
+	}
 }
 
 func TestDNSDeleteRequiresConfirmationBeforeDelete(t *testing.T) {

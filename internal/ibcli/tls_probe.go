@@ -23,31 +23,32 @@ func (e *untrustedTLSCertificateError) Error() string {
 	return "certificate is not trusted"
 }
 
-func (a *App) promptReachableServer(currentServer string, timeoutSeconds int) (string, bool, error) {
+func (a *App) promptReachableServer(currentServer string, timeoutSeconds int) (string, bool, string, error) {
 	defaultValue := currentServer
 	for {
 		server, err := a.gum.Input("Infoblox server", defaultValue, false)
 		if err != nil {
-			return "", false, err
+			return "", false, "", err
 		}
 		normalized, err := normalizeServer(server)
 		if err != nil {
-			return "", false, err
+			return "", false, "", err
 		}
 		verifySSL, err := a.validateServerReachability(normalized, timeoutSeconds)
 		if err == nil {
-			return normalized, verifySSL, nil
+			return normalized, verifySSL, "", nil
 		}
 		defaultValue = normalized
 		if certErr, ok := err.(*untrustedTLSCertificateError); ok {
 			a.printUntrustedCertificate(certErr)
 			trust, promptErr := a.gum.Confirm("Trust this Infoblox HTTPS certificate for this profile?", false)
 			if promptErr != nil {
-				return "", false, promptErr
+				return "", false, "", promptErr
 			}
 			if trust {
-				a.printConfigureWarning("WARNING: SSL verification will be disabled for this profile.")
-				return normalized, false, nil
+				fingerprint := certificateFingerprint(certErr.certificate)
+				a.printConfigureWarning("WARNING: the certificate fingerprint will be pinned for this profile.")
+				return normalized, false, fingerprint, nil
 			}
 			a.printConfigureWarning("WARNING: certificate was not trusted; enter a different Infoblox server.")
 			continue
@@ -182,4 +183,8 @@ func certificateFingerprint(cert *x509.Certificate) string {
 		pairs = append(pairs, raw[i:i+2])
 	}
 	return strings.Join(pairs, ":")
+}
+
+func normalizeCertificateFingerprint(value string) string {
+	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(value), ":", ""))
 }

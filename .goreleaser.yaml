@@ -72,6 +72,10 @@ nfpms:
         dst: /etc/bash_completion.d/ib
         file_info:
           mode: 0644
+      - src: packaging/man/ib.1
+        dst: /usr/share/man/man1/ib.1
+        file_info:
+          mode: 0644
       - src: LICENSE
         dst: /usr/share/doc/ib/LICENSE
         file_info:

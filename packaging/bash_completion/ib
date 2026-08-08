@@ -1,4 +1,6 @@
 # bash completion loader for packaged ib installs
+# shellcheck shell=bash
+# shellcheck disable=SC1090 # The installed ib binary generates this script.
 
 if [[ -n ${BASH_VERSION:-} ]]; then
   _ib_binary=$(command -v ib 2>/dev/null || true)

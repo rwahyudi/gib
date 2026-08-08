@@ -58,7 +58,7 @@ curl -fLO https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd6
 sudo apt install ./ib_linux_amd64.deb
 ```
 
-RPM and DEB packages install `ib` to `/usr/local/bin/ib` and Bash completion to `/etc/bash_completion.d/ib`. For the tarball, install completion manually:
+RPM and DEB packages install `ib` to `/usr/local/bin/ib`, Bash completion to `/etc/bash_completion.d/ib`, and the manual page to `/usr/share/man/man1/ib.1` (`man ib`). For the tarball, install completion manually:
 
 ```bash
 sudo mkdir -p /etc/bash_completion.d
@@ -98,7 +98,7 @@ ib dns zone use example.com
 ib dns list
 ```
 
-Profiles store the primary server, primary TLS trust, auto-detected WAPI version, optional validated GCM read endpoint plus `read_server_verify_ssl`, credentials, DNS view, default zone, and audit logging settings. Passwords are encrypted at rest. Unix builds use a key file; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles.
+Profiles store the primary server, primary TLS trust or pinned certificate fingerprint, auto-detected WAPI version, optional validated GCM read endpoint with independent TLS settings, credentials, DNS view, default zone, and audit logging settings. Passwords are encrypted at rest. Unix builds use a key file; native Windows builds use user-scope DPAPI for new writes and can still read existing `enc:v1` key-file profiles.
 
 Local profiles live under `~/.ib/`. On Linux, `sudo ib config new --global-config [PROFILE]` creates a shared profile under `/etc/ib/`; normal commands merge `/etc/ib/config` with `~/.ib/config` so user-local metadata can select a global profile without copying secrets.
 
@@ -113,6 +113,7 @@ Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, audi
 | Search records | `ib dns search app` | Add `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
 | Create records | `ib dns create host app 192.0.2.10 -c "Application host"` | Type-first syntax keeps A, AAAA, CNAME, host, MX, NS, PTR, SRV, and TXT workflows consistent. |
 | Edit or delete records | `ib dns edit host app 192.0.2.20` | Deletes match forward DNS names case-insensitively and prompt for confirmation unless `-y` is used. |
+| Delete a zone | `ib dns zone delete example.com` | Requires an interactive confirmation; use `-y` only for deliberate automation. |
 | Read IPAM | `ib net list prod --network-view default` | Lists or searches IPv4 networks and containers, including assigned VLAN fields when WAPI supports them. |
 | Find addresses | `ib net next-ip 192.0.2.0/24 -n 3` | Resolves networks and containers, then asks the primary server for current next-IP results. |
 | Inspect VLANs | `ib vlan list --network-view default` | Derives VLAN rows from IPAM network/container metadata; stock NIOS has no VLAN CRUD WAPI. |
@@ -152,9 +153,9 @@ DNS record fields include `type`, `name`, `value`, `zone`, `ttl`, and `comment`.
 
 `cmd/ib/main.go` starts the Cobra CLI and hands behavior to `internal/ibcli`. Profile loading decrypts the stored password, resolves the current DNS view/zone, and builds the WAPI client.
 
-When a profile has a validated `read_server`, read-only GET requests can use that endpoint with its own `read_server_verify_ssl` setting. Create, update, delete, and next-IP function calls always use the primary Grid Master.
+When a profile has a validated `read_server`, read-only GET requests can use that endpoint with its own TLS setting or certificate pin. Create, update, delete, and next-IP function calls always use the primary Grid Master. WAPI responses are size-limited and cancel when the command receives Ctrl-C.
 
-Zone, record, IPAM, and VLAN rows are cached in `~/.ib/cache.badger/` for local profiles or `/etc/ib/cache.badger/` for Linux global profiles. Record and IPAM freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` can be returned immediately while refresh work runs in the background. Large DNS searches use bounded workers, reuse cache rows, and batch stale multi-zone record revalidation.
+Zone, record, IPAM, and VLAN rows are cached in `~/.ib/cache.badger/` for local profiles or `/etc/ib/cache.badger/` for Linux global profiles. Cache namespaces include the profile endpoint, so repointing a profile cannot reuse another Grid's data. Record and IPAM freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` can be returned immediately while refresh work runs in the background. Large DNS searches use bounded workers, reuse cache rows, and batch stale multi-zone record revalidation.
 
 For the deeper cache and worker model, see [Performance & Caching](docs/performance-caching.md).
 
@@ -173,7 +174,7 @@ On Windows, install native PowerShell completion for the current user:
 ib config completion windows
 ```
 
-The generated completion calls the live `ib` binary, so profiles, zones, records, IPAM networks, flags, and output formats are resolved dynamically.
+The generated completion calls the live `ib` binary, so profiles, DNS views, zones, records, IPAM network views/networks, flags, and output formats are resolved dynamically.
 
 To see what a command is doing and how long each step takes, add `--debug`. Debug output is written to stderr, so JSON and CSV stdout stay script-friendly:
 

@@ -188,6 +188,7 @@ func (a *App) cacheCommand() *cobra.Command {
 	refreshNetCmd.Flags().String("profile", "", "profile name")
 	refreshNetCmd.Flags().String("kind", "", "net cache kind")
 	refreshNetCmd.Flags().String("network-view", "", "IPAM network view")
+	_ = refreshNetCmd.RegisterFlagCompletionFunc("network-view", a.networkViewFlagCompletion)
 	refreshNetCmd.Flags().String("ip", "", "IPv4 address")
 	cmd.AddCommand(refreshNetCmd)
 	return cmd
@@ -239,6 +240,7 @@ func (a *App) dnsCommand() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&a.dnsZoneOverride, "zone", "z", "", "DNS zone override for this command")
 	cmd.PersistentFlags().StringVarP(&a.dnsViewOverride, "view", "v", "", "DNS view override for this command")
 	_ = cmd.RegisterFlagCompletionFunc("zone", a.zoneFlagCompletion)
+	_ = cmd.RegisterFlagCompletionFunc("view", a.dnsViewCompletion)
 	cmd.AddCommand(a.dnsViewCommand())
 	cmd.AddCommand(a.dnsZoneCommand())
 	cmd.AddCommand(a.dnsNextIPCommand())
@@ -305,7 +307,7 @@ func (a *App) vlanListCommand() *cobra.Command {
 			return a.runVLANList(search, networkView, vlanSort, columns, refresh)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	a.addNetworkViewFlag(cmd, &networkView, "network view filter")
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh VLAN cache before listing")
 	addVLANSortFlag(cmd, &sortRaw)
 	addVLANColumnsFlag(cmd, &columnsRaw)
@@ -334,7 +336,7 @@ func (a *App) vlanSearchCommand() *cobra.Command {
 			return a.runVLANSarch(args[0], networkView, vlanSort, columns, refresh)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	a.addNetworkViewFlag(cmd, &networkView, "network view filter")
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh VLAN cache before searching")
 	addVLANSortFlag(cmd, &sortRaw)
 	addVLANColumnsFlag(cmd, &columnsRaw)
@@ -352,7 +354,7 @@ func (a *App) vlanShowCommand() *cobra.Command {
 			return a.runVLANShow(args[0], networkView)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the VLAN lookup")
+	a.addNetworkViewFlag(cmd, &networkView, "network view for the VLAN lookup")
 	return cmd
 }
 
@@ -379,7 +381,7 @@ func (a *App) vlanCreateCommand() *cobra.Command {
 			return a.runVLANCreate(args[0], args[1], networkView, comment)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the VLAN")
+	a.addNetworkViewFlag(cmd, &networkView, "network view for the VLAN")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "VLAN comment")
 	return cmd
 }
@@ -396,7 +398,7 @@ func (a *App) vlanEditCommand() *cobra.Command {
 			return a.runVLANEdit(args[0], name, comment, networkView)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the VLAN")
+	a.addNetworkViewFlag(cmd, &networkView, "network view for the VLAN")
 	cmd.Flags().StringVar(&name, "name", "", "new VLAN name")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "new VLAN comment")
 	return cmd
@@ -413,7 +415,7 @@ func (a *App) vlanDeleteCommand() *cobra.Command {
 			return a.runVLANDelete(args[0], networkView)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the VLAN")
+	a.addNetworkViewFlag(cmd, &networkView, "network view for the VLAN")
 	cmd.Flags().BoolVarP(&skipConfirm, "yes", "y", false, "skip delete confirmation prompt")
 	return cmd
 }
@@ -457,7 +459,7 @@ func (a *App) netListCommand() *cobra.Command {
 			return a.runNetList(search, networkView, netSort, columns, refresh)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	a.addNetworkViewFlag(cmd, &networkView, "network view filter")
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh IPAM cache before listing")
 	addNetSortFlag(cmd, &sortRaw)
 	addNetworkColumnsFlag(cmd, &columnsRaw)
@@ -486,7 +488,7 @@ func (a *App) netSearchCommand() *cobra.Command {
 			return a.runNetSearch(args[0], networkView, netSort, columns, refresh)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view filter")
+	a.addNetworkViewFlag(cmd, &networkView, "network view filter")
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh IPAM cache before searching")
 	addNetSortFlag(cmd, &sortRaw)
 	addNetworkColumnsFlag(cmd, &columnsRaw)
@@ -504,7 +506,7 @@ func (a *App) netShowCommand() *cobra.Command {
 			return a.runNetShow(args[0], networkView)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the target network")
+	a.addNetworkViewFlag(cmd, &networkView, "network view for the target network")
 	return cmd
 }
 
@@ -519,7 +521,7 @@ func (a *App) netAddressCommand() *cobra.Command {
 			return a.runNetAddress(args[0], networkView)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the address lookup")
+	a.addNetworkViewFlag(cmd, &networkView, "network view for the address lookup")
 	return cmd
 }
 
@@ -555,9 +557,10 @@ func (a *App) dnsViewCommand() *cobra.Command {
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
-		Use:   "use VIEW",
-		Short: "Set the active DNS view for this shell session",
-		Args:  cobra.ExactArgs(1),
+		Use:               "use VIEW",
+		Short:             "Set the active DNS view for this shell session",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.dnsViewCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, client, err := a.configuredClient()
 			if err != nil {
@@ -673,6 +676,7 @@ func (a *App) dnsZoneCommand() *cobra.Command {
 		},
 	}
 	cmd.AddCommand(infoCmd)
+	var skipZoneDeleteConfirm bool
 	deleteCmd := &cobra.Command{
 		Use:   "delete ZONE",
 		Short: "Delete a DNS zone",
@@ -684,9 +688,10 @@ func (a *App) dnsZoneCommand() *cobra.Command {
 			return a.zoneArgCompletion(cmd, args, toComplete)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.runZoneDelete(args[0])
+			return a.runZoneDelete(args[0], skipZoneDeleteConfirm)
 		},
 	}
+	deleteCmd.Flags().BoolVarP(&skipZoneDeleteConfirm, "yes", "y", false, "skip delete confirmation")
 	cmd.AddCommand(deleteCmd)
 	useCmd := &cobra.Command{
 		Use:   "use ZONE",
@@ -773,10 +778,15 @@ func (a *App) nextIPCommand(run func(string, string, int, []string) error) *cobr
 			return run(args[0], networkView, num, exclude)
 		},
 	}
-	cmd.Flags().StringVar(&networkView, "network-view", "", "network view for the target network")
+	a.addNetworkViewFlag(cmd, &networkView, "network view for the target network")
 	cmd.Flags().IntVarP(&num, "num", "n", 1, "number of IP addresses to request, 1-20")
 	cmd.Flags().StringArrayVarP(&exclude, "exclude", "e", nil, "IP address to exclude from allocation; repeatable")
 	return cmd
+}
+
+func (a *App) addNetworkViewFlag(cmd *cobra.Command, target *string, usage string) {
+	cmd.Flags().StringVar(target, "network-view", "", usage)
+	_ = cmd.RegisterFlagCompletionFunc("network-view", a.networkViewFlagCompletion)
 }
 
 func (a *App) dnsEditCommand() *cobra.Command {
@@ -1371,16 +1381,17 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	current := profiles[selected].complete()
 	a.printConfigureStep(step, "Infoblox Endpoint", "Enter the Grid Master URL; the WAPI suffix is normalized automatically.")
 	step++
-	server, verifySSL, err := a.promptReachableServer(current.Server, firstNonZero(current.Timeout, defaultTimeoutSeconds))
+	server, verifySSL, tlsFingerprint, err := a.promptReachableServer(current.Server, firstNonZero(current.Timeout, defaultTimeoutSeconds))
 	if err != nil {
 		return err
 	}
 	wapiDefault := firstNonEmpty(current.WAPIVersion, defaultWAPIVersion)
 	versionProbe := Profile{
-		Name:      selected,
-		Server:    server,
-		VerifySSL: verifySSL,
-		Timeout:   firstNonZero(current.Timeout, defaultTimeoutSeconds),
+		Name:           selected,
+		Server:         server,
+		VerifySSL:      verifySSL,
+		TLSFingerprint: tlsFingerprint,
+		Timeout:        firstNonZero(current.Timeout, defaultTimeoutSeconds),
 	}.complete()
 	preLoginWAPIDetected := false
 	if detected, err := a.detectWAPIVersion(versionProbe); err == nil {
@@ -1393,12 +1404,13 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	a.printConfigureStep(step, "Credentials", "Username and password are required; the password is encrypted before it is written.")
 	step++
 	credentialProbe := Profile{
-		Name:        selected,
-		Server:      server,
-		WAPIVersion: wapiDefault,
-		DNSView:     firstNonEmpty(current.DNSView, "default"),
-		VerifySSL:   verifySSL,
-		Timeout:     firstNonZero(current.Timeout, defaultTimeoutSeconds),
+		Name:           selected,
+		Server:         server,
+		WAPIVersion:    wapiDefault,
+		DNSView:        firstNonEmpty(current.DNSView, "default"),
+		VerifySSL:      verifySSL,
+		TLSFingerprint: tlsFingerprint,
+		Timeout:        firstNonZero(current.Timeout, defaultTimeoutSeconds),
 	}.complete()
 	username, password, err := a.promptValidatedCredentials(credentialProbe, current)
 	if err != nil {
@@ -1422,14 +1434,15 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 		return err
 	}
 	probe := Profile{
-		Name:        selected,
-		Server:      server,
-		Username:    username,
-		Password:    password,
-		WAPIVersion: wapiVersion,
-		DNSView:     firstNonEmpty(current.DNSView, "default"),
-		VerifySSL:   verifySSL,
-		Timeout:     firstNonZero(current.Timeout, defaultTimeoutSeconds),
+		Name:           selected,
+		Server:         server,
+		Username:       username,
+		Password:       password,
+		WAPIVersion:    wapiVersion,
+		DNSView:        firstNonEmpty(current.DNSView, "default"),
+		VerifySSL:      verifySSL,
+		TLSFingerprint: tlsFingerprint,
+		Timeout:        firstNonZero(current.Timeout, defaultTimeoutSeconds),
 	}.complete()
 	a.printConfigureStep(step, "Connection Test", "The profile is tested before any changes are saved.")
 	step++
@@ -1445,9 +1458,10 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 	step++
 	// read_server is saved only after a direct read-only GET probe succeeds.
 	// Otherwise leaving it blank keeps every request on the primary server.
-	readServer, readServerVerifySSL, _ := a.promptReadServer(probe, current.ReadServer)
+	readServer, readServerVerifySSL, readTLSFingerprint, _ := a.promptReadServer(probe, current.ReadServer)
 	probe.ReadServer = readServer
 	probe.ReadServerVerifySSL = readServerVerifySSL
+	probe.ReadTLSFingerprint = readTLSFingerprint
 	probe.readServerVerifySSLSet = true
 	a.printConfigureStep(step, "DNS View", "Pick the default DNS view for DNS commands.")
 	step++
@@ -1491,6 +1505,7 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 		Server:                 server,
 		ReadServer:             readServer,
 		ReadServerVerifySSL:    readServerVerifySSL,
+		ReadTLSFingerprint:     readTLSFingerprint,
 		readServerVerifySSLSet: true,
 		Username:               username,
 		Password:               password,
@@ -1498,6 +1513,7 @@ func (a *App) saveConfigInteractiveDetails(selected string, defaultProfile strin
 		DNSView:                dnsView,
 		DefaultZone:            defaultZone,
 		VerifySSL:              verifySSL,
+		TLSFingerprint:         tlsFingerprint,
 		Timeout:                probe.Timeout,
 	}.complete()
 	profiles[selected] = savedProfile
@@ -1647,6 +1663,9 @@ func (a *App) promptGlobalConfigGroup(currentGroup string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if a.gum.inputExhausted() {
+			return "", cliError("input canceled: standard input is unavailable")
+		}
 		group = strings.TrimSpace(group)
 		if group == "" {
 			a.PrintWarning("WARNING: Linux group is required for global config access.")
@@ -1661,6 +1680,9 @@ func (a *App) promptGlobalConfigGroup(currentGroup string) (string, error) {
 }
 
 func (a *App) promptConfigRetry(err error) bool {
+	if a.gum == nil || a.gum.inputExhausted() {
+		return false
+	}
 	if isConnectionTestFailure(err) {
 		return a.promptConnectionTestRetry(err)
 	}
@@ -1918,11 +1940,11 @@ func compareWAPIVersionParts(left, right []int) int {
 	return 0
 }
 
-func (a *App) promptReadServer(profile Profile, _ string) (string, bool, bool) {
+func (a *App) promptReadServer(profile Profile, _ string) (string, bool, string, bool) {
 	candidates, disabled, err := gcmReadServers(a.newClient(profile))
 	if err != nil {
 		a.printConfigureInfo("INFO: could not discover Grid Master Candidates; read queries will use the primary server: " + err.Error())
-		return "", true, true
+		return "", true, "", true
 	}
 	if len(disabled) > 0 {
 		for _, host := range disabled {
@@ -1931,21 +1953,21 @@ func (a *App) promptReadServer(profile Profile, _ string) (string, bool, bool) {
 	}
 	if len(candidates) == 0 {
 		a.printConfigureInfo("INFO: no usable Grid Master Candidate found; read queries will use the primary server.")
-		return "", true, true
+		return "", true, "", true
 	}
 	declined := false
 	for _, candidate := range candidates {
-		readServerVerifySSL, ok := a.promptReadServerTLS(candidate, profile.Timeout)
+		readServerVerifySSL, readTLSFingerprint, ok := a.promptReadServerTLS(candidate, profile.Timeout)
 		if !ok {
 			continue
 		}
-		if err := a.testReadServer(profile, candidate, readServerVerifySSL); err != nil {
+		if err := a.testReadServer(profile, candidate, readServerVerifySSL, readTLSFingerprint); err != nil {
 			a.printConfigureInfo("INFO: Grid Master Candidate " + candidate + " failed read-only API probe and will not be used: " + err.Error())
 			continue
 		}
 		useCandidate, err := a.gum.Confirm("Use "+candidate+" for read-only DNS queries?", true)
 		if err != nil {
-			return "", true, true
+			return "", true, "", true
 		}
 		if !useCandidate {
 			declined = true
@@ -1953,42 +1975,44 @@ func (a *App) promptReadServer(profile Profile, _ string) (string, bool, bool) {
 			continue
 		}
 		a.printConfigureInfo("INFO: read-only GET requests will use Grid Master Candidate " + candidate + ".")
-		return candidate, readServerVerifySSL, true
+		return candidate, readServerVerifySSL, readTLSFingerprint, true
 	}
 	if declined {
 		a.printConfigureInfo("INFO: no Grid Master Candidate was selected; read queries will use the primary server.")
-		return "", true, true
+		return "", true, "", true
 	}
 	a.printConfigureInfo("INFO: no Grid Master Candidate passed read-only API probe; read queries will use the primary server.")
-	return "", true, true
+	return "", true, "", true
 }
 
-func (a *App) promptReadServerTLS(readServer string, timeoutSeconds int) (bool, bool) {
+func (a *App) promptReadServerTLS(readServer string, timeoutSeconds int) (bool, string, bool) {
 	verifySSL, err := a.validateServerReachability(readServer, timeoutSeconds)
 	if err == nil {
-		return verifySSL, true
+		return verifySSL, "", true
 	}
 	if certErr, ok := err.(*untrustedTLSCertificateError); ok {
 		a.printUntrustedCertificate(certErr)
 		trust, promptErr := a.gum.Confirm("Trust this Grid Master Candidate HTTPS certificate for read-only queries?", false)
 		if promptErr != nil {
-			return true, false
+			return true, "", false
 		}
 		if trust {
-			a.printConfigureWarning("WARNING: SSL verification will be disabled for this read endpoint.")
-			return false, true
+			fingerprint := certificateFingerprint(certErr.certificate)
+			a.printConfigureWarning("WARNING: the certificate fingerprint will be pinned for this read endpoint.")
+			return false, fingerprint, true
 		}
 		a.printConfigureWarning("WARNING: Grid Master Candidate certificate was not trusted; checking the next candidate.")
-		return true, false
+		return true, "", false
 	}
 	a.printConfigureInfo("INFO: Grid Master Candidate " + readServer + " is not reachable and will not be used: " + err.Error())
-	return true, false
+	return true, "", false
 }
 
-func (a *App) testReadServer(profile Profile, readServer string, readServerVerifySSL bool) error {
+func (a *App) testReadServer(profile Profile, readServer string, readServerVerifySSL bool, readTLSFingerprint string) error {
 	probe := profile
 	probe.ReadServer = readServer
 	probe.ReadServerVerifySSL = readServerVerifySSL
+	probe.ReadTLSFingerprint = readTLSFingerprint
 	probe.readServerVerifySSLSet = true
 	client := a.newClient(probe)
 	params := url.Values{"_return_fields": []string{"name"}, "_max_results": []string{"1"}}
@@ -2266,7 +2290,7 @@ func pluralizeDurationUnit(count int64, unit string) string {
 	return fmt.Sprintf("%d %ss", count, unit)
 }
 
-func (a *App) runZoneDelete(zoneName string) error {
+func (a *App) runZoneDelete(zoneName string, skipConfirm bool) error {
 	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
@@ -2289,6 +2313,13 @@ func (a *App) runZoneDelete(zoneName string) error {
 	if ref == "" {
 		return cliError("matched zone does not include an _ref")
 	}
+	if err := a.confirmZoneDelete(target, client.View, ref, skipConfirm); err != nil {
+		if errors.Is(err, errDeleteCancelled) {
+			a.PrintNote("INFO: delete cancelled")
+			return nil
+		}
+		return err
+	}
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return err
 	}
@@ -2302,6 +2333,33 @@ func (a *App) runZoneDelete(zoneName string) error {
 		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", "ZONE", target, target, client.View, "deleted DNS zone"))
 	}
 	a.PrintSuccess("SUCCESS: deleted DNS zone " + target)
+	return nil
+}
+
+func (a *App) confirmZoneDelete(zone, view, ref string, skipConfirm bool) error {
+	if skipConfirm {
+		return nil
+	}
+	if a.zoneDeleteConfirmer != nil {
+		confirmed, err := a.zoneDeleteConfirmer(zone, view, ref)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return errDeleteCancelled
+		}
+		return nil
+	}
+	if !a.isTableOutput() || a.gum == nil || !a.gum.interactive() {
+		return cliError("zone delete confirmation requires an interactive terminal; rerun with -y to skip confirmation")
+	}
+	confirmed, err := a.gum.Confirm(fmt.Sprintf("Delete DNS zone %s in view %s (ref=%s)?", zone, view, ref), false)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return errDeleteCancelled
+	}
 	return nil
 }
 

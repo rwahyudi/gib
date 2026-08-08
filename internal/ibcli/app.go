@@ -1,11 +1,13 @@
 package ibcli
 
 import (
+	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -100,8 +102,10 @@ type App struct {
 	backgroundNetRefresher           func(Profile, string, string, string) error
 	dnsDeleteRecordSelector          func(string, []TypedRecord) (TypedRecord, bool, error)
 	dnsDeleteConfirmer               func(string, TypedRecord) (bool, error)
+	zoneDeleteConfirmer              func(string, string, string) (bool, error)
 	auditSink                        func(ConfigSettings, []byte) error
 	tlsRootCAs                       *x509.CertPool
+	requestContext                   context.Context
 	configScope                      configScope
 	globalConfigGroup                string
 	cacheDBMu                        sync.Mutex
@@ -160,10 +164,15 @@ func (a *App) Execute(args []string) error {
 		a.debugEnsureStart()
 		a.debugEvent("execute start")
 	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	a.requestContext = ctx
+	defer func() { a.requestContext = nil }()
 	root := a.RootCommand()
 	root.SetOut(a.Stdout)
 	root.SetErr(a.Stderr)
 	root.SetIn(a.Stdin)
+	root.SetContext(ctx)
 	root.SetArgs(normalizeSortArgs(args))
 	cmd, err := root.ExecuteC()
 	if err == nil {

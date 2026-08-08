@@ -124,6 +124,22 @@ func TestAuditFileSinkWritesJSONL(t *testing.T) {
 	}
 }
 
+func TestAuditFileRejectsSymbolicLink(t *testing.T) {
+	app := testApp(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.jsonl")
+	path := filepath.Join(dir, "audit.jsonl")
+	if err := os.WriteFile(target, []byte("existing\n"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	if err := app.writeAuditFile(path, []byte(`{"event":"test"}`)); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("write symlink audit log error = %v", err)
+	}
+}
+
 func TestDNSCreateEmitsAuditEventAndReadCommandDoesNot(t *testing.T) {
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || trimWAPIPath(r.URL.Path) != "record:a" {

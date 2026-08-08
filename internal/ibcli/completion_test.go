@@ -2,6 +2,7 @@ package ibcli
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -421,6 +422,90 @@ func TestZoneCompletionsAreWiredToCommandsAndFlags(t *testing.T) {
 		}
 		output := stdout.String()
 		if !strings.Contains(output, "example.com") || strings.Contains(output, "prod.example.com") {
+			t.Fatalf("completion %v output =\n%s", args, output)
+		}
+		if !strings.Contains(output, ":4") {
+			t.Fatalf("completion %v did not disable file completion:\n%s", args, output)
+		}
+	}
+}
+
+func TestDNSViewCompletionSupportsSelectionAndOverrides(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || trimWAPIPath(r.URL.Path) != viewObject {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{
+			{"name": "default"},
+			{"name": "DNS Zone View"},
+		}})
+	}))
+	defer server.Close()
+
+	for _, args := range [][]string{
+		{"__complete", "dns", "view", "use", "DNS"},
+		{"__complete", "dns", "--view", "DNS"},
+		{"__complete", "dns", "list", "--view", "DNS"},
+	} {
+		app := testApp(t)
+		writeCompletionProfile(t, app, server.URL)
+		var stdout bytes.Buffer
+		app.Stdout = &stdout
+		app.Stderr = &bytes.Buffer{}
+		app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+		if err := app.Execute(args); err != nil {
+			t.Fatalf("completion %v: %v", args, err)
+		}
+		output := stdout.String()
+		if !strings.Contains(output, "DNS Zone View") || strings.Contains(output, "default") {
+			t.Fatalf("completion %v output =\n%s", args, output)
+		}
+		if !strings.Contains(output, ":4") {
+			t.Fatalf("completion %v did not disable file completion:\n%s", args, output)
+		}
+	}
+}
+
+func TestNetworkViewFlagsCompleteCachedViews(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("network view completion made live WAPI request: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	commands := [][]string{
+		{"dns", "next-ip"},
+		{"net", "list"},
+		{"net", "search", "needle"},
+		{"net", "show"},
+		{"net", "address"},
+		{"net", "next-ip"},
+		{"vlan", "list"},
+		{"vlan", "search", "needle"},
+		{"vlan", "show"},
+		{"vlan", "create"},
+		{"vlan", "edit"},
+		{"vlan", "delete"},
+	}
+	for _, command := range commands {
+		app := testApp(t)
+		profile := writeCompletionProfile(t, app, server.URL)
+		if err := app.writeCachedNetworkViews(profile, []map[string]any{
+			{"name": "default"},
+			{"name": "Production"},
+		}, time.Now()); err != nil {
+			t.Fatalf("write network view cache: %v", err)
+		}
+		var stdout bytes.Buffer
+		app.Stdout = &stdout
+		app.Stderr = &bytes.Buffer{}
+		app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+		args := append([]string{"__complete"}, command...)
+		args = append(args, "--network-view", "Pro")
+		if err := app.Execute(args); err != nil {
+			t.Fatalf("completion %v: %v", args, err)
+		}
+		output := stdout.String()
+		if !strings.Contains(output, "Production") || strings.Contains(output, "default") {
 			t.Fatalf("completion %v output =\n%s", args, output)
 		}
 		if !strings.Contains(output, ":4") {

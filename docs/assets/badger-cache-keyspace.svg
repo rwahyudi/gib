@@ -57,7 +57,7 @@
   <rect class="bg" width="980" height="610" />
   <rect class="panel" x="32" y="36" width="916" height="534" rx="5" />
   <text class="title" x="60" y="72">Badger Cache Keyspace</text>
-  <text class="subtitle" x="60" y="95">DNS rows use profile/view/zone; IPAM rows use profile plus network view or IP so multi-profile use stays isolated.</text>
+  <text class="subtitle" x="60" y="95">Cache identity includes profile, endpoint, user, and view/zone or IPAM scope so Grid data stays isolated.</text>
 
   <g class="table">
     <rect class="meta" x="60" y="122" width="390" height="126" rx="4" />
@@ -74,9 +74,9 @@
     <rect class="header" x="530" y="122" width="390" height="38" rx="4" />
     <text class="table-title" x="552" y="146">zones</text>
     <line class="row" x1="530" y1="160" x2="920" y2="160" />
-    <text class="col pk" x="552" y="185">zones/profile/view</text>
+    <text class="col pk" x="552" y="185">zones/identity/view</text>
     <line class="row" x1="530" y1="198" x2="920" y2="198" />
-    <text class="col" x="552" y="223">profile text, view text</text>
+    <text class="col" x="552" y="223">profile, endpoint, user, view</text>
     <line class="row" x1="530" y1="236" x2="920" y2="236" />
     <text class="col" x="552" y="261">cached_at integer</text>
     <line class="row" x1="530" y1="274" x2="920" y2="274" />
@@ -88,9 +88,9 @@
     <rect class="header" x="60" y="318" width="390" height="38" rx="4" />
     <text class="table-title" x="82" y="342">records</text>
     <line class="row" x1="60" y1="356" x2="450" y2="356" />
-    <text class="col pk" x="82" y="381">records/profile/view/zone</text>
+    <text class="col pk" x="82" y="381">records/identity/view/zone</text>
     <line class="row" x1="60" y1="394" x2="450" y2="394" />
-    <text class="col" x="82" y="419">profile text, view text, zone text</text>
+    <text class="col" x="82" y="419">profile, endpoint, user, view, zone</text>
     <line class="row" x1="60" y1="432" x2="450" y2="432" />
     <text class="col" x="82" y="457">zone_serial text</text>
     <line class="row" x1="60" y1="470" x2="450" y2="470" />
@@ -106,9 +106,9 @@
     <line class="row" x1="530" y1="394" x2="920" y2="394" />
     <text class="col pk" x="552" y="419">lock prefix key</text>
     <line class="row" x1="530" y1="432" x2="920" y2="432" />
-    <text class="col" x="552" y="457">record: profile, view, zone</text>
+    <text class="col" x="552" y="457">record: identity, view, zone</text>
     <line class="row" x1="530" y1="470" x2="920" y2="470" />
-    <text class="col" x="552" y="495">net: profile, kind, scope</text>
+    <text class="col" x="552" y="495">net: identity, kind, scope</text>
     <line class="row" x1="530" y1="508" x2="920" y2="508" />
     <text class="col" x="552" y="529">started_at integer, expires_at integer</text>
   </g>

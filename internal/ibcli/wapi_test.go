@@ -2,7 +2,10 @@ package ibcli
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -55,6 +58,72 @@ func TestWapiClientRoutesGETToReadServerAndWritesToPrimary(t *testing.T) {
 		primaryMethods[1] != http.MethodPut ||
 		primaryMethods[2] != http.MethodDelete {
 		t.Fatalf("primary methods = %#v", primaryMethods)
+	}
+}
+
+func TestWapiClientCancelsRequestContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	client := &WapiClient{
+		Server:      "https://infoblox.example",
+		ReadServer:  "https://infoblox.example",
+		WAPIVersion: defaultWAPIVersion,
+		httpClient:  http.DefaultClient,
+		context:     ctx,
+	}
+	_, err := client.Request(http.MethodGet, viewObject, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("request error = %v, want context cancellation", err)
+	}
+}
+
+func TestWapiClientRejectsOversizedResponse(t *testing.T) {
+	originalLimit := maxWAPIResponseBytes
+	maxWAPIResponseBytes = 32
+	t.Cleanup(func() { maxWAPIResponseBytes = originalLimit })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("x"), maxWAPIResponseBytes+1))
+	}))
+	defer server.Close()
+	client := &WapiClient{Server: server.URL, WAPIVersion: defaultWAPIVersion, httpClient: server.Client()}
+	_, err := client.Request(http.MethodGet, viewObject, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "response exceeds") {
+		t.Fatalf("request error = %v, want response limit error", err)
+	}
+}
+
+func TestCertificateFingerprintVerifierRejectsDifferentCertificate(t *testing.T) {
+	trusted := []byte("trusted certificate")
+	sum := sha256.Sum256(trusted)
+	verify := certificateFingerprintVerifier(fmt.Sprintf("%X", sum[:]))
+	if err := verify([][]byte{trusted}, nil); err != nil {
+		t.Fatalf("matching certificate rejected: %v", err)
+	}
+	if err := verify([][]byte{[]byte("replacement certificate")}, nil); err == nil {
+		t.Fatal("replacement certificate was accepted")
+	}
+}
+
+func TestWapiClientAcceptsOnlyPinnedTLSCertificate(t *testing.T) {
+	trusted := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "default"}})
+	}))
+	defer trusted.Close()
+
+	app := testApp(t)
+	profile := Profile{
+		Server:         trusted.URL,
+		WAPIVersion:    defaultWAPIVersion,
+		VerifySSL:      false,
+		TLSFingerprint: certificateFingerprint(trusted.Certificate()),
+	}
+	if _, err := app.newClient(profile).Request(http.MethodGet, viewObject, nil, nil); err != nil {
+		t.Fatalf("pinned certificate request: %v", err)
+	}
+
+	profile.TLSFingerprint = strings.Repeat("00", sha256.Size)
+	if _, err := app.newClient(profile).Request(http.MethodGet, viewObject, nil, nil); err == nil || !strings.Contains(err.Error(), "fingerprint") {
+		t.Fatalf("wrong fingerprint error = %v, want fingerprint mismatch", err)
 	}
 }
 

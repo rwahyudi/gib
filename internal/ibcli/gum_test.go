@@ -36,16 +36,16 @@ func TestGumChoiceArgsSkipUnknownDefault(t *testing.T) {
 	}
 }
 
-func TestFallbackInputEndsEOFPromptWithNewline(t *testing.T) {
+func TestFallbackInputMarksEmptyEOF(t *testing.T) {
 	var stdout bytes.Buffer
 	gum := NewGum(strings.NewReader(""), &stdout, &bytes.Buffer{})
 
 	value, err := gum.fallbackInput("Infoblox server", "", false)
-	if err != nil {
-		t.Fatalf("fallback input: %v", err)
+	if err != nil || value != "" {
+		t.Fatalf("fallback input = %q, %v", value, err)
 	}
-	if value != "" {
-		t.Fatalf("fallback input value = %q, want empty", value)
+	if !gum.inputExhausted() {
+		t.Fatal("fallback input did not mark EOF")
 	}
 	if !strings.HasSuffix(stdout.String(), "\n") {
 		t.Fatalf("fallback input prompt did not end with newline: %q", stdout.String())

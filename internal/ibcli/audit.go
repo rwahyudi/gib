@@ -162,10 +162,8 @@ func (a *App) writeAuditLine(settings ConfigSettings, line []byte) error {
 }
 
 func (a *App) writeAuditFile(path string, line []byte) error {
-	if strings.TrimSpace(path) == "" {
-		path = a.defaultAuditLogFile()
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	path, err := a.prepareAuditLogPath(path)
+	if err != nil {
 		return err
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -186,14 +184,11 @@ func (a *App) writeAuditFile(path string, line []byte) error {
 }
 
 func (a *App) testAuditLogFileWritable(path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return cliError("audit log file is required")
-	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	path, err := a.prepareAuditLogPath(path)
+	if err != nil {
 		return err
 	}
+	dir := filepath.Dir(path)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
@@ -226,6 +221,44 @@ func (a *App) testAuditLogFileWritable(path string) error {
 		return a.protectAuditLogFile(path)
 	}
 	return nil
+}
+
+func (a *App) prepareAuditLogPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = a.defaultAuditLogFile()
+	}
+	if !filepath.IsAbs(path) {
+		return "", cliError("audit log file must use an absolute path")
+	}
+	path = filepath.Clean(path)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if info, err := os.Lstat(dir); err != nil {
+		return "", err
+	} else if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", cliError("audit log directory must not be a symbolic link")
+	}
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", err
+	}
+	if filepath.Clean(resolvedDir) != dir {
+		return "", cliError("audit log directory must not contain symbolic links")
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", cliError("audit log file must not be a symbolic link")
+		}
+		if !info.Mode().IsRegular() {
+			return "", cliError("audit log file must be a regular file")
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	return path, nil
 }
 
 func (a *App) protectAuditLogFile(path string) error {

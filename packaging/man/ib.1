@@ -51,8 +51,9 @@ context.
 Print the version number and AEST build date.
 .TP
 .B ib config new --default
-Create a default Infoblox profile, validate primary TLS trust, optionally save a
-Grid Master Candidate read endpoint with its own TLS trust setting, and
+Create a default Infoblox profile, validate or pin the primary TLS certificate,
+optionally save a Grid Master Candidate read endpoint with independent TLS
+trust or certificate pinning, and
 optionally enable audit logging.
 .TP
 .B ib config use PROFILE
@@ -87,6 +88,10 @@ Larger IPv4 reverse CIDR scopes can include matching child reverse zones.
 .TP
 .B ib dns search app
 Search records by name, value, or comment.
+.TP
+.B ib dns zone delete example.com
+Delete a DNS zone after an interactive confirmation showing its zone, view, and
+reference. Use -y only for deliberate noninteractive automation.
 .TP
 .B ib dns search ben-dr-vss.net.latrobe.edu.au
 Infer the matching forward zone from a complete FQDN keyword; global search
@@ -136,14 +141,15 @@ Search VLANs by id, name, network view, network, or comment.
 .TP
 .I ~/.ib/config
 Local profile configuration with encrypted password tokens, primary server TLS
-trust, and optional read_server/read_server_verify_ssl routing settings.
+trust or certificate pinning, and optional read endpoint TLS settings.
 .TP
 .I ~/.ib/key
-Unix key file for legacy \fBenc:v1\fR profile password tokens. Native Windows
-builds write new password tokens with user-scope DPAPI instead.
+Unix key file for \fBenc:v1\fR profile password tokens. Native Windows builds
+use it only to decrypt legacy \fBenc:v1\fR profiles; new password tokens use
+user-scope DPAPI instead.
 .TP
 .I ~/.ib/cache.badger
-Local DNS/IPAM cache directory.
+Local DNS/IPAM cache directory. Cache entries are isolated by profile endpoint.
 .TP
 .I ~/.ib/audit.jsonl
 Default local JSON Lines audit log file when file audit logging is enabled.

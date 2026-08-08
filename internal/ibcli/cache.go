@@ -159,19 +159,13 @@ func badgerOpenLockError(err error) bool {
 	return strings.Contains(text, "lock") || strings.Contains(text, "resource temporarily unavailable")
 }
 
-// runValueLogGC reclaims discardable space in Badger value log files. Each call
-// rewrites the most recyclable vlog; loop until ErrNoRewrite means nothing is
-// left. This runs best-effort on DB open so vlog files do not accumulate.
+// runValueLogGC reclaims one discardable Badger value log. Cache commands are
+// short-lived, so a single best-effort pass avoids turning startup into an
+// unbounded compaction job while still reclaiming space over time.
 func (a *App) runValueLogGC(db *badger.DB) {
-	for {
-		err := db.RunValueLogGC(0.5)
-		if errors.Is(err, badger.ErrNoRewrite) {
-			return
-		}
-		if err != nil {
-			a.debugEvent("value log gc error", df("error", err.Error()))
-			return
-		}
+	err := db.RunValueLogGC(0.5)
+	if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
+		a.debugEvent("value log gc error", df("error", err.Error()))
 	}
 }
 
@@ -189,6 +183,19 @@ func cacheProfileName(profile Profile) string {
 	if name == "" {
 		name = defaultProfileName
 	}
+	// A profile can be repointed at another Grid without changing its name.
+	// Include the normalized origin in every cache namespace so stale rows never
+	// cross that security boundary.
+	origin := strings.ToLower(strings.TrimRight(strings.TrimSpace(profile.Server), "/"))
+	if origin == "" {
+		origin = "unknown"
+	}
+	identity := strings.ToLower(strings.TrimSpace(profile.Username))
+	return name + "\x1e" + origin + "\x1e" + identity
+}
+
+func cacheDisplayProfile(profile string) string {
+	name, _, _ := strings.Cut(profile, "\x1e")
 	return name
 }
 
@@ -261,6 +268,19 @@ func (a *App) readBadgerCacheEntry(key []byte) (badgerCacheEntry, bool, error) {
 	return entry, true, nil
 }
 
+func (a *App) readProfileCacheEntry(profile Profile, kind string, parts ...string) (badgerCacheEntry, bool, error) {
+	profileName := cacheProfileName(profile)
+	entry, found, err := a.readBadgerCacheEntry(cacheEntryKey(kind, profileName, parts...))
+	if err != nil || found || strings.TrimSpace(profile.Server) == "" {
+		return entry, found, err
+	}
+	// Callers that construct a Profile without an endpoint (notably embedding
+	// users) retain an isolated "unknown" namespace. It is never shared with
+	// persisted profiles, whose server is always known before cache access.
+	unknownProfileName := cacheProfileName(Profile{Name: profile.Name})
+	return a.readBadgerCacheEntry(cacheEntryKey(kind, unknownProfileName, parts...))
+}
+
 func (a *App) writeBadgerCacheEntry(key []byte, entry badgerCacheEntry) error {
 	raw, err := json.Marshal(entry)
 	if err != nil {
@@ -288,7 +308,7 @@ func cachedPayloadFromBadger(entry badgerCacheEntry) cachedPayload {
 func (a *App) readCachedZones(profile Profile) (cachedPayload, error) {
 	started := time.Now()
 	profileName, view := cacheScope(profile)
-	entry, found, err := a.readBadgerCacheEntry(cacheEntryKey("zones", profileName, view))
+	entry, found, err := a.readProfileCacheEntry(profile, "zones", view)
 	if err != nil {
 		a.debugEvent("cache zones error", df("profile", profileName), df("view", view), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedPayload{}, err
@@ -321,9 +341,8 @@ func (a *App) writeCachedZones(profile Profile, rows []map[string]any, now time.
 }
 
 func (a *App) readCachedVLANs(profile Profile, networkView string) (cachedPayload, error) {
-	profileName := cacheProfileName(profile)
 	networkView = strings.TrimSpace(networkView)
-	entry, found, err := a.readBadgerCacheEntry(cacheEntryKey("vlans", profileName, networkView))
+	entry, found, err := a.readProfileCacheEntry(profile, "vlans", networkView)
 	if err != nil {
 		return cachedPayload{}, err
 	}
@@ -347,8 +366,7 @@ func (a *App) writeCachedVLANs(profile Profile, networkView string, rows []map[s
 }
 
 func (a *App) readCachedNetworkViews(profile Profile) (cachedPayload, error) {
-	profileName := cacheProfileName(profile)
-	entry, found, err := a.readBadgerCacheEntry(cacheEntryKey("network_views", profileName))
+	entry, found, err := a.readProfileCacheEntry(profile, "network_views")
 	if err != nil {
 		return cachedPayload{}, err
 	}
@@ -374,9 +392,8 @@ func (a *App) writeCachedNetworkViewsEntry(profile Profile, rows []map[string]an
 }
 
 func (a *App) readCachedNetworks(profile Profile, networkView string) (cachedPayload, error) {
-	profileName := cacheProfileName(profile)
 	networkView = strings.TrimSpace(networkView)
-	entry, found, err := a.readBadgerCacheEntry(cacheEntryKey("networks", profileName, networkView))
+	entry, found, err := a.readProfileCacheEntry(profile, "networks", networkView)
 	if err != nil {
 		return cachedPayload{}, err
 	}
@@ -404,9 +421,8 @@ func (a *App) writeCachedNetworksEntry(profile Profile, networkView string, rows
 }
 
 func (a *App) readCachedNetworkContainers(profile Profile, networkView string) (cachedPayload, error) {
-	profileName := cacheProfileName(profile)
 	networkView = strings.TrimSpace(networkView)
-	entry, found, err := a.readBadgerCacheEntry(cacheEntryKey("network_containers", profileName, networkView))
+	entry, found, err := a.readProfileCacheEntry(profile, "network_containers", networkView)
 	if err != nil {
 		return cachedPayload{}, err
 	}
@@ -434,10 +450,9 @@ func (a *App) writeCachedNetworkContainersEntry(profile Profile, networkView str
 }
 
 func (a *App) readCachedIPv4Addresses(profile Profile, ip string, networkView string) (cachedPayload, error) {
-	profileName := cacheProfileName(profile)
 	ip = strings.TrimSpace(ip)
 	networkView = strings.TrimSpace(networkView)
-	entry, found, err := a.readBadgerCacheEntry(cacheEntryKey("ipv4_addresses", profileName, networkView, ip))
+	entry, found, err := a.readProfileCacheEntry(profile, "ipv4_addresses", networkView, ip)
 	if err != nil {
 		return cachedPayload{}, err
 	}
@@ -470,7 +485,7 @@ func (a *App) readCachedRecords(profile Profile, zone string) (cachedPayload, er
 	started := time.Now()
 	profileName, view := cacheScope(profile)
 	zone = normalizeCacheZone(zone)
-	entry, found, err := a.readBadgerCacheEntry(recordCacheKey(profileName, view, zone))
+	entry, found, err := a.readProfileCacheEntry(profile, "records", view, zone)
 	if err != nil {
 		a.debugEvent("cache records error", df("profile", profileName), df("view", view), df("zone", zone), df("duration", time.Since(started)), df("error", err.Error()))
 		return cachedPayload{}, err
@@ -687,11 +702,16 @@ func (a *App) clearProfileCache(profileName string) error {
 		"net_refresh_locks",
 		"vlans",
 	} {
-		if err := deleteBadgerPrefix(db, badgerKey(prefix, profileName)); err != nil {
+		if err := deleteBadgerProfilePrefix(db, prefix, profileName); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func deleteBadgerProfilePrefix(db *badger.DB, kind, profileName string) error {
+	prefix := []byte(kind + "\x1f" + profileName + "\x1e")
+	return deleteBadgerPrefix(db, prefix)
 }
 
 func (a *App) tryAcquireRecordRefreshLease(profile Profile, zone string, now time.Time, ttl time.Duration) (bool, error) {
@@ -1002,7 +1022,7 @@ func (a *App) cacheStatusSnapshot() (cacheStatusSnapshot, error) {
 				}
 				snapshot.Entries = append(snapshot.Entries, map[string]any{
 					"kind":          kind,
-					"profile":       entry.Profile,
+					"profile":       cacheDisplayProfile(entry.Profile),
 					"view":          view,
 					"zone":          zone,
 					"serial":        cleanIntegerString(entry.Serial),

@@ -9,12 +9,12 @@ worker pool.
 
 | Area | Behavior |
 | --- | --- |
-| Cache scope | DNS rows are keyed by profile, DNS view, and zone. IPAM rows are keyed by profile plus network view or IP. |
+| Cache scope | DNS rows are keyed by profile, normalized endpoint, username, DNS view, and zone. IPAM rows use that same identity plus network view or IP. |
 | Freshness | Fresh until `cached_at + cache_ttl`; `fresh_until` is not stored. |
 | Stale window | Record and targeted IPAM rows can be served stale until `stale_expires_at`; IPAM list/search can serve older cached rows by default. |
 | Revalidation | Stale rows return immediately; DNS rows renew locally when cached zone serials match, otherwise background refresh starts are lease-protected and batched for multi-zone search, with batch dispatch ordered by descending cached record count. |
 | IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. |
-| Read endpoint | GET requests use `read_server` when configured, with `read_server_verify_ssl` controlling that endpoint's TLS verification; high-parallel DNS search can spread a configured share back to primary. |
+| Read endpoint | GET requests use `read_server` when configured, with `read_server_verify_ssl` and an optional `read_tls_fingerprint` pin controlling that endpoint's TLS trust; high-parallel DNS search can spread a configured share back to primary. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
 | Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`; the active/root zone is submitted first, then remaining zones descend by cached record count. |
 | Connections | The WAPI HTTP client keeps an idle connection pool sized from `dns_search_worker_limit` for better TLS reuse. |
@@ -77,7 +77,9 @@ helpers.
 
 Read-only traffic can use a Grid Master Candidate when `ib config new/edit`
 finds one that supports read-only WAPI access and passes its own TLS trust check.
-The saved `read_server_verify_ssl` value applies only to that read endpoint.
+When an operator accepts an untrusted certificate, its SHA-256 certificate
+fingerprint is saved as `read_tls_fingerprint`; the pin applies only to that
+read endpoint.
 Writes never use that endpoint: create, edit, delete, and zone mutation commands
 stay on the primary Grid Master.
 When `dns_search_worker_limit` is greater than 10 and `read_server` is distinct
@@ -117,9 +119,11 @@ normalization happen before matching.
 
 ![Nord Badger cache keyspace diagram](assets/badger-cache-keyspace.svg)
 
-Badger keys are grouped by prefixes. `zones` caches authoritative zone list
-payloads per profile and view. `records` stores `/allrecords` payloads per
-profile, view, and zone. `network_views`, `networks`,
+Badger keys are grouped by prefixes. Every cache identity includes the profile
+name, normalized endpoint, and username, so repointing a profile or changing
+its credentials cannot reuse another Grid's rows. `zones` caches authoritative
+zone-list payloads per identity and view. `records` stores `/allrecords`
+payloads per identity, view, and zone. `network_views`, `networks`,
 `network_containers`, and `ipv4_addresses` store IPAM read payloads.
 IPAM cache rows include extensible attributes (`extattrs`) when the WAPI returns them.
 Extensible attributes are cached alongside other network, container, and address fields,

@@ -127,7 +127,8 @@ GoReleaser then:
 4. Creates the Linux tarball and Windows ZIP with README and license files.
 5. Creates Linux RPM and DEB packages with nFPM. These install `ib` to
    `/usr/local/bin/ib` and package Bash completion under
-   `/etc/bash_completion.d/ib`.
+   `/etc/bash_completion.d/ib`, plus the manual page under
+   `/usr/share/man/man1/ib.1`.
 6. Writes `checksums.txt`.
 7. Publishes the GitHub release under `rwahyudi/gib`.
 
