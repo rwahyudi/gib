@@ -2,10 +2,21 @@
 
 ## Unreleased
 
-### Cache Reliability
+## v0.4.3 - 2026-08-08
 
-- Detached DNS record-cache revalidation now releases Badger before slow WAPI serial and record requests, reducing lock contention for a repeated global DNS search.
+### Reliability and Safety
+
+- WAPI transport now applies consistent request timeouts, validates response content, and avoids unsafe handling of malformed or unexpected responses.
+- DNS and network workflows add safer request handling and clearer operator-facing failures.
+
+### Search and Cache Performance
+
+- Detached DNS record-cache revalidation now releases Badger before slow WAPI serial and record requests, reducing lock contention for repeated global DNS searches.
 - Background refresh plans verify that the cached snapshot has not changed before writing, so foreground cache updates are not overwritten by delayed refresh results.
+
+### Network Output
+
+- Network list and detail output now uses clearer, consistent headers for operator readability.
 
 ## v0.4.2 - 2026-07-28
 
