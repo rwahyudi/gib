@@ -25,12 +25,12 @@ need MinGW-w64 for cache support.
 
 ## Step 1: Choose and Prepare the Version
 
-1. Choose the next semantic version and tag, for example `0.3.5` and `v0.3.5`.
+1. Choose the next semantic version as `VERSION` and tag it as `vVERSION`.
 2. Create or update `docs/release-notes.md` with the release version, date, and operator-facing changes before tagging.
 3. Update versioned source files before tagging:
 
 ```bash
-rg -n '0\.3\.|gib [0-9]+\.[0-9]+\.[0-9]+|Version:' internal packaging gib.spec README.md docs
+rg -n 'gib [0-9]+\.[0-9]+\.[0-9]+|Version:' internal packaging gib.spec README.md docs
 ```
 
 Common files to check are:
@@ -80,15 +80,15 @@ Commit all version, docs, and packaging changes first:
 ```bash
 git status --short
 git add <changed-files>
-git commit -m "Prepare release v0.3.5"
+git commit -m "Prepare release vVERSION"
 ```
 
 Push `main`, then push the tag:
 
 ```bash
 git push origin main
-git tag -a v0.3.5 -m "Release v0.3.5"
-git push origin v0.3.5
+git tag -a vVERSION -m "Release vVERSION"
+git push origin vVERSION
 ```
 
 The tag push is what starts the GitHub release workflow. Do not create the
@@ -152,14 +152,14 @@ gh run watch
 ```
 
 If the workflow fails before publishing assets, fix the issue on `main`, delete
-the failed local and remote tag, recreate it on the fixed commit, and push it
-again:
+the failed local and remote `vVERSION` tag, recreate it on the fixed commit, and
+push it again:
 
 ```bash
-git tag -d v0.3.5
-git push origin :refs/tags/v0.3.5
-git tag -a v0.3.5 -m "Release v0.3.5"
-git push origin v0.3.5
+git tag -d vVERSION
+git push origin :refs/tags/vVERSION
+git tag -a vVERSION -m "Release vVERSION"
+git push origin vVERSION
 ```
 
 If assets were already published, inspect the release before deleting anything.
@@ -170,7 +170,7 @@ Avoid leaving a partial release marked as latest.
 Check the live release metadata and asset names:
 
 ```bash
-gh release view v0.3.5 --json tagName,isDraft,isPrerelease,publishedAt,url,assets
+gh release view vVERSION --json tagName,isDraft,isPrerelease,publishedAt,url,assets
 gh release view --json tagName,isDraft,isPrerelease,publishedAt,url,assets
 ```
 
@@ -219,8 +219,9 @@ unzip -l "$tmp/ib_windows_amd64.zip"
 
 ## Step 7: Publish Copr RPM Follow-up
 
-The GitHub RPM is built by GoReleaser. Copr uses `gib.spec` and a vendored Go
-source archive instead.
+The GitHub RPM is built by GoReleaser and installs `ib` to `/usr/local/bin/ib`.
+Copr uses `gib.spec` and a vendored Go source archive instead; its RPM installs
+`ib` to `/usr/bin/ib`.
 
 From a Fedora packaging workstation:
 

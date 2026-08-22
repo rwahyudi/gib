@@ -2404,6 +2404,7 @@ func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr 
 		targetName = name
 	}
 	if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
+		a.auditDNSRecordFailure(profile, client, "create", "dns.record.create", recordType, targetName, resolvedZone, payload, err)
 		return err
 	}
 	a.auditDNSRecordCreate(profile, client, recordType, targetName, resolvedZone, payload)
@@ -2452,6 +2453,7 @@ func (a *App) runDNSCreatePTR(profile Profile, client *WapiClient, name, value, 
 		return err
 	}
 	if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
+		a.auditDNSRecordFailure(profile, client, "create", "dns.record.create", "ptr", address.String(), reverseZone, payload, err)
 		return err
 	}
 	a.auditDNSRecordCreate(profile, client, "ptr", address.String(), reverseZone, payload)
@@ -2474,7 +2476,7 @@ func (a *App) runDNSEdit(recordNameValue, requestedType string, value *string, z
 	if err != nil {
 		return err
 	}
-	target, matches, allMatches, err := a.findForwardRecords(profile, client, recordNameValue, zone, false)
+	target, matches, allMatches, err := a.findForwardRecords(profile, client, recordNameValue, zone, false, requestedType)
 	if err != nil {
 		return err
 	}
@@ -2550,6 +2552,7 @@ func (a *App) runDNSEdit(recordNameValue, requestedType string, value *string, z
 		}
 	}
 	if _, err := client.Request(http.MethodPut, ref, nil, payload); err != nil {
+		a.auditDNSRecordFailure(profile, client, "edit", "dns.record.edit", record.Type, target, cleanString(record.Item["zone"]), payload, err)
 		return err
 	}
 	a.auditDNSRecordEdit(profile, client, record, payload)
@@ -2797,7 +2800,7 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 	if err != nil {
 		return err
 	}
-	target, matches, allMatches, err := a.findForwardRecords(profile, client, recordName, zone, true)
+	target, matches, allMatches, err := a.findForwardRecords(profile, client, recordName, zone, true, recordType)
 	if err != nil {
 		return err
 	}
@@ -2847,6 +2850,7 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 		}
 	}
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
+		a.auditDNSRecordFailure(profile, client, "delete", "dns.record.delete", record.Type, target, cleanString(record.Item["zone"]), record.Item, err)
 		return err
 	}
 	a.auditDNSRecordDelete(profile, client, record, target)
@@ -3069,6 +3073,7 @@ func (a *App) runDNSDeletePTR(ipValue string, skipConfirm bool) error {
 		return err
 	}
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
+		a.auditDNSRecordFailure(profile, client, "delete", "dns.record.delete", "ptr", address.String(), reverseZone, matches[0].Item, err)
 		return err
 	}
 	a.auditDNSRecordDelete(profile, client, matches[0], address.String())

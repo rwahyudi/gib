@@ -1,86 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="430" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
-  <title id="title">ib operational workflow</title>
-  <desc id="desc">Diagram of ib routing reads to a validated read endpoint, writes to the primary Grid Master, and serving large searches through Badger cache and bounded workers.</desc>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#08111f"/>
-      <stop offset="1" stop-color="#101827"/>
-    </linearGradient>
-    <style>
-      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-      .heading { fill: #f8fafc; font-size: 34px; font-weight: 800; letter-spacing: -0.8px; }
-      .sub { fill: #94a3b8; font-size: 16px; }
-      .label { fill: #e2e8f0; font-size: 19px; font-weight: 700; }
-      .body { fill: #cbd5e1; font-size: 15px; }
-      .small { fill: #94a3b8; font-size: 13px; }
-      .card { fill: #0b1220; stroke: #263244; stroke-width: 1.3; }
-      .blue { stroke: #38bdf8; }
-      .green { stroke: #22c55e; }
-      .amber { stroke: #fbbf24; }
-      .red { stroke: #f87171; }
-      .arrow { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowhead); }
-    </style>
-    <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
-    </marker>
-  </defs>
-
-  <rect width="1200" height="430" rx="26" fill="url(#bg)"/>
-  <text x="54" y="62" class="heading">Operational model</text>
-  <text x="54" y="92" class="sub">One CLI keeps human output compact while preserving script-safe JSON and CSV.</text>
-
-  <g transform="translate(54 134)">
-    <rect width="240" height="116" rx="16" class="card blue"/>
-    <text x="22" y="34" class="label">Shell context</text>
-    <text x="22" y="63" class="body mono">profile + view + zone</text>
-    <text x="22" y="88" class="small">defaults, env, or one-command flags</text>
-  </g>
-
-  <path d="M310 192 H348" class="arrow" stroke="#64748b"/>
-
-  <g transform="translate(364 112)">
-    <rect width="216" height="276" rx="18" class="card"/>
-    <text x="24" y="38" class="label">ib command</text>
-    <text x="24" y="70" class="body mono">dns list/search</text>
-    <text x="24" y="96" class="body mono">dns create/edit/delete</text>
-    <text x="24" y="122" class="body mono">net list/next-ip</text>
-    <text x="24" y="148" class="body mono">vlan list/show</text>
-    <line x1="24" y1="174" x2="192" y2="174" stroke="#263244"/>
-    <text x="24" y="206" class="small">Cobra commands</text>
-    <text x="24" y="230" class="small">Lipgloss tables</text>
-    <text x="24" y="254" class="small">machine output untouched</text>
-  </g>
-
-  <path d="M598 164 H682" class="arrow" stroke="#38bdf8"/>
-  <path d="M598 250 H682" class="arrow" stroke="#22c55e"/>
-  <path d="M598 336 H682" class="arrow" stroke="#fbbf24"/>
-
-  <g transform="translate(700 110)">
-    <rect width="278" height="84" rx="16" class="card blue"/>
-    <text x="20" y="34" class="label">Validated read GCM</text>
-    <text x="20" y="60" class="body">GETs can use the read endpoint.</text>
-  </g>
-
-  <g transform="translate(700 216)">
-    <rect width="278" height="84" rx="16" class="card green"/>
-    <text x="20" y="34" class="label">Primary Grid Master</text>
-    <text x="20" y="60" class="body">POST, PUT, DELETE, next-IP stay primary.</text>
-  </g>
-
-  <g transform="translate(700 322)">
-    <rect width="278" height="66" rx="16" class="card amber"/>
-    <text x="20" y="34" class="label">Badger cache</text>
-    <text x="20" y="55" class="body">SWR records, IPAM, and VLAN rows.</text>
-  </g>
-
-  <path d="M994 355 C1014 355 1000 284 1032 284" class="arrow" stroke="#fbbf24"/>
-  <path d="M994 152 C1014 152 1000 250 1032 250" class="arrow" stroke="#38bdf8"/>
-
-  <g transform="translate(1046 216)">
-    <rect width="100" height="104" rx="16" fill="#151a26" stroke="#475569"/>
-    <text x="24" y="36" class="label mono">rows</text>
-    <text x="18" y="64" class="small">tables</text>
-    <text x="18" y="84" class="small">json / csv</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" role="img" aria-labelledby="title desc">
+  <title id="title">ib cache, read, write, worker, and audit model</title>
+  <desc id="desc">The CLI resolves shell context, checks cache freshness, and sends read-only GET traffic to a validated read endpoint with an optional primary worker share. Writes and next-IP calls use the primary Grid Master. Stale data refreshes through lease-protected workers, while write results can emit redacted JSONL audit events.</desc>
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#111827"/></linearGradient><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="#64748b"/></marker><style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{fill:#f8fafc;font-size:31px;font-weight:800}.l{fill:#e2e8f0;font-size:17px;font-weight:700}.b{fill:#cbd5e1;font-size:13px}.s{fill:#94a3b8;font-size:12px}.card{fill:#0b1220;stroke:#263244;stroke-width:1.3}.line{fill:none;stroke-width:2.4;marker-end:url(#a)} </style></defs>
+  <rect width="1200" height="470" rx="26" fill="url(#bg)"/><text x="48" y="54" class="h">Operational model</text><text x="48" y="81" class="b">Cache decisions stay separate from read and write routing.</text>
+  <g transform="translate(48 125)"><rect width="185" height="92" rx="14" class="card" stroke="#38bdf8"/><text x="18" y="31" class="l">Shell context</text><text x="18" y="56" class="b mono">profile + view + zone</text><text x="18" y="77" class="s">defaults, env, flags</text></g>
+  <path d="M233 171h34" class="line" stroke="#64748b"/>
+  <g transform="translate(267 105)"><rect width="220" height="132" rx="14" class="card" stroke="#22c55e"/><text x="18" y="31" class="l">Cache decision</text><text x="18" y="58" class="b">fresh → return now</text><text x="18" y="80" class="b">stale in SWR → return + refresh</text><text x="18" y="102" class="b">missing/expired → WAPI read</text></g>
+  <path d="M487 140h52" class="line" stroke="#38bdf8"/><path d="M487 205h52" class="line" stroke="#fbbf24"/>
+  <g transform="translate(539 92)"><rect width="250" height="86" rx="14" class="card" stroke="#38bdf8"/><text x="18" y="31" class="l">Read-only GET lane</text><text x="18" y="55" class="b">validated read endpoint</text><text x="18" y="73" class="s">optional primary worker share</text></g>
+  <g transform="translate(539 193)"><rect width="250" height="86" rx="14" class="card" stroke="#fbbf24"/><text x="18" y="31" class="l">Refresh workers</text><text x="18" y="55" class="b">bounded pool + preload</text><text x="18" y="73" class="s">leases + one batch revalidation</text></g>
+  <path d="M789 135h35" class="line" stroke="#38bdf8"/><path d="M789 236h35" class="line" stroke="#fbbf24"/>
+  <g transform="translate(824 92)"><rect width="170" height="86" rx="14" class="card" stroke="#38bdf8"/><text x="18" y="31" class="l">Read endpoint</text><text x="18" y="55" class="b">GET /allrecords</text><text x="18" y="73" class="s">SOA and IPAM reads</text></g>
+  <g transform="translate(824 193)"><rect width="170" height="86" rx="14" class="card" stroke="#fbbf24"/><text x="18" y="31" class="l">Badger cache</text><text x="18" y="55" class="b">DNS, IPAM, VLAN rows</text><text x="18" y="73" class="s">serial renewal / SWR</text></g>
+  <g transform="translate(267 302)"><rect width="220" height="78" rx="14" class="card" stroke="#22c55e"/><text x="18" y="30" class="l">Write lane</text><text x="18" y="54" class="b">create · edit · delete</text><text x="18" y="70" class="s">next-IP function calls</text></g><path d="M487 341h52" class="line" stroke="#22c55e"/>
+  <g transform="translate(539 302)"><rect width="250" height="78" rx="14" class="card" stroke="#22c55e"/><text x="18" y="30" class="l">Primary Grid Master</text><text x="18" y="54" class="b">writes and next-IP only</text><text x="18" y="70" class="s">POST · PUT · DELETE</text></g><path d="M789 341h35" class="line" stroke="#22c55e"/>
+  <g transform="translate(824 302)"><rect width="170" height="78" rx="14" class="card" stroke="#f87171"/><text x="18" y="30" class="l">Audit branch</text><text x="18" y="54" class="b">success / failure</text><text x="18" y="70" class="s">redacted JSONL</text></g>
+  <text x="48" y="430" class="s">Reads, searches, cache work, completion, and cancelled actions stay quiet.</text>
 </svg>

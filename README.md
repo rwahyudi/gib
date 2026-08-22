@@ -12,10 +12,6 @@
 
 It is built for daily record and network tasks: compact tables for humans, plain JSON/CSV for automation, safe read/write routing, dynamic completion, and cache-backed searches that stay responsive on large zones.
 
-<p align="center">
-  <img src="./docs/assets/go-record1.gif" width="100%" alt="Animated preview of ib DNS record output">
-</p>
-
 ## What `ib` helps you do
 
 - Manage local and Linux-global Infoblox profiles with encrypted credentials.
@@ -25,11 +21,11 @@ It is built for daily record and network tasks: compact tables for humans, plain
 - Route read-only GET requests to a validated Grid Master Candidate with separate TLS trust while keeping POST, PUT, DELETE, and next-IP function calls on the primary Grid Master.
 - Use Badger-backed zone, record, IPAM, and VLAN caches with bounded workers and stale-while-revalidate refreshes.
 - Generate dynamic shell completion for profiles, views, zones, records, networks, record types, flags, columns, and output formats.
-- Emit optional JSON Lines audit events for successful DNS/config writes while keeping read workflows quiet.
+- Emit optional JSON Lines audit events for successful DNS/config writes and failed DNS record WAPI mutations while keeping read workflows quiet.
 
 ## Install
 
-For Fedora or EPEL, Copr is the shortest path when you want a distro-built package. The package is named `gib` and installs the command as `/usr/bin/ib`.
+For Fedora or EPEL, Copr is the shortest path when you want a distro-built package. The Copr package is named `gib` and installs the command as `/usr/bin/ib`; the GitHub release RPM and DEB install it as `/usr/local/bin/ib`.
 
 ```bash
 sudo dnf install dnf-plugins-core
@@ -58,7 +54,7 @@ curl -fLO https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd6
 sudo apt install ./ib_linux_amd64.deb
 ```
 
-RPM and DEB packages install `ib` to `/usr/local/bin/ib`, Bash completion to `/etc/bash_completion.d/ib`, and the manual page to `/usr/share/man/man1/ib.1` (`man ib`). For the tarball, install completion manually:
+GitHub release RPM and DEB packages install `ib` to `/usr/local/bin/ib`, Bash completion to `/etc/bash_completion.d/ib`, and the manual page to `/usr/share/man/man1/ib.1` (`man ib`). Copr RPMs use `/usr/bin/ib`. For the tarball, install completion manually:
 
 ```bash
 sudo mkdir -p /etc/bash_completion.d
@@ -112,7 +108,7 @@ Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, audi
 | List records | `ib dns list` | Uses the current DNS view/zone unless `--view` or `--zone` is supplied. |
 | Search records | `ib dns search app` | Add `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
 | Create records | `ib dns create host app 192.0.2.10 -c "Application host"` | Type-first syntax keeps A, AAAA, CNAME, host, MX, NS, PTR, SRV, and TXT workflows consistent. |
-| Edit or delete records | `ib dns edit host app 192.0.2.20` | Deletes match forward DNS names case-insensitively and prompt for confirmation unless `-y` is used. |
+| Edit or delete records | `ib dns edit host app 192.0.2.20` | Deletes match forward DNS names case-insensitively and prompts for confirmation unless `-y` is used. |
 | Delete a zone | `ib dns zone delete example.com` | Requires an interactive confirmation; use `-y` only for deliberate automation. |
 | Read IPAM | `ib net list prod --network-view default` | Lists or searches IPv4 networks and containers, including assigned VLAN fields when WAPI supports them. |
 | Find addresses | `ib net next-ip 192.0.2.0/24 -n 3` | Resolves networks and containers, then asks the primary server for current next-IP results. |
@@ -143,12 +139,16 @@ ib dns zone list --sort zone --columns zone,format,comment -o json
 ib net list --sort network --columns network,type,extattrs -o json
 ```
 
-DNS record fields include `type`, `name`, `value`, `zone`, `ttl`, and `comment`. Zone fields include `zone`, `view`, `format`, `ns_group`, and `comment`. Network fields include `network`, `type`, `network_view`, `assigned_vlan`, `assigned_vlan_name`, `comment`, and `extattrs`.
+DNS record fields include `type`, `name`, `value`, `zone`, `ttl`, and `comment`. Zone fields include `zone`, `view`, `format`, `ns_group`, and `comment`. Network default output includes `network`, `type`, `assigned_vlan`, `assigned_vlan_name`, `comment`, and `extattrs`; `network_view` is available through `--columns`.
 
 ## How it stays safe and fast
 
 <p align="center">
   <img src="./docs/assets/readme/workflow.svg" width="100%" alt="ib operational model for shell context, read/write routing, cache, and output">
+</p>
+
+<p align="center">
+  <img src="./docs/assets/audit-write-flow.svg" width="100%" alt="ib audit flow for successful and failed DNS writes with redacted JSON Lines events">
 </p>
 
 `cmd/ib/main.go` starts the Cobra CLI and hands behavior to `internal/ibcli`. Profile loading decrypts the stored password, resolves the current DNS view/zone, and builds the WAPI client.
@@ -190,7 +190,7 @@ If a DNS write reports a non-JSON WAPI response, `ib` prints the WAPI object, HT
 | Module | Purpose | Start here |
 | --- | --- | --- |
 | `config` | Manage profiles, encrypted credentials, completion, and cache. | `ib config new --default` |
-| `dns` | Manage Infoblox DNS views, zones, records, searches, and context overrides. | `ib dns list` |
+| `dns` | Manage Infoblox DNS views, zones, records, searches, next-IP lookups, and context overrides. | `ib dns list` |
 | `net` | Manage IPAM network views, IPv4 networks and containers, addresses, and next-IP lookups. | `ib net list` |
 | `vlan` | List, search, inspect, and select VLANs derived from IPAM VLAN metadata. | `ib vlan list` |
 

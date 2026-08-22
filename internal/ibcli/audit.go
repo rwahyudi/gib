@@ -87,12 +87,23 @@ func (a *App) emitAuditEvent(profileName string, action, operation, targetType, 
 }
 
 func (a *App) emitAuditEventWithSettings(settings ConfigSettings, profileName string, action, operation, targetType, target string, data map[string]any) {
+	a.emitAuditEventResultWithSettings(settings, profileName, action, operation, targetType, target, "success", data)
+}
+
+func (a *App) emitAuditEventResult(profileName string, action, operation, targetType, target, result string, data map[string]any) {
+	a.emitAuditEventResultWithSettings(a.configSettings(), profileName, action, operation, targetType, target, result, data)
+}
+
+func (a *App) emitAuditEventResultWithSettings(settings ConfigSettings, profileName string, action, operation, targetType, target, result string, data map[string]any) {
 	settings = settings.complete()
 	if !settings.AuditLoggingEnabled {
 		return
 	}
 	if profileName == "" {
 		profileName = defaultProfileName
+	}
+	if result == "" {
+		result = "success"
 	}
 	now := auditNow()
 	local := now.Local()
@@ -117,7 +128,7 @@ func (a *App) emitAuditEventWithSettings(settings ConfigSettings, profileName st
 		Operation:  operation,
 		TargetType: targetType,
 		Target:     target,
-		Result:     "success",
+		Result:     result,
 		Data:       redactAuditData(data),
 	}
 	line, err := json.Marshal(event)
@@ -393,6 +404,15 @@ func (a *App) auditDNSRecordCreate(profile Profile, client *WapiClient, recordTy
 		"view":       client.View,
 		"new_values": auditRecordValues(recordType, payload, zone),
 	})
+}
+
+func (a *App) auditDNSRecordFailure(profile Profile, client *WapiClient, action, operation, recordType, target, zone string, values map[string]any, err error) {
+	data := map[string]any{
+		"view":             client.View,
+		"attempted_values": auditRecordValues(recordType, values, zone),
+		"error":            err.Error(),
+	}
+	a.emitAuditEventResult(profile.Name, action, operation, "DNS_RECORD", target, "failure", data)
 }
 
 func (a *App) auditDNSRecordEdit(profile Profile, client *WapiClient, record TypedRecord, payload map[string]any) {

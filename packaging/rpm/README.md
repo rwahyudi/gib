@@ -1,7 +1,8 @@
 # RPM and Copr Packaging
 
-This directory documents how to publish `gib` as an RPM package. The RPM
-package name is `gib`; the installed command is `/usr/bin/ib`.
+This directory documents how to publish `gib` as a Copr RPM package. The package
+name is `gib`; the Copr-installed command is `/usr/bin/ib`. This differs from
+the GitHub release RPM and DEB, which install `ib` to `/usr/local/bin/ib`.
 
 ## Prerequisites
 
@@ -48,9 +49,9 @@ ib --help
 ib config completion bash
 ```
 
-The RPM installs `ib` under `/usr/bin/ib`. The packaged Bash completion loader
-resolves `ib` from `PATH` so the same loader also works for GoReleaser RPM/DEB
-packages that install `/usr/local/bin/ib`.
+The Copr RPM installs `ib` under `/usr/bin/ib`. The packaged Bash completion
+loader resolves `ib` from `PATH`, so the same loader also works for GoReleaser
+RPM/DEB packages that install `/usr/local/bin/ib`.
 
 Optional output-control smoke checks after configuring a test profile:
 

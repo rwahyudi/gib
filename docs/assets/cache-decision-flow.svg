@@ -1,108 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="500" viewBox="0 0 980 500" role="img" aria-labelledby="title desc">
-  <title id="title">Nord cache decision flow</title>
-  <desc id="desc">Compact flow showing how ib returns fresh cache, serves stale rows, or refreshes DNS/IPAM data from Infoblox.</desc>
-  <defs>
-    <linearGradient id="page-bg" x1="0" y1="0" x2="980" y2="500" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2E3440" />
-      <stop offset=".58" stop-color="#242933" />
-      <stop offset="1" stop-color="#1f2430" />
-    </linearGradient>
-    <linearGradient id="panel-grad" x1="32" y1="36" x2="948" y2="462" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#3B4252" />
-      <stop offset="1" stop-color="#2E3440" />
-    </linearGradient>
-    <linearGradient id="entry-grad" x1="60" y1="0" x2="404" y2="0" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#434C5E" />
-      <stop offset="1" stop-color="#5E81AC" />
-    </linearGradient>
-    <linearGradient id="fresh-grad" x1="450" y1="145" x2="910" y2="205" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#3B4252" />
-      <stop offset="1" stop-color="#536d56" />
-    </linearGradient>
-    <linearGradient id="stale-grad" x1="450" y1="235" x2="910" y2="295" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#3B4252" />
-      <stop offset="1" stop-color="#725f78" />
-    </linearGradient>
-    <linearGradient id="fetch-grad" x1="450" y1="330" x2="910" y2="425" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#434C5E" />
-      <stop offset="1" stop-color="#8d6656" />
-    </linearGradient>
-    <filter id="shadow" x="-18%" y="-18%" width="136%" height="136%">
-      <feDropShadow dx="0" dy="9" stdDeviation="10" flood-color="#1f2430" flood-opacity=".55" />
-    </filter>
-    <marker id="arrow" viewBox="0 0 8 8" refX="6.4" refY="4" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
-      <path d="M 0 0 L 8 4 L 0 8 z" fill="#D8DEE9" />
-    </marker>
-  </defs>
-
-  <style>
-    .bg { fill: url(#page-bg); }
-    .panel { fill: url(#panel-grad); stroke: #4C566A; stroke-width: 1.3; }
-    .entry { fill: url(#entry-grad); stroke: #81A1C1; stroke-width: 1.2; }
-    .fresh { fill: url(#fresh-grad); stroke: #A3BE8C; stroke-width: 1.2; }
-    .stale { fill: url(#stale-grad); stroke: #B48EAD; stroke-width: 1.2; }
-    .fetch { fill: url(#fetch-grad); stroke: #D08770; stroke-width: 1.2; }
-    .node { filter: url(#shadow); }
-    .line { fill: none; stroke: #D8DEE9; stroke-width: 2; stroke-linecap: square; stroke-linejoin: miter; marker-end: url(#arrow); opacity: .9; }
-    .fresh-line { stroke: #A3BE8C; }
-    .stale-line { stroke: #B48EAD; }
-    .fetch-line { stroke: #D08770; }
-    .title { font: 700 18px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #ECEFF4; }
-    .subtitle { font: 520 13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #D8DEE9; }
-    .label { font: 650 14px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #ECEFF4; }
-    .small { font: 520 12px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #D8DEE9; }
-  </style>
-
-  <rect class="bg" width="980" height="500" />
-  <rect class="panel" x="32" y="36" width="916" height="426" rx="5" />
-  <text class="title" x="60" y="72">Cache Decision Flow</text>
-  <text class="subtitle" x="60" y="95">Fresh rows return immediately. Stale rows return on the fast path; IPAM list/search may serve older cache.</text>
-
-  <rect class="entry node" x="60" y="133" width="150" height="56" rx="4" />
-  <text class="label" x="83" y="157">Read request</text>
-  <text class="small" x="83" y="175">DNS or IPAM</text>
-
-  <rect class="entry node" x="255" y="133" width="170" height="56" rx="4" />
-  <text class="label" x="281" y="157">Read cache row</text>
-  <text class="small" x="281" y="175">profile + scope</text>
-
-  <rect class="fresh node" x="470" y="126" width="185" height="70" rx="4" />
-  <text class="label" x="493" y="151">Fresh row</text>
-  <text class="small" x="493" y="169">now &lt; cached_at</text>
-  <text class="small" x="493" y="184">+ cache_ttl</text>
-
-  <rect class="fresh node" x="715" y="126" width="175" height="70" rx="4" />
-  <text class="label" x="740" y="151">Return rows</text>
-  <text class="small" x="740" y="169">no Infoblox call</text>
-
-  <rect class="stale node" x="470" y="232" width="185" height="70" rx="4" />
-  <text class="label" x="493" y="257">Stale inside SWR</text>
-  <text class="small" x="493" y="275">now &lt; stale_expires_at</text>
-
-  <rect class="stale node" x="715" y="222" width="175" height="90" rx="4" />
-  <text class="label" x="739" y="248">Return stale rows</text>
-  <text class="small" x="739" y="266">renew locally</text>
-  <text class="small" x="739" y="282">or acquire lease</text>
-
-  <rect class="fetch node" x="470" y="344" width="185" height="70" rx="4" />
-  <text class="label" x="493" y="369">Missing or refresh</text>
-  <text class="small" x="493" y="387">foreground WAPI read</text>
-
-  <rect class="fetch node" x="715" y="330" width="175" height="98" rx="4" />
-  <text class="label" x="739" y="354">Refresh cache</text>
-  <text class="small" x="739" y="372">DNS: use/check serial</text>
-  <text class="small" x="739" y="388">IPAM: skip serial</text>
-  <text class="small" x="739" y="404">then return rows</text>
-
-  <path class="line" d="M210 161 L255 161" />
-  <path class="line fresh-line" d="M425 161 L470 161" />
-  <path class="line stale-line" d="M425 161 L445 161 L445 267 L470 267" />
-  <path class="line fetch-line" d="M425 161 L445 161 L445 379 L470 379" />
-  <path class="line fresh-line" d="M655 161 L715 161" />
-  <path class="line stale-line" d="M655 267 L715 267" />
-  <path class="line fetch-line" d="M655 379 L715 379" />
-
-  <text class="small" x="470" y="114">cache hit path</text>
-  <text class="small" x="470" y="220">stale or cached IPAM list/search path</text>
-  <text class="small" x="470" y="332">missing cache or --refresh path</text>
+  <title id="title">ib cache freshness and stale-while-revalidate decision flow</title>
+  <desc id="desc">Fresh cache rows return immediately when now is earlier than cached_at plus cache_ttl. Rows inside the stale-while-revalidate window return immediately and queue lease-protected refresh. Matching DNS serials renew rows locally; missing or changed data uses a foreground or background WAPI read.</desc>
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#111827"/></linearGradient><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="#64748b"/></marker><style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.h{fill:#f8fafc;font-size:23px;font-weight:800}.l{fill:#e2e8f0;font-size:15px;font-weight:700}.b{fill:#cbd5e1;font-size:12px}.s{fill:#94a3b8;font-size:11px}.card{fill:#0b1220;stroke:#263244;stroke-width:1.3}.line{fill:none;stroke-width:2.2;marker-end:url(#a)}</style></defs>
+  <rect width="980" height="500" rx="24" fill="url(#bg)"/><rect x="28" y="28" width="924" height="444" rx="18" fill="#0b1220" stroke="#263244"/><text x="55" y="67" class="h">Cache decision flow</text><text x="55" y="91" class="b">Freshness is calculated from timestamps; SWR keeps reads responsive while refresh runs.</text>
+  <g transform="translate(55 133)"><rect width="165" height="65" rx="13" class="card" stroke="#38bdf8"/><text x="20" y="29" class="l">Read request</text><text x="20" y="49" class="b">DNS · IPAM · VLAN</text></g><path d="M220 165h42" class="line" stroke="#38bdf8"/>
+  <g transform="translate(262 123)"><rect width="210" height="85" rx="13" class="card" stroke="#38bdf8"/><text x="18" y="29" class="l">Read cache row</text><text x="18" y="52" class="b">scope + cached_at</text><text x="18" y="70" class="s">cache_ttl / SWR window</text></g>
+  <path d="M472 145h40M472 190h40M472 235h40" class="line" stroke="#64748b"/>
+  <g transform="translate(512 110)"><rect width="180" height="70" rx="13" class="card" stroke="#22c55e"/><text x="18" y="28" class="l">Fresh</text><text x="18" y="49" class="b">now &lt; cached_at + cache_ttl</text><text x="18" y="64" class="s">return immediately</text></g>
+  <g transform="translate(512 195)"><rect width="180" height="70" rx="13" class="card" stroke="#fbbf24"/><text x="18" y="28" class="l">Stale inside SWR</text><text x="18" y="49" class="b">return cached rows</text><text x="18" y="64" class="s">queue lease-protected refresh</text></g>
+  <g transform="translate(512 280)"><rect width="180" height="70" rx="13" class="card" stroke="#f87171"/><text x="18" y="28" class="l">Missing / expired</text><text x="18" y="49" class="b">foreground WAPI read</text><text x="18" y="64" class="s">unless refresh completes first</text></g>
+  <path d="M692 145h42M692 230h42M692 315h42" class="line" stroke="#64748b"/>
+  <g transform="translate(734 110)"><rect width="165" height="70" rx="13" class="card" stroke="#22c55e"/><text x="18" y="28" class="l">Return fresh</text><text x="18" y="49" class="b">no Infoblox call</text></g>
+  <g transform="translate(734 195)"><rect width="165" height="70" rx="13" class="card" stroke="#fbbf24"/><text x="18" y="28" class="l">Return stale</text><text x="18" y="49" class="b">refresh in background</text></g>
+  <g transform="translate(734 280)"><rect width="165" height="70" rx="13" class="card" stroke="#f87171"/><text x="18" y="28" class="l">Refresh rows</text><text x="18" y="49" class="b">DNS serial or /allrecords</text><text x="18" y="64" class="s">IPAM/VLAN skips serial</text></g>
+  <rect x="55" y="390" width="844" height="45" rx="12" fill="#082f49" stroke="#0369a1"/><text x="74" y="418" class="b">DNS matching SOA serial renews cached_at locally. IPAM list/search may serve older rows; --refresh forces foreground WAPI data.</text>
 </svg>

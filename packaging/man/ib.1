@@ -1,6 +1,6 @@
 .TH IB 1 "August 2026" "gib 0.4.3" "User Commands"
 .SH NAME
-ib \- operator-focused Infoblox DNS CLI
+ib \- operator-focused Infoblox DNS and IPAM CLI
 .SH SYNOPSIS
 .B ib
 [\fIOPTIONS\fR] [\fICOMMAND\fR] [\fIARGS\fR]
@@ -14,19 +14,23 @@ write-action audit logging, and shell completion.
 .SH COMMANDS
 .TP
 .B ib config
-Manage profiles, completion, and cache data.
+Manage profiles, completion, and cache data (`new`, `edit`, `delete`, `list`,
+`use`, `completion`, and `cache`).
 .TP
 .B ib dns
-Manage DNS views, zones, records, and searches.
+Manage DNS views, zones, records, searches, and next-IP lookups (`create`,
+`edit`, `delete`, `list`, `next-ip`, `search`, `view`, and `zone`).
 .TP
 .B ib net
 Manage IPAM network views, IPv4 networks and containers, address details, and
-next available IP lookups.
+next available IP lookups (`view`, `list`, `search`, `show`, `address`, and
+`next-ip`).
 .TP
 .B ib vlan
 List, search, inspect, and select VLANs derived from the vlans array on IPAM
-networks and containers. Create, edit, and delete are unsupported on stock NIOS
-WAPI because VLANs are managed via network device discovery.
+networks and containers (`list`, `search`, `show`, and `use`). Create, edit, and
+delete are unsupported on stock NIOS WAPI because VLANs are managed via network
+device discovery.
 .SH OPTIONS
 .TP
 .B \-v, \-\-version
@@ -41,6 +45,22 @@ Select output format.
 .B \-\-debug
 Print timestamped command, WAPI, and cache timing diagnostics to stderr.
 Stdout remains reserved for normal table, JSON, or CSV output.
+.PP
+DNS commands use `--view`/`-v` and `--zone`/`-z` as one-command context
+overrides where applicable. Record list and search support `--type`,
+`--exclude`, `--sort`, and `--columns`; search also supports `--global`,
+`--recursive`, `--fuzzy`, and `--case-sensitive`. Record create and edit accept
+`--comment`, `--ttl`, and `--noptr`; delete accepts `--yes`.
+.PP
+DNS zone list supports `--type`, `--exclude`, `--sort`, and `--columns`; zone
+create accepts `--comment`, `--format`, and `--ns-group`, and zone delete accepts
+`--yes`.
+.PP
+IPAM list and search support `--network-view`, `--refresh`, `--sort`, and
+`--columns`. IPAM details use `--network-view`; `next-ip` additionally supports
+`--num` and repeatable `--exclude`. VLAN list and search use the same filter,
+refresh, sort, and column controls; VLAN details use `--network-view`, and `use`
+takes a VLAN ID or name.
 .SH EXAMPLES
 .TP
 .B ib
@@ -108,7 +128,8 @@ nameservers are managed through zone configuration, not this record create path.
 .TP
 .B ib net list prod --network-view default
 List IPv4 networks and containers matching prod in the default IPAM network view.
-Default output shows network, type, assigned_vlan, assigned_vlan_name, and comment columns; add -C extattrs to include extensible attributes.
+Default output includes network, type, assigned_vlan, assigned_vlan_name,
+comment, and extensible attributes. Use --columns to select or reorder fields.
 Table output color-codes CIDR size and network/container type values.
 Covered child CIDRs are not synthesized unless Infoblox returns them as objects.
 Existing cache is returned immediately; add --refresh to wait for fresh WAPI data.
@@ -174,14 +195,17 @@ Audit logging is disabled by default and can be enabled during
 or
 .B ib config edit .
 Successful DNS record create/edit/delete, DNS zone create/delete, PTR side
-effects, and config profile create/edit/delete actions are logged. Read, list,
-search, cache, and completion operations are not logged. Linux supports file and
-syslog sinks; Windows supports Windows Event Log and file sinks. File logs use
-one JSON object per line and redact password, key, credential, token, and secret
-fields. Selecting the file sink warns about writable log-file risk, allows
-returning to method selection, and tests that the path can be opened for
-writing before saving. Audit sink failures print a warning and do not fail the
-completed write.
+effects, and config profile create/edit/delete actions are logged. Failed DNS
+record create/edit/delete WAPI attempts, including explicit PTR creates and
+deletes, are also logged with `result: "failure"`, redacted attempted values,
+and a sanitized error. A forward success followed by a PTR sync failure is
+recorded as separate events. Read, list, search, cache, and completion
+operations are not logged. Linux supports file and syslog sinks; Windows
+supports Windows Event Log and file sinks. File logs use one JSON object per
+line and redact password, key, credential, token, and secret fields. Selecting
+the file sink warns about writable log-file risk, allows returning to method
+selection, and tests that the path can be opened for writing before saving.
+Audit sink failures print a warning and do not fail the completed write.
 .SH ENVIRONMENT
 .TP
 .B IB_SEARCH_DEBUG=1

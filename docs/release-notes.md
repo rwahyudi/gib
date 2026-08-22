@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### DNS Reliability and Auditing
+
+- Typed `ib dns edit` and `ib dns delete` lookups query the requested record type first, avoiding unnecessary WAPI scans; the broader lookup is retained only to report an actionable record-type mismatch.
+- Optional DNS audit logging now records failed create, edit, and delete WAPI attempts, including explicit PTR operations, as redacted JSON Lines events with `result: "failure"`. A forward success followed by a PTR sync failure remains represented by separate events.
+
 ## v0.4.3 - 2026-08-08
 
 ### Reliability and Safety

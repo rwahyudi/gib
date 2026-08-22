@@ -3610,7 +3610,7 @@ func parseRecordTypes(raw string) ([]string, error) {
 	return types, nil
 }
 
-func (a *App) findForwardRecords(profile Profile, client *WapiClient, recordNameValue, zone string, caseInsensitive bool) (string, []TypedRecord, []TypedRecord, error) {
+func (a *App) findForwardRecords(profile Profile, client *WapiClient, recordNameValue, zone string, caseInsensitive bool, requestedType string) (string, []TypedRecord, []TypedRecord, error) {
 	recordNameValue = strings.TrimRight(strings.TrimSpace(recordNameValue), ".")
 	if recordNameValue == "" {
 		return "", nil, nil, cliError("record name is required")
@@ -3638,14 +3638,18 @@ func (a *App) findForwardRecords(profile Profile, client *WapiClient, recordName
 			}
 		}
 	}
+	types := supportedRecordTypes()
+	if requestedType != "" && requestedType != "ptr" {
+		types = []string{requestedType}
+	}
 	var firstTarget string
-	var allMatches []TypedRecord
 	for _, target := range targets {
 		if firstTarget == "" {
 			firstTarget = target
 		}
 		var matches []TypedRecord
-		for recordType, spec := range recordTypes {
+		for _, recordType := range types {
+			spec := recordTypes[recordType]
 			if recordType == "ptr" {
 				continue
 			}
@@ -3664,12 +3668,14 @@ func (a *App) findForwardRecords(profile Profile, client *WapiClient, recordName
 		if len(matches) > 0 {
 			return target, matches, matches, nil
 		}
-		allMatches = append(allMatches, matches...)
+	}
+	if requestedType != "" && requestedType != "ptr" {
+		return a.findForwardRecords(profile, client, recordNameValue, zone, caseInsensitive, "")
 	}
 	if firstTarget == "" {
 		firstTarget = recordNameValue
 	}
-	return firstTarget, nil, allMatches, nil
+	return firstTarget, nil, nil, nil
 }
 
 func containsString(values []string, target string) bool {
