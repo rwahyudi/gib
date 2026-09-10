@@ -708,6 +708,76 @@ func TestDNSDeleteNSFallsBackToGenericRecordNSWhenDelegationIsAbsent(t *testing.
 	}
 }
 
+func TestDNSDeleteNSPickerRoutesSelectedSystemRecordToDelegation(t *testing.T) {
+	var primaryRequests []string
+	var putPayload map[string]any
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		if strings.Contains(trimWAPIPath(r.URL.Path), "record:ns") {
+			t.Fatalf("selected system NS used record:ns write: %s %s", r.Method, r.URL.Path)
+		}
+		if r.Method != http.MethodPut || trimWAPIPath(r.URL.Path) != "zone_delegated/delegation-ref" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&putPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "zone_delegated/delegation-ref"})
+	}))
+	defer primary.Close()
+
+	var readRequests []string
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
+		object := trimWAPIPath(r.URL.Path)
+		readRequests = append(readRequests, r.Method+" "+object)
+		switch object {
+		case "record:ns":
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{
+				{"_ref": "record:ns/generated-ref", "name": "child.example.com", "nameserver": "ns1.example.com", "zone": "example.com", "view": "default"},
+				{"_ref": "record:ns/ordinary-ref", "name": "child.example.com", "nameserver": "ns2.example.com", "zone": "example.com", "view": "default"},
+			}})
+		case "zone_delegated":
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"_ref": "zone_delegated/delegation-ref",
+				"delegate_to": []map[string]any{
+					{"name": "ns1.example.com", "address": "255.255.255.255"},
+					{"name": "ns2.example.com", "address": "192.0.2.2"},
+				},
+			}}})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		}
+	}))
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	app.dnsDeleteRecordSelector = func(_ string, matches []TypedRecord) ([]TypedRecord, bool, error) {
+		if len(matches) != 2 {
+			t.Fatalf("picker matches = %d, want two NS candidates", len(matches))
+		}
+		return []TypedRecord{matches[0]}, true, nil
+	}
+
+	if err := app.Execute([]string{"dns", "delete", "ns", "child", "-y"}); err != nil {
+		t.Fatalf("delete selected delegated ns: %v", err)
+	}
+	if !containsString(readRequests, "GET record:ns") || !containsString(readRequests, "GET zone_delegated") {
+		t.Fatalf("read requests = %#v, want record listing and delegation lookup", readRequests)
+	}
+	if strings.Join(primaryRequests, ",") != "PUT zone_delegated/delegation-ref" {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	delegateTo, ok := putPayload["delegate_to"].([]any)
+	if !ok || len(delegateTo) != 1 {
+		t.Fatalf("filtered delegate_to = %#v, want one remaining delegate", putPayload["delegate_to"])
+	}
+}
+
 func TestDNSCreateUsesDNSContextOverrides(t *testing.T) {
 	var postPayload map[string]any
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

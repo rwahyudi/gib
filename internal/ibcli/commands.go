@@ -2884,6 +2884,16 @@ func (a *App) runDNSDeleteGeneric(recordType, recordName, zone string, skipConfi
 		}
 		matches = selected
 	}
+	if recordType == "ns" {
+		handled, err := a.deleteSelectedNSCandidates(profile, client, target, matches, skipConfirm)
+		if handled || err != nil {
+			return err
+		}
+	}
+	return a.deleteSelectedForwardDNSRecords(profile, client, target, matches, skipConfirm)
+}
+
+func (a *App) deleteSelectedForwardDNSRecords(profile Profile, client *WapiClient, target string, matches []TypedRecord, skipConfirm bool) error {
 	plans := make([]preparedForwardDNSDelete, 0, len(matches))
 	for _, record := range matches {
 		plan, err := prepareForwardDNSDelete(record)
@@ -3042,6 +3052,234 @@ func emitDelegatedNSDeleteSuccess(a *App, targetName, zone, view, message, table
 	}
 	a.PrintSuccess("SUCCESS: " + tableMessage + " " + targetName)
 	return nil
+}
+
+type preparedDelegatedNSDelete struct {
+	profile    Profile
+	client     *WapiClient
+	targetName string
+	zone       string
+	view       string
+	nameserver string
+	ref        string
+	match      map[string]any
+	delegates  []map[string]any
+	index      int
+}
+
+func (a *App) deleteSelectedNSCandidates(profile Profile, client *WapiClient, target string, matches []TypedRecord, skipConfirm bool) (bool, error) {
+	delegated := make([]preparedDelegatedNSDelete, 0, len(matches))
+	ordinary := make([]TypedRecord, 0, len(matches))
+	for _, record := range matches {
+		nameserver := cleanDNSName(recordValue("ns", record.Item))
+		if nameserver == "" {
+			ordinary = append(ordinary, record)
+			continue
+		}
+		explicitZone := strings.TrimSpace(a.dnsZoneOverride)
+		if explicitZone == "" {
+			explicitZone = cleanString(record.Item["zone"])
+		}
+		plan, err := a.prepareDelegatedNSDelete(profile, client, recordName(record.Item, "ns"), nameserver, explicitZone)
+		if err != nil {
+			if errors.Is(err, errDelegatedNSNotFound) {
+				ordinary = append(ordinary, record)
+				continue
+			}
+			return true, err
+		}
+		delegated = append(delegated, plan)
+	}
+	if len(delegated) == 0 {
+		return false, nil
+	}
+
+	for _, plan := range delegated {
+		if err := a.confirmPreparedDelegatedNSDelete(plan, skipConfirm); err != nil {
+			if errors.Is(err, errDeleteCancelled) {
+				a.PrintInfo("INFO: delete cancelled; no records were deleted")
+				return true, nil
+			}
+			return true, err
+		}
+	}
+	if len(ordinary) > 0 {
+		if err := a.deleteSelectedForwardDNSRecords(profile, client, target, ordinary, skipConfirm); err != nil {
+			return true, err
+		}
+	}
+	if err := a.applyPreparedDelegatedNSDeletes(delegated); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func (a *App) prepareDelegatedNSDelete(profile Profile, client *WapiClient, recordName, nameserver, explicitZone string) (preparedDelegatedNSDelete, error) {
+	resolvedZone, err := a.resolveCreateZone(profile, client, "ns", recordName, explicitZone)
+	if err != nil {
+		return preparedDelegatedNSDelete{}, err
+	}
+	targetName, err := fqdn(recordName, resolvedZone)
+	if err != nil {
+		return preparedDelegatedNSDelete{}, err
+	}
+	nameserver = cleanDNSName(nameserver)
+	if nameserver == "" {
+		return preparedDelegatedNSDelete{}, cliError("NS nameserver is required")
+	}
+	params := url.Values{}
+	params.Set("fqdn", targetName)
+	params.Set("view", client.View)
+	params.Set("_return_fields", "delegate_to")
+	response, err := client.Request(http.MethodGet, "zone_delegated", params, nil)
+	if err != nil {
+		a.auditDNSRecordFailure(profile, client, "delete", "dns.record.delete", "ns", targetName, resolvedZone, map[string]any{"name": targetName, "nameserver": nameserver, "view": client.View}, err)
+		return preparedDelegatedNSDelete{}, err
+	}
+	matches, err := delegatedNSRows(response)
+	if err != nil {
+		return preparedDelegatedNSDelete{}, err
+	}
+	if len(matches) == 0 {
+		return preparedDelegatedNSDelete{}, errDelegatedNSNotFound
+	}
+	if len(matches) > 1 {
+		return preparedDelegatedNSDelete{}, cliError("multiple zone_delegated records found for %s in view %s", targetName, client.View)
+	}
+	match := matches[0]
+	refValue, ok := match["_ref"].(string)
+	ref := strings.TrimSpace(refValue)
+	if !ok || ref == "" {
+		return preparedDelegatedNSDelete{}, cliError("zone_delegated record for %s is malformed: missing _ref", targetName)
+	}
+	delegates, err := delegatedNSArray(match["delegate_to"], "existing")
+	if err != nil {
+		return preparedDelegatedNSDelete{}, err
+	}
+	matchedIndex := -1
+	for index, delegate := range delegates {
+		if sameDNSName(cleanString(delegate["name"]), nameserver) {
+			if matchedIndex >= 0 {
+				return preparedDelegatedNSDelete{}, cliError("multiple delegated nameservers named %s found for %s", nameserver, targetName)
+			}
+			matchedIndex = index
+		}
+	}
+	if matchedIndex < 0 {
+		return preparedDelegatedNSDelete{}, cliError("delegated zone %s does not contain nameserver %s", targetName, nameserver)
+	}
+	return preparedDelegatedNSDelete{
+		profile:    profile,
+		client:     client,
+		targetName: targetName,
+		zone:       resolvedZone,
+		view:       client.View,
+		nameserver: nameserver,
+		ref:        ref,
+		match:      match,
+		delegates:  delegates,
+		index:      matchedIndex,
+	}, nil
+}
+
+func (a *App) confirmPreparedDelegatedNSDelete(plan preparedDelegatedNSDelete, skipConfirm bool) error {
+	item := delegatedNSDeleteAuditItem(plan)
+	return a.confirmDNSDelete(plan.targetName, TypedRecord{Type: "ns", Item: item}, skipConfirm)
+}
+
+func (a *App) applyPreparedDelegatedNSDelete(plan preparedDelegatedNSDelete) error {
+	auditItem := delegatedNSDeleteAuditItem(plan)
+	if len(plan.delegates) == 1 {
+		if _, err := plan.client.Request(http.MethodDelete, plan.ref, nil, nil); err != nil {
+			a.auditDNSRecordFailure(plan.profile, plan.client, "delete", "dns.record.delete", "ns", plan.targetName, plan.zone, auditItem, err)
+			return err
+		}
+		a.auditDNSRecordDelete(plan.profile, plan.client, TypedRecord{Type: "ns", Item: auditItem}, plan.targetName)
+		a.deleteRecordCacheEntry(plan.profile, plan.zone)
+		a.queueRecordCacheRefreshAfterWrite(plan.profile, plan.zone)
+		return emitDelegatedNSDeleteSuccess(a, plan.targetName, plan.zone, plan.view, "deleted delegated zone", "deleted delegated NS zone")
+	}
+	filtered := make([]map[string]any, 0, len(plan.delegates)-1)
+	filtered = append(filtered, plan.delegates[:plan.index]...)
+	filtered = append(filtered, plan.delegates[plan.index+1:]...)
+	update := map[string]any{"delegate_to": filtered}
+	if _, err := plan.client.Request(http.MethodPut, plan.ref, nil, update); err != nil {
+		a.auditDNSRecordFailure(plan.profile, plan.client, "edit", "dns.record.edit", "ns", plan.targetName, plan.zone, update, err)
+		return err
+	}
+	a.auditDNSRecordEdit(plan.profile, plan.client, TypedRecord{Type: "ns", Item: auditItem}, update)
+	a.deleteRecordCacheEntry(plan.profile, plan.zone)
+	a.queueRecordCacheRefreshAfterWrite(plan.profile, plan.zone)
+	return emitDelegatedNSDeleteSuccess(a, plan.targetName, plan.zone, plan.view, "removed nameserver from delegated zone", "removed NS nameserver from delegated zone")
+}
+
+func (a *App) applyPreparedDelegatedNSDeletes(plans []preparedDelegatedNSDelete) error {
+	type delegatedDeleteGroup struct {
+		plans   []preparedDelegatedNSDelete
+		indexes map[int]bool
+	}
+	groups := make(map[string]*delegatedDeleteGroup, len(plans))
+	ordered := make([]*delegatedDeleteGroup, 0, len(plans))
+	for _, plan := range plans {
+		group := groups[plan.ref]
+		if group == nil {
+			group = &delegatedDeleteGroup{indexes: map[int]bool{}}
+			groups[plan.ref] = group
+			ordered = append(ordered, group)
+		}
+		group.plans = append(group.plans, plan)
+		group.indexes[plan.index] = true
+	}
+	for _, group := range ordered {
+		plan := group.plans[0]
+		remaining := make([]map[string]any, 0, len(plan.delegates)-len(group.indexes))
+		for index, delegate := range plan.delegates {
+			if !group.indexes[index] {
+				remaining = append(remaining, delegate)
+			}
+		}
+		if len(remaining) == 0 {
+			if _, err := plan.client.Request(http.MethodDelete, plan.ref, nil, nil); err != nil {
+				a.auditDNSRecordFailure(plan.profile, plan.client, "delete", "dns.record.delete", "ns", plan.targetName, plan.zone, delegatedNSDeleteAuditItem(plan), err)
+				return err
+			}
+			a.auditDNSRecordDelete(plan.profile, plan.client, TypedRecord{Type: "ns", Item: delegatedNSDeleteAuditItem(plan)}, plan.targetName)
+			a.deleteRecordCacheEntry(plan.profile, plan.zone)
+			a.queueRecordCacheRefreshAfterWrite(plan.profile, plan.zone)
+			for _, selected := range group.plans {
+				if err := emitDelegatedNSDeleteSuccess(a, selected.targetName, selected.zone, selected.view, "deleted delegated zone", "deleted delegated NS zone"); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		update := map[string]any{"delegate_to": remaining}
+		if _, err := plan.client.Request(http.MethodPut, plan.ref, nil, update); err != nil {
+			a.auditDNSRecordFailure(plan.profile, plan.client, "edit", "dns.record.edit", "ns", plan.targetName, plan.zone, update, err)
+			return err
+		}
+		a.auditDNSRecordEdit(plan.profile, plan.client, TypedRecord{Type: "ns", Item: delegatedNSDeleteAuditItem(plan)}, update)
+		a.deleteRecordCacheEntry(plan.profile, plan.zone)
+		a.queueRecordCacheRefreshAfterWrite(plan.profile, plan.zone)
+		for _, selected := range group.plans {
+			if err := emitDelegatedNSDeleteSuccess(a, selected.targetName, selected.zone, selected.view, "removed nameserver from delegated zone", "removed NS nameserver from delegated zone"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func delegatedNSDeleteAuditItem(plan preparedDelegatedNSDelete) map[string]any {
+	item := make(map[string]any, len(plan.match)+4)
+	for key, value := range plan.match {
+		item[key] = value
+	}
+	item["name"] = plan.targetName
+	item["nameserver"] = plan.nameserver
+	item["zone"] = plan.zone
+	item["view"] = plan.view
+	return item
 }
 
 type preparedForwardDNSDelete struct {
