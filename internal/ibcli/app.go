@@ -100,8 +100,9 @@ type App struct {
 	backgroundRecordBatchRevalidator func(Profile, []string) error
 	backgroundZoneRefresher          func(Profile) error
 	backgroundNetRefresher           func(Profile, string, string, string) error
-	dnsDeleteRecordSelector          func(string, []TypedRecord) (TypedRecord, bool, error)
+	dnsDeleteRecordSelector          func(string, []TypedRecord) ([]TypedRecord, bool, error)
 	dnsDeleteConfirmer               func(string, TypedRecord) (bool, error)
+	dnsDeleteBatchConfirmer          func(string, []TypedRecord) (bool, error)
 	zoneDeleteConfirmer              func(string, string, string) (bool, error)
 	auditSink                        func(ConfigSettings, []byte) error
 	tlsRootCAs                       *x509.CertPool

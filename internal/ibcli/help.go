@@ -351,7 +351,7 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 			{"lookup", "forward record names match case-insensitively"},
 			{"ptr", "ib dns delete ptr <ip-address>"},
 			{"confirm", "prompts before deleting; use -y to skip"},
-			{"duplicates", "interactive table mode prompts you to choose one matching record"},
+			{"duplicates", "interactive table mode lets you select one or more matching forward records; Space selects, Enter continues, and Esc cancels"},
 			{"example", "ib dns delete a app"},
 		})
 	case "ib config completion":

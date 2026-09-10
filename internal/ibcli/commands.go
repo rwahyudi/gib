@@ -2722,6 +2722,18 @@ func (a *App) syncPTRForAddress(profile Profile, client *WapiClient, address net
 }
 
 func (a *App) deleteManagedPTRForAddress(profile Profile, client *WapiClient, address netip.Addr, ptrdname string) (string, error) {
+	reverseZone, err := a.deleteManagedPTRForAddressWithRefresh(profile, client, address, ptrdname, true)
+	if err != nil {
+		return "", err
+	}
+	return reverseZone, nil
+}
+
+func (a *App) deleteManagedPTRForAddressDeferredRefresh(profile Profile, client *WapiClient, address netip.Addr, ptrdname string) (string, error) {
+	return a.deleteManagedPTRForAddressWithRefresh(profile, client, address, ptrdname, false)
+}
+
+func (a *App) deleteManagedPTRForAddressWithRefresh(profile Profile, client *WapiClient, address netip.Addr, ptrdname string, queueRefresh bool) (string, error) {
 	ptrdname = cleanDNSName(ptrdname)
 	if ptrdname == "" {
 		return "", cliError("old PTR target name is required")
@@ -2738,22 +2750,39 @@ func (a *App) deleteManagedPTRForAddress(profile Profile, client *WapiClient, ad
 		}
 	}
 	if len(targetMatches) == 0 {
-		a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
+		a.refreshManagedPTRCache(profile, reverseZone, queueRefresh)
 		return reverseZone, nil
 	}
 	if len(targetMatches) > 1 {
-		return "", cliError("multiple old PTR records found for %s in reverse zone %s. Delete one _ref manually", address, reverseZone)
+		if !queueRefresh {
+			a.deleteRecordCacheEntry(profile, reverseZone)
+		}
+		return reverseZone, cliError("multiple old PTR records found for %s in reverse zone %s. Delete one _ref manually", address, reverseZone)
 	}
 	ref, err := recordRef(targetMatches[0])
 	if err != nil {
-		return "", err
+		if !queueRefresh {
+			a.deleteRecordCacheEntry(profile, reverseZone)
+		}
+		return reverseZone, err
 	}
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
-		return "", err
+		if !queueRefresh {
+			a.deleteRecordCacheEntry(profile, reverseZone)
+		}
+		return reverseZone, err
 	}
 	a.auditDNSPTRSideEffect(profile, client, "delete", address, ptrdname, reverseZone, &targetMatches[0])
-	a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
+	a.refreshManagedPTRCache(profile, reverseZone, queueRefresh)
 	return reverseZone, nil
+}
+
+func (a *App) refreshManagedPTRCache(profile Profile, reverseZone string, queueRefresh bool) {
+	if queueRefresh {
+		a.queueRecordCacheRefreshAfterWrite(profile, reverseZone)
+		return
+	}
+	a.deleteRecordCacheEntry(profile, reverseZone)
 }
 
 func managedPTRMatchesForDelete(client *WapiClient, address netip.Addr, ptrdname string) (string, []TypedRecord, error) {
@@ -2824,89 +2853,151 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 		return cliError("no forward DNS record found for %s in view %s\nHINT: To delete a reverse DNS PTR entry, run: ib dns delete ptr <ip-address>", target, client.View)
 	}
 	if len(matches) > 1 {
-		record, err := a.selectDuplicateDeleteRecord(target, matches)
+		selected, err := a.selectDuplicateDeleteRecords(target, matches)
 		if err != nil {
 			if errors.Is(err, errDeleteCancelled) {
-				a.PrintInfo("INFO: delete cancelled")
+				a.PrintInfo("INFO: delete cancelled; no records were deleted")
 				return nil
 			}
 			return err
 		}
-		matches = []TypedRecord{record}
+		matches = selected
 	}
-	record := matches[0]
-	ref, err := recordRef(record)
-	if err != nil {
-		return err
+	plans := make([]preparedForwardDNSDelete, 0, len(matches))
+	for _, record := range matches {
+		plan, err := prepareForwardDNSDelete(record)
+		if err != nil {
+			return cliError("cannot prepare %s for deletion: %v", duplicateDeleteRecordDescription(record), err)
+		}
+		plans = append(plans, plan)
 	}
-	if err := a.confirmDNSDelete(target, record, skipConfirm); err != nil {
+	if err := a.confirmDNSDeleteRecords(target, matches, skipConfirm); err != nil {
 		if errors.Is(err, errDeleteCancelled) {
-			a.PrintInfo("INFO: delete cancelled")
+			a.PrintInfo("INFO: delete cancelled; no records were deleted")
 			return nil
 		}
 		return err
 	}
-	var ptrAddresses []netip.Addr
-	ptrName := target
-	syncPTR := ptrDeleteManagedRecordType(record.Type)
-	if syncPTR {
-		ptrAddresses, err = managedPTRAddresses(record.Type, nil, record.Item)
+	deferRefresh := len(plans) > 1
+	var affectedZones []string
+	if deferRefresh {
+		defer func() {
+			if len(affectedZones) > 0 {
+				a.startRecordCacheRevalidationBatchAsync(profile, affectedZones)
+			}
+		}()
+	}
+	completedForwardDeletes := 0
+	for _, plan := range plans {
+		forwardDeleted, ptrCleanupFailed, reverseZones, err := a.deleteForwardDNSRecord(profile, client, target, plan, deferRefresh)
+		if forwardDeleted {
+			completedForwardDeletes++
+			affectedZones = append(affectedZones, cleanString(plan.record.Item["zone"]))
+			affectedZones = append(affectedZones, reverseZones...)
+		}
 		if err != nil {
-			return err
+			if ptrCleanupFailed {
+				return cliError("forward delete succeeded for %s, but managed PTR cleanup failed; completed forward deletes: %d of %d selected records: %v", duplicateDeleteRecordDescription(plan.record), completedForwardDeletes, len(plans), err)
+			}
+			if forwardDeleted {
+				return cliError("forward delete succeeded for %s, but action output failed; completed forward deletes: %d of %d selected records: %v", duplicateDeleteRecordDescription(plan.record), completedForwardDeletes, len(plans), err)
+			}
+			return cliError("forward DELETE failed for %s; completed forward deletes: %d of %d selected records: %v", duplicateDeleteRecordDescription(plan.record), completedForwardDeletes, len(plans), err)
 		}
 	}
-	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
+	return nil
+}
+
+type preparedForwardDNSDelete struct {
+	record       TypedRecord
+	ref          string
+	ptrAddresses []netip.Addr
+}
+
+func prepareForwardDNSDelete(record TypedRecord) (preparedForwardDNSDelete, error) {
+	ref, err := recordRef(record)
+	if err != nil {
+		return preparedForwardDNSDelete{}, err
+	}
+	var ptrAddresses []netip.Addr
+	if ptrDeleteManagedRecordType(record.Type) {
+		ptrAddresses, err = managedPTRAddresses(record.Type, nil, record.Item)
+		if err != nil {
+			return preparedForwardDNSDelete{}, err
+		}
+	}
+	return preparedForwardDNSDelete{record: record, ref: ref, ptrAddresses: ptrAddresses}, nil
+}
+
+func (a *App) deleteForwardDNSRecord(profile Profile, client *WapiClient, target string, plan preparedForwardDNSDelete, deferRefresh bool) (bool, bool, []string, error) {
+	record := plan.record
+	if _, err := client.Request(http.MethodDelete, plan.ref, nil, nil); err != nil {
 		a.auditDNSRecordFailure(profile, client, "delete", "dns.record.delete", record.Type, target, cleanString(record.Item["zone"]), record.Item, err)
-		return err
+		return false, false, nil, err
 	}
 	a.auditDNSRecordDelete(profile, client, record, target)
-	a.queueRecordCacheRefreshAfterWrite(profile, cleanString(record.Item["zone"]))
-	if syncPTR {
-		for _, ptrAddress := range ptrAddresses {
-			if _, err := a.deleteManagedPTRForAddress(profile, client, ptrAddress, ptrName); err != nil {
-				return cliError("deleted %s record %s, but PTR cleanup failed: %v", strings.ToUpper(record.Type), target, err)
+	a.deleteRecordCacheEntry(profile, cleanString(record.Item["zone"]))
+	if !deferRefresh {
+		a.queueRecordCacheRefreshAfterWrite(profile, cleanString(record.Item["zone"]))
+	}
+	var reverseZones []string
+	if len(plan.ptrAddresses) > 0 {
+		for _, ptrAddress := range plan.ptrAddresses {
+			var reverseZone string
+			var err error
+			if deferRefresh {
+				reverseZone, err = a.deleteManagedPTRForAddressDeferredRefresh(profile, client, ptrAddress, target)
+			} else {
+				reverseZone, err = a.deleteManagedPTRForAddress(profile, client, ptrAddress, target)
+			}
+			if reverseZone != "" {
+				reverseZones = append(reverseZones, reverseZone)
+			}
+			if err != nil {
+				return true, true, reverseZones, err
 			}
 		}
 	}
 	if !a.isTableOutput() {
-		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", strings.ToUpper(record.Type), target, cleanString(record.Item["zone"]), client.View, "deleted DNS record"))
+		return true, false, reverseZones, a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", strings.ToUpper(record.Type), target, cleanString(record.Item["zone"]), client.View, "deleted DNS record"))
 	}
 	a.PrintSuccess("SUCCESS: deleted " + strings.ToUpper(record.Type) + " record " + target)
-	return nil
+	return true, false, reverseZones, nil
 }
 
-func (a *App) selectDuplicateDeleteRecord(target string, matches []TypedRecord) (TypedRecord, error) {
+func (a *App) selectDuplicateDeleteRecords(target string, matches []TypedRecord) ([]TypedRecord, error) {
 	if a.dnsDeleteRecordSelector != nil {
-		record, selected, err := a.dnsDeleteRecordSelector(target, matches)
+		records, selected, err := a.dnsDeleteRecordSelector(target, matches)
 		if err != nil {
-			return TypedRecord{}, err
+			return nil, err
 		}
-		if !selected {
-			return TypedRecord{}, errDeleteCancelled
+		if !selected || len(records) == 0 {
+			return nil, errDeleteCancelled
 		}
-		return record, nil
+		return records, nil
 	}
 	if !a.isTableOutput() || a.gum == nil || !a.gum.interactive() {
-		return TypedRecord{}, duplicateDeleteError(target, matches)
+		return nil, duplicateDeleteError(target, matches)
 	}
 
 	selected, err := a.huhDuplicateDeleteSelect(target, matches)
 	if err != nil {
-		return TypedRecord{}, err
+		return nil, err
 	}
 	return selected, nil
 }
 
-func (a *App) huhDuplicateDeleteSelect(target string, records []TypedRecord) (TypedRecord, error) {
+func (a *App) huhDuplicateDeleteSelect(target string, records []TypedRecord) ([]TypedRecord, error) {
 	if len(records) == 0 {
-		return TypedRecord{}, cliError("no duplicate records available to select")
+		return nil, cliError("no duplicate records available to select")
 	}
 	options := duplicateDeleteOptions(records)
-	selected := 0
+	selected := []int{}
 	form := huh.NewForm(
 		huh.NewGroup(
-			huh.NewSelect[int]().
-				Title("Multiple records found for " + target + "; select one to delete").
+			huh.NewMultiSelect[int]().
+				Title("Select duplicate DNS records to delete").
+				Description("Use Space to select, Enter to continue, or Esc to cancel.").
 				Options(options...).
 				Value(&selected).
 				Height(8),
@@ -2916,24 +3007,27 @@ func (a *App) huhDuplicateDeleteSelect(target string, records []TypedRecord) (Ty
 		WithOutput(a.Stdout)
 	if err := form.Run(); err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
-			return TypedRecord{}, errDeleteCancelled
+			return nil, errDeleteCancelled
 		}
-		return TypedRecord{}, err
+		return nil, err
 	}
-	if selected < 0 || selected >= len(records) {
-		return TypedRecord{}, cliError("invalid duplicate record selection")
+	if len(selected) == 0 {
+		return nil, errDeleteCancelled
 	}
-	return records[selected], nil
+	selectedRecords := make([]TypedRecord, 0, len(selected))
+	for _, index := range selected {
+		if index < 0 || index >= len(records) {
+			return nil, cliError("invalid duplicate record selection")
+		}
+		selectedRecords = append(selectedRecords, records[index])
+	}
+	return selectedRecords, nil
 }
 
 func duplicateDeleteOptions(records []TypedRecord) []huh.Option[int] {
 	options := make([]huh.Option[int], 0, len(records))
 	for i, record := range records {
-		option := huh.NewOption(duplicateDeleteChoice(i+1, record), i)
-		if i == 0 {
-			option = option.Selected(true)
-		}
-		options = append(options, option)
+		options = append(options, huh.NewOption(duplicateDeleteChoice(i+1, record), i))
 	}
 	return options
 }
@@ -2953,7 +3047,7 @@ func duplicateDeleteChoice(index int, record TypedRecord) string {
 
 func duplicateDeleteError(target string, records []TypedRecord) error {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "multiple records found for %s; run in an interactive terminal to choose one:\n", target)
+	fmt.Fprintf(&builder, "multiple records found for %s; run in an interactive terminal to choose records:\n", target)
 	for i, record := range records {
 		fields := duplicateDeleteFields(record)
 		fmt.Fprintf(&builder, "  %d. type=%s name=%s value=%s zone=%s ref=%s%s\n",
@@ -2987,6 +3081,35 @@ func duplicateDeleteCommentSuffix(comment string) string {
 	return " | comment=" + comment
 }
 
+func duplicateDeleteRecordDescription(record TypedRecord) string {
+	fields := duplicateDeleteFields(record)
+	return fmt.Sprintf("%s %s | %s | zone=%s | ref=%s%s",
+		fields["type"],
+		fields["name"],
+		fields["value"],
+		fields["zone"],
+		fields["ref"],
+		duplicateDeleteCommentSuffix(fields["comment"]),
+	)
+}
+
+func (a *App) confirmDNSDeleteRecords(target string, records []TypedRecord, skipConfirm bool) error {
+	if len(records) == 1 {
+		return a.confirmDNSDelete(target, records[0], skipConfirm)
+	}
+	if skipConfirm {
+		return nil
+	}
+	confirmed, err := a.promptDNSDeleteBatchConfirmation(target, records)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return errDeleteCancelled
+	}
+	return nil
+}
+
 func (a *App) confirmDNSDelete(target string, record TypedRecord, skipConfirm bool) error {
 	if skipConfirm {
 		return nil
@@ -2999,6 +3122,49 @@ func (a *App) confirmDNSDelete(target string, record TypedRecord, skipConfirm bo
 		return errDeleteCancelled
 	}
 	return nil
+}
+
+func (a *App) promptDNSDeleteBatchConfirmation(target string, records []TypedRecord) (bool, error) {
+	if a.dnsDeleteBatchConfirmer != nil {
+		return a.dnsDeleteBatchConfirmer(target, records)
+	}
+	if !a.isTableOutput() || a.gum == nil || !a.gum.interactive() {
+		return false, cliError("delete confirmation requires an interactive terminal; rerun with -y to skip confirmation")
+	}
+	return a.huhDNSDeleteBatchConfirm(target, records)
+}
+
+func (a *App) huhDNSDeleteBatchConfirm(target string, records []TypedRecord) (bool, error) {
+	confirmed := false
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title(fmt.Sprintf("Delete %d records?", len(records))).
+				Description(deleteConfirmationBatchDescription(target, records)).
+				Affirmative(fmt.Sprintf("Delete %d records", len(records))).
+				Negative("Cancel").
+				Value(&confirmed),
+		),
+	).
+		WithInput(a.Stdin).
+		WithOutput(a.Stdout)
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return false, errDeleteCancelled
+		}
+		return false, err
+	}
+	return confirmed, nil
+}
+
+func deleteConfirmationBatchDescription(target string, records []TypedRecord) string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Selected records for %s:\n", target)
+	for _, record := range records {
+		fmt.Fprintf(&builder, "- %s\n", duplicateDeleteRecordDescription(record))
+	}
+	builder.WriteString("This action is irreversible.")
+	return builder.String()
 }
 
 func (a *App) promptDNSDeleteConfirmation(target string, record TypedRecord) (bool, error) {
