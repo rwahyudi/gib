@@ -406,6 +406,151 @@ func nsDelegatedZonePayload(value string) (map[string]any, error) {
 	return map[string]any{"delegate_to": []map[string]any{{"name": nameserver, "address": nsDelegationAddress}}}, nil
 }
 
+func (a *App) runDNSCreateDelegatedNS(profile Profile, client *WapiClient, targetName, zone string, payload map[string]any) error {
+	requested, err := delegatedNSArray(payload["delegate_to"], "requested")
+	if err != nil {
+		return err
+	}
+	if len(requested) != 1 {
+		return cliError("requested NS delegation must contain exactly one nameserver")
+	}
+
+	params := url.Values{}
+	params.Set("fqdn", targetName)
+	params.Set("view", client.View)
+	params.Set("_return_fields", "_ref,delegate_to")
+	response, err := client.Request(http.MethodGet, "zone_delegated", params, nil)
+	if err != nil {
+		a.auditDNSRecordFailure(profile, client, "create", "dns.record.create", "ns", targetName, zone, payload, err)
+		return err
+	}
+	matches, err := delegatedNSRows(response)
+	if err != nil {
+		return err
+	}
+	if len(matches) == 0 {
+		if _, err := client.Request(http.MethodPost, "zone_delegated", nil, payload); err != nil {
+			a.auditDNSRecordFailure(profile, client, "create", "dns.record.create", "ns", targetName, zone, payload, err)
+			return err
+		}
+		a.auditDNSRecordCreate(profile, client, "ns", targetName, zone, payload)
+		a.queueRecordCacheRefreshAfterWrite(profile, zone)
+		return emitDelegatedNSSuccess(a, "create", targetName, zone, client.View, "created DNS delegation", "created NS delegation")
+	}
+	if len(matches) > 1 {
+		return cliError("multiple zone_delegated records found for %s in view %s", targetName, client.View)
+	}
+
+	match := matches[0]
+	refValue, ok := match["_ref"].(string)
+	ref := strings.TrimSpace(refValue)
+	if !ok || ref == "" {
+		return cliError("zone_delegated record for %s is malformed: missing _ref", targetName)
+	}
+	delegates, err := delegatedNSArray(match["delegate_to"], "existing")
+	if err != nil {
+		return err
+	}
+	for _, delegate := range delegates {
+		if sameDNSName(cleanString(delegate["name"]), cleanString(requested[0]["name"])) {
+			return emitDelegatedNSSuccess(a, "unchanged", targetName, zone, client.View, "DNS delegation already contains nameserver", "NS delegation already contains nameserver")
+		}
+	}
+	merged := make([]map[string]any, 0, len(delegates)+1)
+	merged = append(merged, delegates...)
+	merged = append(merged, requested[0])
+	update := map[string]any{"delegate_to": merged}
+	if _, err := client.Request(http.MethodPut, ref, nil, update); err != nil {
+		a.auditDNSRecordFailure(profile, client, "edit", "dns.record.edit", "ns", targetName, zone, update, err)
+		return err
+	}
+	auditItem := make(map[string]any, len(match)+3)
+	for key, value := range match {
+		auditItem[key] = value
+	}
+	auditItem["name"] = targetName
+	auditItem["zone"] = zone
+	auditItem["view"] = client.View
+	a.auditDNSRecordEdit(profile, client, TypedRecord{Type: "ns", Item: auditItem}, update)
+	a.queueRecordCacheRefreshAfterWrite(profile, zone)
+	return emitDelegatedNSSuccess(a, "edit", targetName, zone, client.View, "updated DNS delegation", "updated NS delegation")
+}
+
+func delegatedNSRows(response any) ([]map[string]any, error) {
+	var raw any
+	switch typed := response.(type) {
+	case []any:
+		raw = typed
+	case map[string]any:
+		var ok bool
+		raw, ok = typed["result"]
+		if !ok {
+			return nil, cliError("zone_delegated lookup returned malformed response: missing result")
+		}
+	default:
+		return nil, cliError("zone_delegated lookup returned malformed response")
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		if raw == nil {
+			return nil, cliError("zone_delegated lookup returned malformed response: result is null")
+		}
+		return nil, cliError("zone_delegated lookup returned malformed response: result is not an array")
+	}
+	rows := make([]map[string]any, len(items))
+	for index, item := range items {
+		row, ok := item.(map[string]any)
+		if !ok {
+			return nil, cliError("zone_delegated record %d is malformed: expected an object", index+1)
+		}
+		rows[index] = row
+	}
+	return rows, nil
+}
+
+func delegatedNSArray(value any, scope string) ([]map[string]any, error) {
+	var items []any
+	switch typed := value.(type) {
+	case []any:
+		items = typed
+	case []map[string]any:
+		items = make([]any, len(typed))
+		for index := range typed {
+			items[index] = typed[index]
+		}
+	default:
+		return nil, cliError("%s zone_delegated record is malformed: delegate_to is not an array", scope)
+	}
+	delegates := make([]map[string]any, len(items))
+	for index, item := range items {
+		delegate, ok := item.(map[string]any)
+		if !ok {
+			return nil, cliError("%s zone_delegated record is malformed: delegate_to[%d] is not an object", scope, index)
+		}
+		name, ok := delegate["name"].(string)
+		if !ok || cleanDNSName(name) == "" {
+			return nil, cliError("%s zone_delegated record is malformed: delegate_to[%d] has no nameserver name", scope, index)
+		}
+		address, ok := delegate["address"].(string)
+		if !ok || strings.TrimSpace(address) == "" {
+			return nil, cliError("%s zone_delegated record is malformed: delegate_to[%d] has no address", scope, index)
+		}
+		if _, err := netip.ParseAddr(strings.TrimSpace(address)); err != nil {
+			return nil, cliError("%s zone_delegated record is malformed: delegate_to[%d] has invalid address", scope, index)
+		}
+		delegates[index] = delegate
+	}
+	return delegates, nil
+}
+
+func emitDelegatedNSSuccess(a *App, action, targetName, zone, view, message, tableMessage string) error {
+	if !a.isTableOutput() {
+		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow(action, "NS", targetName, zone, view, message))
+	}
+	a.PrintSuccess("SUCCESS: " + tableMessage)
+	return nil
+}
+
 func nsServerAddresses(value string) (string, []map[string]any, error) {
 	parts := strings.Fields(value)
 	if len(parts) == 0 {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -255,6 +256,173 @@ func TestDNSCreateNSRejectsExplicitAddress(t *testing.T) {
 	}
 	if len(primaryRequests) != 0 {
 		t.Fatalf("create ns with unresolvable nameserver made primary requests: %#v", primaryRequests)
+	}
+}
+
+func TestDNSCreateNSExistingDelegationReadsReadServerAndUpdatesPrimary(t *testing.T) {
+	var putPayload map[string]any
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		if r.Method != http.MethodPut || trimWAPIPath(r.URL.Path) != "zone_delegated/existing-ref" {
+			t.Fatalf("primary request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&putPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "zone_delegated/existing-ref"})
+	}))
+	defer primary.Close()
+
+	var readRequests []string
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || trimWAPIPath(r.URL.Path) != "zone_delegated" {
+			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
+		readRequests = append(readRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		if got := r.URL.Query().Get("fqdn"); got != "child.example.com" {
+			t.Fatalf("fqdn = %q, want child.example.com", got)
+		}
+		if got := r.URL.Query().Get("view"); got != "default" {
+			t.Fatalf("view = %q, want default", got)
+		}
+		if got := r.URL.Query().Get("_return_fields"); got != "_ref,delegate_to" {
+			t.Fatalf("_return_fields = %q, want _ref,delegate_to", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{{
+				"_ref":        "zone_delegated/existing-ref",
+				"delegate_to": []map[string]any{{"name": "ns0.example.com", "address": "192.0.2.53", "weight": 10}},
+			}},
+		})
+	}))
+	defer read.Close()
+
+	app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	refreshes := captureRecordRefreshes(app)
+
+	if err := app.Execute([]string{"dns", "create", "ns", "child", "ns1.example.com"}); err != nil {
+		t.Fatalf("create ns: %v", err)
+	}
+	if len(readRequests) != 1 {
+		t.Fatalf("read requests = %#v, want one read-server lookup", readRequests)
+	}
+	if strings.Join(primaryRequests, ",") != "PUT zone_delegated/existing-ref" {
+		t.Fatalf("primary requests = %#v", primaryRequests)
+	}
+	if len(putPayload) != 1 {
+		t.Fatalf("PUT payload = %#v, want only delegate_to", putPayload)
+	}
+	delegateTo, ok := putPayload["delegate_to"].([]any)
+	if !ok || len(delegateTo) != 2 {
+		t.Fatalf("PUT delegate_to = %#v, want preserved and new delegates", putPayload["delegate_to"])
+	}
+	for index, want := range []map[string]any{
+		{"name": "ns0.example.com", "address": "192.0.2.53", "weight": float64(10)},
+		{"name": "ns1.example.com", "address": "255.255.255.255"},
+	} {
+		if got, ok := delegateTo[index].(map[string]any); !ok || !reflect.DeepEqual(got, want) {
+			t.Fatalf("PUT delegate_to[%d] = %#v, want %#v", index, got, want)
+		}
+	}
+	assertRecordCacheInvalidated(t, app, profile, "example.com")
+	assertRecordRefreshQueued(t, refreshes, "example.com")
+}
+
+func TestDNSCreateNSExistingDelegationIsIdempotent(t *testing.T) {
+	var primaryRequests []string
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+		t.Fatalf("idempotent NS invocation made primary request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer primary.Close()
+
+	var readRequests int
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || trimWAPIPath(r.URL.Path) != "zone_delegated" {
+			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+		}
+		readRequests++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{{
+				"_ref":        "zone_delegated/existing-ref",
+				"delegate_to": []map[string]any{{"name": "ns1.example.com", "address": "255.255.255.255"}},
+			}},
+		})
+	}))
+	defer read.Close()
+
+	app, stdout := dnsWorkflowApp(t, primary.URL, read.URL)
+	profile := mustLoadProfile(t, app)
+	writeWorkflowRecordCache(t, app, profile)
+	if err := app.Execute([]string{"--output", "json", "dns", "create", "ns", "child", "ns1.example.com"}); err != nil {
+		t.Fatalf("first create ns: %v", err)
+	}
+	if err := app.Execute([]string{"--output", "json", "dns", "create", "ns", "child", "ns1.example.com"}); err != nil {
+		t.Fatalf("second create ns: %v", err)
+	}
+	if readRequests != 2 {
+		t.Fatalf("read requests = %d, want two lookups", readRequests)
+	}
+	if len(primaryRequests) != 0 {
+		t.Fatalf("primary requests = %#v, want none", primaryRequests)
+	}
+	if !strings.Contains(stdout.String(), `"action": "unchanged"`) {
+		t.Fatalf("output = %s, want unchanged action", stdout.String())
+	}
+}
+
+func TestDNSCreateNSDelegationRejectsAmbiguousOrMalformedExistingRecords(t *testing.T) {
+	tests := []struct {
+		name   string
+		result []map[string]any
+		want   string
+	}{
+		{
+			name: "ambiguous",
+			result: []map[string]any{
+				{"_ref": "zone_delegated/ref-1", "delegate_to": []map[string]any{}},
+				{"_ref": "zone_delegated/ref-2", "delegate_to": []map[string]any{}},
+			},
+			want: "multiple zone_delegated records found",
+		},
+		{
+			name:   "missing ref",
+			result: []map[string]any{{"delegate_to": []map[string]any{}}},
+			want:   "missing _ref",
+		},
+		{
+			name:   "malformed delegate",
+			result: []map[string]any{{"_ref": "zone_delegated/ref", "delegate_to": []map[string]any{{"name": "ns0.example.com"}}}},
+			want:   "has no address",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var primaryRequests []string
+			primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				primaryRequests = append(primaryRequests, r.Method+" "+trimWAPIPath(r.URL.Path))
+				t.Fatalf("invalid existing delegation made primary request: %s %s", r.Method, r.URL.Path)
+			}))
+			defer primary.Close()
+			read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || trimWAPIPath(r.URL.Path) != "zone_delegated" {
+					t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": test.result})
+			}))
+			defer read.Close()
+
+			app, _ := dnsWorkflowApp(t, primary.URL, read.URL)
+			if err := app.Execute([]string{"dns", "create", "ns", "child", "ns1.example.com"}); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want substring %q", err, test.want)
+			}
+			if len(primaryRequests) != 0 {
+				t.Fatalf("primary requests = %#v, want none", primaryRequests)
+			}
+		})
 	}
 }
 

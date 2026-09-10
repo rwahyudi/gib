@@ -2403,6 +2403,12 @@ func (a *App) runDNSCreate(recordType, name, value, zone string, ttl int, noptr 
 	if targetName == "" {
 		targetName = name
 	}
+	if recordType == "ns" {
+		if noptr {
+			a.PrintWarning("WARNING: --noptr only applies to A/AAAA workflows and was ignored.")
+		}
+		return a.runDNSCreateDelegatedNS(profile, client, targetName, resolvedZone, payload)
+	}
 	if _, err := client.Request(http.MethodPost, objectType, nil, payload); err != nil {
 		a.auditDNSRecordFailure(profile, client, "create", "dns.record.create", recordType, targetName, resolvedZone, payload, err)
 		return err
