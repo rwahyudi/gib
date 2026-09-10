@@ -198,6 +198,9 @@ func TestDNSDeleteHelpShowsConfirmationSkip(t *testing.T) {
 	for _, want := range []string{
 		"Delete Record Usage",
 		"ib dns delete <type> <record-name> [zone]",
+		"ib dns delete ns <child-zone> <nameserver>",
+		"removes the delegate from zone_delegated",
+		"deletes the delegated zone when it is the last entry",
 		"ib dns delete a app",
 		"forward record names match case-insensitively",
 		"prompts before deleting; use -y to skip",

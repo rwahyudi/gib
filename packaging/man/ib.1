@@ -131,6 +131,12 @@ zone. The delegated target address is always 255.255.255.255. Authoritative
 zone nameservers are managed through zone configuration, not this record create
 path.
 .TP
+.B ib dns delete ns child ns1.example.com
+Remove a nameserver from the child delegated zone through zone_delegated. If it
+is the last nameserver, delete the delegated zone instead. Use -y to skip the
+confirmation prompt; authoritative-zone nameservers are managed through zone
+configuration, not this record delete path.
+.TP
 .B ib net list prod --network-view default
 List IPv4 networks and containers matching prod in the default IPAM network view.
 Default output includes network, type, assigned_vlan, assigned_vlan_name,

@@ -999,6 +999,13 @@ func (a *App) dnsDeleteCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if recordType == "ns" {
+				zone := ""
+				if len(args) > 2 {
+					zone = args[2]
+				}
+				return a.runDNSDelete(recordType, args[1], zone, skipConfirm)
+			}
 			zone := ""
 			if len(args) > 2 {
 				zone = args[2]
@@ -2823,6 +2830,8 @@ func recordTypeList(records []TypedRecord) string {
 	return strings.Join(types, ", ")
 }
 
+var errDelegatedNSNotFound = errors.New("delegated NS zone not found")
+
 func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool) error {
 	recordType = strings.ToLower(strings.TrimSpace(recordType))
 	if recordType == "ptr" {
@@ -2831,6 +2840,18 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 		}
 		return a.runDNSDeletePTR(recordName, skipConfirm)
 	}
+	if recordType == "ns" {
+		if strings.TrimSpace(zone) != "" {
+			err := a.runDNSDeleteDelegatedNS(recordName, zone, a.dnsZoneOverride, skipConfirm)
+			if err == nil || !errors.Is(err, errDelegatedNSNotFound) {
+				return err
+			}
+		}
+	}
+	return a.runDNSDeleteGeneric(recordType, recordName, zone, skipConfirm)
+}
+
+func (a *App) runDNSDeleteGeneric(recordType, recordName, zone string, skipConfirm bool) error {
 	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
@@ -2905,6 +2926,121 @@ func (a *App) runDNSDelete(recordType, recordName, zone string, skipConfirm bool
 			return cliError("forward DELETE failed for %s; completed forward deletes: %d of %d selected records: %v", duplicateDeleteRecordDescription(plan.record), completedForwardDeletes, len(plans), err)
 		}
 	}
+	return nil
+}
+
+func (a *App) runDNSDeleteDelegatedNS(recordName, nameserver, explicitZone string, skipConfirm bool) error {
+	profile, client, err := a.configuredClient()
+	if err != nil {
+		return err
+	}
+	resolvedZone, err := a.resolveCreateZone(profile, client, "ns", recordName, explicitZone)
+	if err != nil {
+		return err
+	}
+	targetName, err := fqdn(recordName, resolvedZone)
+	if err != nil {
+		return err
+	}
+	nameserver = cleanDNSName(nameserver)
+	if nameserver == "" {
+		return cliError("NS nameserver is required. Use: ib dns delete ns <child-zone> <nameserver>")
+	}
+
+	params := url.Values{}
+	params.Set("fqdn", targetName)
+	params.Set("view", client.View)
+	params.Set("_return_fields", "delegate_to")
+	response, err := client.Request(http.MethodGet, "zone_delegated", params, nil)
+	if err != nil {
+		a.auditDNSRecordFailure(profile, client, "delete", "dns.record.delete", "ns", targetName, resolvedZone, map[string]any{"name": targetName, "nameserver": nameserver, "view": client.View}, err)
+		return err
+	}
+	matches, err := delegatedNSRows(response)
+	if err != nil {
+		return err
+	}
+	if len(matches) == 0 {
+		return errDelegatedNSNotFound
+	}
+	if len(matches) > 1 {
+		return cliError("multiple zone_delegated records found for %s in view %s", targetName, client.View)
+	}
+
+	match := matches[0]
+	refValue, ok := match["_ref"].(string)
+	ref := strings.TrimSpace(refValue)
+	if !ok || ref == "" {
+		return cliError("zone_delegated record for %s is malformed: missing _ref", targetName)
+	}
+	delegates, err := delegatedNSArray(match["delegate_to"], "existing")
+	if err != nil {
+		return err
+	}
+	matchedIndex := -1
+	for index, delegate := range delegates {
+		if sameDNSName(cleanString(delegate["name"]), nameserver) {
+			if matchedIndex >= 0 {
+				return cliError("multiple delegated nameservers named %s found for %s", nameserver, targetName)
+			}
+			matchedIndex = index
+		}
+	}
+	if matchedIndex < 0 {
+		return cliError("delegated zone %s does not contain nameserver %s", targetName, nameserver)
+	}
+
+	confirmationItem := make(map[string]any, len(match)+4)
+	for key, value := range match {
+		confirmationItem[key] = value
+	}
+	confirmationItem["name"] = targetName
+	confirmationItem["nameserver"] = nameserver
+	confirmationItem["zone"] = resolvedZone
+	confirmationItem["view"] = client.View
+	confirmationRecord := TypedRecord{Type: "ns", Item: confirmationItem}
+	if err := a.confirmDNSDelete(targetName, confirmationRecord, skipConfirm); err != nil {
+		if errors.Is(err, errDeleteCancelled) {
+			a.PrintInfo("INFO: delete cancelled; no records were deleted")
+			return nil
+		}
+		return err
+	}
+
+	auditItem := make(map[string]any, len(confirmationItem))
+	for key, value := range confirmationItem {
+		auditItem[key] = value
+	}
+	if len(delegates) == 1 {
+		if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
+			a.auditDNSRecordFailure(profile, client, "delete", "dns.record.delete", "ns", targetName, resolvedZone, auditItem, err)
+			return err
+		}
+		a.auditDNSRecordDelete(profile, client, TypedRecord{Type: "ns", Item: auditItem}, targetName)
+		a.deleteRecordCacheEntry(profile, resolvedZone)
+		a.queueRecordCacheRefreshAfterWrite(profile, resolvedZone)
+		return emitDelegatedNSDeleteSuccess(a, targetName, resolvedZone, client.View, "deleted delegated zone", "deleted delegated NS zone")
+	}
+
+	filtered := make([]map[string]any, 0, len(delegates)-1)
+	filtered = append(filtered, delegates[:matchedIndex]...)
+	filtered = append(filtered, delegates[matchedIndex+1:]...)
+	update := map[string]any{"delegate_to": filtered}
+	if _, err := client.Request(http.MethodPut, ref, nil, update); err != nil {
+		a.auditDNSRecordFailure(profile, client, "edit", "dns.record.edit", "ns", targetName, resolvedZone, update, err)
+		return err
+	}
+	a.auditDNSRecordEdit(profile, client, TypedRecord{Type: "ns", Item: auditItem}, update)
+	a.deleteRecordCacheEntry(profile, resolvedZone)
+	a.queueRecordCacheRefreshAfterWrite(profile, resolvedZone)
+	return emitDelegatedNSDeleteSuccess(a, targetName, resolvedZone, client.View, "removed nameserver from delegated zone", "removed NS nameserver from delegated zone")
+}
+
+func emitDelegatedNSDeleteSuccess(a *App, targetName, zone, view, message, tableMessage string) error {
+	if !a.isTableOutput() {
+		return a.emitObject("Action", []string{"status", "action", "type", "name", "zone", "view", "message"}, actionRow("delete", "NS", targetName, zone, view, message))
+	}
+	a.PrintSuccess("SUCCESS: " + tableMessage + " " + targetName)
 	return nil
 }
 
