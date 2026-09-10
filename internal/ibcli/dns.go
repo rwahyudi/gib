@@ -418,7 +418,7 @@ func (a *App) runDNSCreateDelegatedNS(profile Profile, client *WapiClient, targe
 	params := url.Values{}
 	params.Set("fqdn", targetName)
 	params.Set("view", client.View)
-	params.Set("_return_fields", "_ref,delegate_to")
+	params.Set("_return_fields", "delegate_to")
 	response, err := client.Request(http.MethodGet, "zone_delegated", params, nil)
 	if err != nil {
 		a.auditDNSRecordFailure(profile, client, "create", "dns.record.create", "ns", targetName, zone, payload, err)

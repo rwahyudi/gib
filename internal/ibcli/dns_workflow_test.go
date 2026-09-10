@@ -286,8 +286,8 @@ func TestDNSCreateNSExistingDelegationReadsReadServerAndUpdatesPrimary(t *testin
 		if got := r.URL.Query().Get("view"); got != "default" {
 			t.Fatalf("view = %q, want default", got)
 		}
-		if got := r.URL.Query().Get("_return_fields"); got != "_ref,delegate_to" {
-			t.Fatalf("_return_fields = %q, want _ref,delegate_to", got)
+		if got := r.URL.Query().Get("_return_fields"); got != "delegate_to" {
+			t.Fatalf("_return_fields = %q, want delegate_to without _ref", got)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"result": []map[string]any{{
