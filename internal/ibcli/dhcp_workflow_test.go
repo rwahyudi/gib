@@ -48,6 +48,9 @@ func TestDHCPReservationListUsesReadServer(t *testing.T) {
 		if got := r.URL.Query().Get("_max_results"); got != "20000" {
 			t.Fatalf("max results = %q, want 20000", got)
 		}
+		if got := r.URL.Query().Get("network_view"); got != "default" {
+			t.Fatalf("network view = %q, want default", got)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"ipv4addr": "192.0.2.25", "mac": "00:11:22:33:44:55", "name": "printer", "network_view": "default", "comment": "lab"}}})
 	}))
 	defer read.Close()
@@ -413,5 +416,37 @@ func TestDHCPReservationNetworkViewDisambiguatesReadLookup(t *testing.T) {
 	}
 	if primaryHits != 0 || readHits != 2 {
 		t.Fatalf("request routing read=%d primary=%d", readHits, primaryHits)
+	}
+}
+
+func TestDHCPReservationTableWrapsCellsAndShowsContext(t *testing.T) {
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("network_view"); got != "default" {
+			t.Fatalf("network view = %q, want default", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+			"ipv4addr": "192.0.2.25", "mac": "00:11:22:33:44:55",
+			"name": strings.Repeat("n", 75), "network_view": "default",
+			"comment": "first line\nsecond line " + strings.Repeat("comment ", 12),
+		}}})
+	}))
+	defer read.Close()
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unexpected primary request", http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+	app := dhcpWorkflowApp(t, primary.URL, read.URL, tableOutput)
+	if err := app.runDHCPReservationList("", "", "", ""); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	out := app.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "Current Context:") || !strings.Contains(out, "View: default") {
+		t.Fatalf("missing DHCP context: %s", out)
+	}
+	if !strings.Contains(out, strings.Repeat("n", 50)+" ") {
+		t.Fatalf("name was not wrapped at 50 columns: %s", out)
+	}
+	if !strings.Contains(out, "first line") || !strings.Contains(out, "second line") {
+		t.Fatalf("multiline comment was not preserved: %s", out)
 	}
 }

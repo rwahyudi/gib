@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	fixedAddressObject       = "fixedaddress"
-	dhcpReservationCacheKind = "dhcp_reservations"
-	dhcpReservationPageSize  = 20000
+	fixedAddressObject          = "fixedaddress"
+	dhcpReservationCacheKind    = "dhcp_reservations"
+	dhcpReservationPageSize     = 20000
+	dhcpReservationNameWidth    = 50
+	dhcpReservationCommentWidth = 60
 )
 
 var (
@@ -140,10 +142,13 @@ func (a *App) runDHCPReservationListWithRefresh(search, networkView, name, comme
 	if len(rows) == 0 && a.isTableOutput() {
 		a.PrintWarning("No DHCP reservations found.")
 	}
+	if a.isTableOutput() {
+		return a.emitDHCPReservationTable(rows, networkView)
+	}
 	return a.emitRows(fmt.Sprintf("DHCP Reservations (%d)", len(rows)), dhcpReservationOutputFields, rows)
 }
 func (a *App) cachedDHCPReservations(profile Profile, client *WapiClient, networkView string, forceRefresh bool) ([]map[string]any, error) {
-	networkView = strings.TrimSpace(networkView)
+	networkView = effectiveDHCPNetworkView(networkView)
 	return a.cachedNetRows(
 		profile,
 		dhcpReservationCacheKind,
@@ -156,6 +161,7 @@ func (a *App) cachedDHCPReservations(profile Profile, client *WapiClient, networ
 }
 
 func (a *App) refreshDHCPReservationCache(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	networkView = effectiveDHCPNetworkView(networkView)
 	// Capture the cache generation before WAPI work. The guarded write compares
 	// this token inside the same Badger transaction as the cache write.
 	token, err := a.readDHCPReservationCacheToken(profile, networkView)
@@ -194,10 +200,7 @@ func (a *App) reportDHCPReservationCacheFailure(err error) {
 }
 
 func (a *App) queueDHCPReservationCacheRefresh(profile Profile, networkView string) error {
-	networkView = strings.TrimSpace(networkView)
-	if networkView == "" {
-		networkView = "default"
-	}
+	networkView = effectiveDHCPNetworkView(networkView)
 	if err := a.invalidateDHCPReservationCache(profile, networkView); err != nil {
 		return err
 	}
@@ -213,6 +216,7 @@ func (a *App) queueDHCPReservationCacheRefresh(profile Profile, networkView stri
 }
 
 func (a *App) runDHCPReservationShow(ip, networkView string) error {
+	networkView = effectiveDHCPNetworkView(networkView)
 	ip, err := normalizeIPv4Address(ip)
 	if err != nil {
 		return err
@@ -228,7 +232,7 @@ func (a *App) runDHCPReservationShow(ip, networkView string) error {
 	return a.emitObject("DHCP Reservation", dhcpReservationOutputFields, dhcpReservationOutputRow(reservation))
 }
 func (a *App) runDHCPReservationCreate(ip, nextIP, networkView, mac, name, comment string) error {
-	networkView, nextIP = strings.TrimSpace(networkView), strings.TrimSpace(nextIP)
+	networkView, nextIP = effectiveDHCPNetworkView(networkView), strings.TrimSpace(nextIP)
 	if strings.TrimSpace(ip) != "" && nextIP != "" {
 		return cliError("provide an explicit IP or --next-ip NETWORK, not both")
 	}
@@ -318,6 +322,7 @@ func (a *App) runDHCPReservationCreate(ip, nextIP, networkView, mac, name, comme
 	return nil
 }
 func (a *App) runDHCPReservationEdit(ip, networkView string, updates map[string]any) error {
+	networkView = effectiveDHCPNetworkView(networkView)
 	ip, err := normalizeIPv4Address(ip)
 	if err != nil {
 		return err
@@ -380,6 +385,7 @@ func (a *App) runDHCPReservationEdit(ip, networkView string, updates map[string]
 	return nil
 }
 func (a *App) runDHCPReservationDelete(ip, networkView string, skipConfirm bool) error {
+	networkView = effectiveDHCPNetworkView(networkView)
 	ip, err := normalizeIPv4Address(ip)
 	if err != nil {
 		return err
@@ -430,6 +436,7 @@ func queryDHCPReservations(client *WapiClient, networkView, ip string) ([]map[st
 }
 
 func queryDHCPReservationsWithCompleteness(client *WapiClient, networkView, ip string) ([]map[string]any, bool, error) {
+	networkView = effectiveDHCPNetworkView(networkView)
 	params := url.Values{}
 	params.Set("_return_fields", dhcpReservationReturnFields)
 	if networkView = strings.TrimSpace(networkView); networkView != "" {
@@ -441,6 +448,7 @@ func queryDHCPReservationsWithCompleteness(client *WapiClient, networkView, ip s
 	return pagedQueryWithPageSizeComplete(client, fixedAddressObject, params, dhcpReservationPageSize)
 }
 func findDHCPReservation(client *WapiClient, ip, networkView string) (map[string]any, error) {
+	networkView = effectiveDHCPNetworkView(networkView)
 	reservations, err := queryDHCPReservations(client, networkView, ip)
 	if err != nil {
 		return nil, err
@@ -546,6 +554,40 @@ func normalizeDHCPName(raw string) (string, error) {
 	}
 	return value, nil
 }
+func effectiveDHCPNetworkView(networkView string) string {
+	if networkView = strings.TrimSpace(networkView); networkView == "" {
+		return "default"
+	}
+	return networkView
+}
+
+func (a *App) emitDHCPReservationTable(rows []map[string]any, networkView string) error {
+	displayRows := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		displayRows = append(displayRows, []string{
+			stringify(row["ip"]), stringify(row["mac"]),
+			wrapRecordTableCell(stringify(row["name"]), dhcpReservationNameWidth),
+			stringify(row["network"]), stringify(row["network_view"]),
+			wrapRecordTableCell(stringify(row["comment"]), dhcpReservationCommentWidth),
+		})
+	}
+	fmt.Fprintln(a.Stdout, renderTable(fmt.Sprintf("DHCP Reservations (%d)", len(rows)), titleCaseFields(dhcpReservationOutputFields), displayRows))
+	fmt.Fprintln(a.Stdout, a.dhcpReservationContextLine(networkView))
+	return nil
+}
+
+func (a *App) dhcpReservationContextLine(networkView string) string {
+	profile, scope := a.defaultConfigProfileAndScope()
+	profileName := profile.Name
+	if profileName == "" {
+		profileName = defaultProfileName
+	}
+	return contextTitleStyle.Render("Current Context:") + " " + strings.Join([]string{
+		renderContextPair("Profile", profileContextName(profileName, scope), contextProfileValueStyle),
+		renderContextPair("View", effectiveDHCPNetworkView(networkView), contextViewValueStyle),
+	}, " | ")
+}
+
 func dhcpReservationOutputRow(item map[string]any) map[string]any {
 	return map[string]any{"ip": firstNonEmpty(cleanString(item["ipv4addr"]), cleanString(item["ip"])), "mac": cleanString(item["mac"]), "name": cleanString(item["name"]), "network": cleanString(item["network"]), "network_view": cleanString(item["network_view"]), "comment": cleanString(item["comment"])}
 }
