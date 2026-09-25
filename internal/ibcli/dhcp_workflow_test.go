@@ -107,6 +107,37 @@ func TestDHCPReservationCreateWritesPrimaryAndNormalizesMAC(t *testing.T) {
 	}
 }
 
+func TestDHCPReservationMutationReportsCacheFailureWithoutRetryError(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("mutation request = %s", r.Method)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ipv4addr": "192.0.2.25", "network_view": "default"})
+	}))
+	defer primary.Close()
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unexpected read request", http.StatusInternalServerError)
+	}))
+	defer read.Close()
+	app := dhcpWorkflowApp(t, primary.URL, read.URL, jsonOutput)
+	app.backgroundNetRefresher = func(Profile, string, string, string) error {
+		return cliError("simulated cache dispatch failure")
+	}
+	if err := app.runDHCPReservationCreate("192.0.2.25", "", "default", "00:11:22:33:44:55", "", ""); err != nil {
+		t.Fatalf("mutation returned cache-only error: %v", err)
+	}
+	if !strings.Contains(app.Stderr.(*bytes.Buffer).String(), "do not retry") {
+		t.Fatalf("missing partial-success warning: %s", app.Stderr.(*bytes.Buffer).String())
+	}
+	var row map[string]any
+	if err := json.Unmarshal(app.Stdout.(*bytes.Buffer).Bytes(), &row); err != nil {
+		t.Fatalf("decode successful mutation output: %v", err)
+	}
+	if row["action"] != "create" {
+		t.Fatalf("mutation output = %#v", row)
+	}
+}
+
 func TestDHCPReservationCreateValidatesAllocationSourceAndMAC(t *testing.T) {
 	app := testApp(t)
 	if err := app.runDHCPReservationCreate("192.0.2.25", "192.0.2.0/24", "", "00:11:22:33:44:55", "", ""); err == nil || !strings.Contains(err.Error(), "not both") {
@@ -156,6 +187,114 @@ func TestDHCPReservationCreateNextIPIsAtomicAndUsesPrimary(t *testing.T) {
 	}
 	if primaryHits != 1 || readHits != 0 {
 		t.Fatalf("request routing read=%d primary=%d", readHits, primaryHits)
+	}
+}
+
+func TestDHCPReservationCreateNextIPRecoversMinimalResponseOnPrimary(t *testing.T) {
+	var primaryHits, readHits int
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		switch r.Method {
+		case http.MethodPost:
+			_ = json.NewEncoder(w).Encode(map[string]any{"_ref": "fixedaddress/recover"})
+		case http.MethodGet:
+			if !strings.HasSuffix(r.URL.Path, "/fixedaddress/recover") {
+				t.Fatalf("recovery path = %s", r.URL.Path)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ipv4addr": "192.0.2.43", "mac": "00:11:22:33:44:66", "network_view": "default"})
+		default:
+			t.Fatalf("unexpected primary method %s", r.Method)
+		}
+	}))
+	defer primary.Close()
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		readHits++
+		http.Error(w, "unexpected read request", http.StatusInternalServerError)
+	}))
+	defer read.Close()
+	app := dhcpWorkflowApp(t, primary.URL, read.URL, jsonOutput)
+	if err := app.runDHCPReservationCreate("", "192.0.2.0/24", "default", "00:11:22:33:44:66", "", ""); err != nil {
+		t.Fatalf("next-ip minimal response: %v", err)
+	}
+	var row map[string]any
+	if err := json.Unmarshal(app.Stdout.(*bytes.Buffer).Bytes(), &row); err != nil {
+		t.Fatalf("decode recovered output: %v", err)
+	}
+	if row["ip"] != "192.0.2.43" {
+		t.Fatalf("recovered output = %#v", row)
+	}
+	if primaryHits != 2 || readHits != 0 {
+		t.Fatalf("recovery routing primary=%d read=%d", primaryHits, readHits)
+	}
+}
+
+func TestDHCPReservationCreateNextIPRecoversRawStringReference(t *testing.T) {
+	var primaryHits int
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		switch r.Method {
+		case http.MethodPost:
+			_ = json.NewEncoder(w).Encode("fixedaddress/raw-recover")
+		case http.MethodGet:
+			if !strings.HasSuffix(r.URL.Path, "/fixedaddress/raw-recover") {
+				t.Fatalf("raw reference recovery path = %s", r.URL.Path)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ipv4addr": "192.0.2.44", "mac": "00:11:22:33:44:68", "network_view": "default"})
+		default:
+			t.Fatalf("unexpected primary method %s", r.Method)
+		}
+	}))
+	defer primary.Close()
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unexpected read request", http.StatusInternalServerError)
+	}))
+	defer read.Close()
+	app := dhcpWorkflowApp(t, primary.URL, read.URL, jsonOutput)
+	if err := app.runDHCPReservationCreate("", "192.0.2.0/24", "default", "00:11:22:33:44:68", "", ""); err != nil {
+		t.Fatalf("raw-string next-ip create: %v", err)
+	}
+	var row map[string]any
+	if err := json.Unmarshal(app.Stdout.(*bytes.Buffer).Bytes(), &row); err != nil {
+		t.Fatalf("decode raw-string recovery output: %v", err)
+	}
+	if row["ip"] != "192.0.2.44" {
+		t.Fatalf("raw-string recovery output = %#v", row)
+	}
+	if primaryHits != 2 {
+		t.Fatalf("raw-string recovery primary requests = %d, want 2", primaryHits)
+	}
+}
+
+func TestDHCPReservationCreateNextIPMinimalResponseReportsPartialSuccess(t *testing.T) {
+	var primaryHits int
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected recovery request: %s", r.Method)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "created"})
+	}))
+	defer primary.Close()
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unexpected read request", http.StatusInternalServerError)
+	}))
+	defer read.Close()
+	app := dhcpWorkflowApp(t, primary.URL, read.URL, jsonOutput)
+	if err := app.runDHCPReservationCreate("", "192.0.2.0/24", "default", "00:11:22:33:44:67", "", ""); err != nil {
+		t.Fatalf("partial-success create returned error: %v", err)
+	}
+	var row map[string]any
+	if err := json.Unmarshal(app.Stdout.(*bytes.Buffer).Bytes(), &row); err != nil {
+		t.Fatalf("decode partial-success output: %v", err)
+	}
+	if row["status"] != "success" || row["ip"] != "" {
+		t.Fatalf("partial-success output = %#v", row)
+	}
+	if !strings.Contains(app.Stderr.(*bytes.Buffer).String(), "do not retry") {
+		t.Fatalf("missing no-retry warning: %s", app.Stderr.(*bytes.Buffer).String())
+	}
+	if primaryHits != 1 {
+		t.Fatalf("primary mutation requests = %d, want 1", primaryHits)
 	}
 }
 
@@ -219,6 +358,31 @@ func TestDHCPReservationDeleteUsesReadLookupAndPrimaryDelete(t *testing.T) {
 	}
 	if primaryHits != 1 || readHits != 1 {
 		t.Fatalf("request routing read=%d primary=%d", readHits, primaryHits)
+	}
+}
+
+func TestDHCPReservationRefreshAfterMutationUsesPrimary(t *testing.T) {
+	var primaryGets, readGets int
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/fixedaddress") {
+			t.Fatalf("primary refresh request = %s %s", r.Method, r.URL.Path)
+		}
+		primaryGets++
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"ipv4addr": "192.0.2.25", "network_view": "default"}}})
+	}))
+	defer primary.Close()
+	read := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		readGets++
+		http.Error(w, "refresh must not use read server", http.StatusInternalServerError)
+	}))
+	defer read.Close()
+	app := dhcpWorkflowApp(t, primary.URL, read.URL, jsonOutput)
+	t.Setenv(cacheRefreshPrimaryEnv, "1")
+	if err := app.runNetCacheRefresh(defaultProfileName, dhcpReservationCacheKind, "default", ""); err != nil {
+		t.Fatalf("refresh DHCP cache: %v", err)
+	}
+	if primaryGets != 1 || readGets != 0 {
+		t.Fatalf("refresh routing primary=%d read=%d", primaryGets, readGets)
 	}
 }
 

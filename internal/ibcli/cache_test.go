@@ -3,6 +3,7 @@ package ibcli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,13 +36,25 @@ func TestCacheStatusAndClear(t *testing.T) {
 	if err := app.writeCachedIPv4Addresses(profile, "192.0.2.10", "default", []map[string]any{{"ip_address": "192.0.2.10"}}, time.Now()); err != nil {
 		t.Fatalf("write address cache: %v", err)
 	}
+	if err := app.writeCachedDHCPReservations(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.25", "network_view": "default"}}, time.Now()); err != nil {
+		t.Fatalf("write DHCP reservation cache: %v", err)
+	}
 
 	rows, err := app.cacheStatusRows()
 	if err != nil {
 		t.Fatalf("cache status: %v", err)
 	}
-	if len(rows) != 6 {
+	if len(rows) != 7 {
 		t.Fatalf("status rows = %#v", rows)
+	}
+	var foundDHCP bool
+	for _, row := range rows {
+		if row["kind"] == dhcpReservationCacheKind {
+			foundDHCP = true
+		}
+	}
+	if !foundDHCP {
+		t.Fatalf("status rows missing DHCP reservation cache: %#v", rows)
 	}
 	for _, row := range rows {
 		if row["kind"] == "records" && row["serial"] != "2026050801" {
@@ -1167,6 +1180,414 @@ func TestCachedRecordsForZoneFetchesExpiredCacheWithoutSerial(t *testing.T) {
 	}
 	if len(records) != 1 || recordName(records[0].Item, records[0].Type) != "live.example.com" {
 		t.Fatalf("records = %#v", records)
+	}
+}
+
+func TestDHCPReservationCacheFreshStaleExpiredAndForceRefresh(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/fixedaddress") {
+			t.Fatalf("WAPI request = %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"ipv4addr": fmt.Sprintf("192.0.2.%d", 20+requests), "mac": "00:11:22:33:44:55", "network_view": "default"}}})
+	}))
+	defer server.Close()
+
+	app := testApp(t)
+	writeConfigForSettings(t, app, ConfigSettings{CacheTTLSeconds: 60, DNSSearchWorkerLimit: defaultDNSSearchWorkerLimit, RecordsCacheSWRSeconds: 120})
+	profile := Profile{Name: "default", Server: server.URL, DNSView: "default"}
+	client := testWapiClient(server)
+	now := time.Now()
+	if err := app.writeCachedDHCPReservations(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.10", "network_view": "default"}}, now); err != nil {
+		t.Fatalf("write fresh DHCP cache: %v", err)
+	}
+	if _, err := app.cachedDHCPReservations(profile, client, "default", false); err != nil {
+		t.Fatalf("fresh DHCP cache: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("fresh cache WAPI requests = %d, want 0", requests)
+	}
+
+	refreshes := make(chan string, 4)
+	app.backgroundNetRefresher = func(_ Profile, kind, networkView, ip string) error {
+		refreshes <- kind + ":" + networkView + ":" + ip
+		return nil
+	}
+	if err := app.writeCachedDHCPReservations(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.11", "network_view": "default"}}, now.Add(-90*time.Second)); err != nil {
+		t.Fatalf("write stale DHCP cache: %v", err)
+	}
+	if _, err := app.cachedDHCPReservations(profile, client, "default", false); err != nil {
+		t.Fatalf("stale DHCP cache: %v", err)
+	}
+	if _, err := app.cachedDHCPReservations(profile, client, "default", false); err != nil {
+		t.Fatalf("second stale DHCP cache: %v", err)
+	}
+	select {
+	case got := <-refreshes:
+		if got != dhcpReservationCacheKind+":default:" {
+			t.Fatalf("refresh scope = %q", got)
+		}
+	default:
+		t.Fatal("stale cache did not queue refresh")
+	}
+	select {
+	case got := <-refreshes:
+		t.Fatalf("duplicate stale refresh = %q", got)
+	default:
+	}
+
+	app.backgroundNetRefresher = nil
+	if _, err := app.cachedDHCPReservations(profile, client, "default", true); err != nil {
+		t.Fatalf("forced DHCP refresh: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("forced refresh requests = %d, want 1", requests)
+	}
+	if err := app.writeCachedDHCPReservations(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.12", "network_view": "default"}}, now.Add(-300*time.Second)); err != nil {
+		t.Fatalf("write expired DHCP cache: %v", err)
+	}
+	if _, err := app.cachedDHCPReservations(profile, client, "default", false); err != nil {
+		t.Fatalf("expired DHCP cache: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("expired refresh requests = %d, want 2", requests)
+	}
+	if err := app.clearCache(); err != nil {
+		t.Fatalf("clear DHCP cache before miss: %v", err)
+	}
+	if _, err := app.cachedDHCPReservations(profile, client, "default", false); err != nil {
+		t.Fatalf("missing DHCP cache: %v", err)
+	}
+	if requests != 3 {
+		t.Fatalf("missing refresh requests = %d, want 3", requests)
+	}
+}
+
+func TestDHCPReservationCacheInvalidationAndRefreshLease(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", Server: "https://grid.example", DNSView: "default"}
+	now := time.Now()
+	if err := app.writeCachedDHCPReservations(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.10"}}, now); err != nil {
+		t.Fatalf("write scoped DHCP cache: %v", err)
+	}
+	if err := app.writeCachedDHCPReservations(profile, "", []map[string]any{{"ipv4addr": "192.0.2.11"}}, now); err != nil {
+		t.Fatalf("write unscoped DHCP cache: %v", err)
+	}
+	refreshes := make(chan string, 4)
+	app.backgroundNetRefresher = func(_ Profile, kind, networkView, ip string) error {
+		refreshes <- kind + ":" + networkView + ":" + ip
+		return nil
+	}
+	if err := app.queueDHCPReservationCacheRefresh(profile, "default"); err != nil {
+		t.Fatalf("queue DHCP refresh: %v", err)
+	}
+	oldToken, err := app.netRefreshLeaseToken(profile, dhcpReservationCacheKind, "default", "")
+	if err != nil || oldToken == 0 {
+		t.Fatalf("read initial refresh token: token=%d err=%v", oldToken, err)
+	}
+	for _, want := range []string{dhcpReservationCacheKind + ":default:", dhcpReservationCacheKind + "::"} {
+		select {
+		case got := <-refreshes:
+			if got != want {
+				t.Fatalf("refresh scope = %q, want %q", got, want)
+			}
+		default:
+			t.Fatalf("missing refresh %q", want)
+		}
+	}
+	if entry, err := app.readCachedDHCPReservations(profile, "default"); err != nil || entry.CacheFound {
+		t.Fatalf("scoped cache after invalidation = %#v, err=%v", entry, err)
+	}
+	if entry, err := app.readCachedDHCPReservations(profile, ""); err != nil || entry.CacheFound {
+		t.Fatalf("unscoped cache after invalidation = %#v, err=%v", entry, err)
+	}
+	if err := app.queueDHCPReservationCacheRefresh(profile, "default"); err != nil {
+		t.Fatalf("queue second DHCP refresh: %v", err)
+	}
+	for range []string{"default", ""} {
+		select {
+		case <-refreshes:
+		default:
+			t.Fatal("missing replacement refresh")
+		}
+	}
+	if err := app.releaseNetRefreshLeaseIfOwner(cacheProfileName(profile), dhcpReservationCacheKind, "default", "", oldToken); err != nil {
+		t.Fatalf("release old refresh lease: %v", err)
+	}
+	active, err := app.netRefreshLeaseActive(profile, dhcpReservationCacheKind, "default", "", time.Now())
+	if err != nil {
+		t.Fatalf("check replacement refresh lease: %v", err)
+	}
+	if !active {
+		t.Fatal("old refresh released replacement DHCP lease")
+	}
+	acquired, err := app.tryAcquireNetRefreshLease(profile, dhcpReservationCacheKind, "default", "", time.Now(), recordRefreshLeaseTTL)
+	if err != nil {
+		t.Fatalf("check refresh lease: %v", err)
+	}
+	if acquired {
+		t.Fatal("refresh lease was reacquired while background refresh was active")
+	}
+}
+
+func TestDHCPReservationCreateWithoutViewFencesDefaultAndUnscopedCaches(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", Server: "https://grid.example"}
+	now := time.Now()
+	if err := app.writeCachedDHCPReservations(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.10"}}, now); err != nil {
+		t.Fatalf("write default cache: %v", err)
+	}
+	if err := app.writeCachedDHCPReservations(profile, "", []map[string]any{{"ipv4addr": "192.0.2.11"}}, now); err != nil {
+		t.Fatalf("write unscoped cache: %v", err)
+	}
+	var views []string
+	app.backgroundNetRefresher = func(_ Profile, _ string, networkView, _ string) error {
+		views = append(views, networkView)
+		return nil
+	}
+	if err := app.queueDHCPReservationCacheRefresh(profile, ""); err != nil {
+		t.Fatalf("queue omitted-view refresh: %v", err)
+	}
+	if len(views) != 2 || views[0] != "default" || views[1] != "" {
+		t.Fatalf("refresh views = %#v, want default and unscoped", views)
+	}
+	for _, view := range []string{"default", ""} {
+		entry, err := app.readCachedDHCPReservations(profile, view)
+		if err != nil {
+			t.Fatalf("read invalidated view %q: %v", view, err)
+		}
+		if entry.CacheFound {
+			t.Fatalf("cache view %q survived omitted-view invalidation", view)
+		}
+	}
+}
+
+func TestDHCPReservationCacheDoesNotFallbackAcrossEndpointIdentity(t *testing.T) {
+	app := testApp(t)
+	unknown := Profile{Name: "default"}
+	configured := Profile{Name: "default", Server: "https://grid.example", Username: "admin"}
+	if err := app.writeCachedDHCPReservations(unknown, "default", []map[string]any{{"ipv4addr": "192.0.2.10"}}, time.Now()); err != nil {
+		t.Fatalf("write unknown cache: %v", err)
+	}
+	entry, err := app.readCachedDHCPReservations(configured, "default")
+	if err != nil {
+		t.Fatalf("read configured cache: %v", err)
+	}
+	if entry.CacheFound {
+		t.Fatalf("configured profile reused endpoint-less cache: %#v", entry)
+	}
+}
+
+func TestDHCPReservationCacheSWRStartsAfterFreshTTL(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", Server: "https://grid.example"}
+	settings := defaultConfigSettings()
+	settings.CacheTTLSeconds = 60
+	settings.RecordsCacheSWRSeconds = 120
+	writeConfigForSettings(t, app, settings)
+	cachedAt := time.Now().Add(-150 * time.Second)
+	if err := app.writeCachedDHCPReservations(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.10"}}, cachedAt); err != nil {
+		t.Fatalf("write DHCP cache: %v", err)
+	}
+	entry, err := app.readCachedDHCPReservations(profile, "default")
+	if err != nil {
+		t.Fatalf("read DHCP cache: %v", err)
+	}
+	want := cachedAt.Add(60 * time.Second).Add(120 * time.Second).Unix()
+	if entry.StaleExpiresAt != want {
+		t.Fatalf("stale expiry = %d, want fresh TTL plus SWR at %d", entry.StaleExpiresAt, want)
+	}
+	if entry.StaleExpiresAt <= time.Now().Unix() {
+		t.Fatal("cache should still be inside SWR after 150 seconds")
+	}
+}
+
+func TestDHCPReservationCacheClearFencesInFlightRefresh(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", Server: "https://grid.example"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"ipv4addr": "192.0.2.99", "network_view": "default"}}})
+	}))
+	defer server.Close()
+	token, err := app.readDHCPReservationCacheToken(profile, "default")
+	if err != nil {
+		t.Fatalf("capture cache token: %v", err)
+	}
+	if err := app.clearCache(); err != nil {
+		t.Fatalf("clear cache: %v", err)
+	}
+	wrote, err := app.writeDHCPReservationCacheIfCurrent(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.99"}}, time.Now(), token)
+	if err != nil {
+		t.Fatalf("guarded refresh write: %v", err)
+	}
+	if wrote {
+		t.Fatal("stale refresh wrote after invalidation")
+	}
+	entry, err := app.readCachedDHCPReservations(profile, "default")
+	if err != nil {
+		t.Fatalf("read cleared cache: %v", err)
+	}
+	if entry.CacheFound {
+		t.Fatalf("refresh resurrected cache after clear: %#v", entry)
+	}
+}
+
+func TestDHCPReservationProfileClearFencesInFlightRefresh(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", Server: "https://grid.example"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"ipv4addr": "192.0.2.99", "network_view": "default"}}})
+	}))
+	defer server.Close()
+	token, err := app.readDHCPReservationCacheToken(profile, "default")
+	if err != nil {
+		t.Fatalf("capture cache token: %v", err)
+	}
+	if err := app.clearProfileCache(profile.Name); err != nil {
+		t.Fatalf("clear profile cache: %v", err)
+	}
+	wrote, err := app.writeDHCPReservationCacheIfCurrent(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.99"}}, time.Now(), token)
+	if err != nil {
+		t.Fatalf("profile-guarded refresh write: %v", err)
+	}
+	if wrote {
+		t.Fatal("stale refresh wrote after profile clear")
+	}
+	entry, err := app.readCachedDHCPReservations(profile, "default")
+	if err != nil {
+		t.Fatalf("read profile-cleared cache: %v", err)
+	}
+	if entry.CacheFound {
+		t.Fatalf("refresh resurrected cache after profile clear: %#v", entry)
+	}
+}
+
+func TestDHCPReservationCacheGenerationFencesWAPIFlight(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", Server: "https://grid.example"}
+	requestStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
+		<-releaseResponse
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"ipv4addr": "192.0.2.99", "network_view": "default"}}})
+	}))
+	defer server.Close()
+	client := testWapiClient(server)
+	refreshErr := make(chan error, 1)
+	go func() {
+		_, err := app.refreshDHCPReservationCache(profile, client, "default")
+		refreshErr <- err
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("refresh did not reach WAPI")
+	}
+	if err := app.invalidateDHCPReservationCache(profile, "default"); err != nil {
+		t.Fatalf("invalidate during WAPI request: %v", err)
+	}
+	close(releaseResponse)
+	if err := <-refreshErr; err != nil {
+		t.Fatalf("refresh after generation invalidation: %v", err)
+	}
+	entry, err := app.readCachedDHCPReservations(profile, "default")
+	if err != nil {
+		t.Fatalf("read generation-fenced cache: %v", err)
+	}
+	if entry.CacheFound {
+		t.Fatalf("in-flight refresh repopulated invalidated cache: %#v", entry)
+	}
+}
+
+func TestDHCPReservationCacheMutationFencesInFlightRefresh(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", Server: "https://grid.example"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"ipv4addr": "192.0.2.99", "network_view": "default"}}})
+	}))
+	defer server.Close()
+	token, err := app.readDHCPReservationCacheToken(profile, "default")
+	if err != nil {
+		t.Fatalf("capture cache token: %v", err)
+	}
+	if err := app.invalidateDHCPReservationCache(profile, "default"); err != nil {
+		t.Fatalf("invalidate DHCP cache: %v", err)
+	}
+	wrote, err := app.writeDHCPReservationCacheIfCurrent(profile, "default", []map[string]any{{"ipv4addr": "192.0.2.99"}}, time.Now(), token)
+	if err != nil {
+		t.Fatalf("guarded refresh write: %v", err)
+	}
+	if wrote {
+		t.Fatal("stale refresh wrote after invalidation")
+	}
+	entry, err := app.readCachedDHCPReservations(profile, "default")
+	if err != nil {
+		t.Fatalf("read fenced cache: %v", err)
+	}
+	if entry.CacheFound {
+		t.Fatalf("fenced pre-mutation refresh repopulated cache: %#v", entry)
+	}
+}
+
+func TestDHCPReservationCacheDoesNotCacheAmbiguousPlainPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rows := make([]map[string]any, dhcpReservationPageSize)
+		for i := range rows {
+			rows[i] = map[string]any{"ipv4addr": fmt.Sprintf("192.0.%d.%d", 2+i/254, 1+i%254), "network_view": "default"}
+		}
+		_ = json.NewEncoder(w).Encode(rows)
+	}))
+	defer server.Close()
+	app := testApp(t)
+	profile := Profile{Name: "default", Server: server.URL}
+	if _, err := app.refreshDHCPReservationCache(profile, testWapiClient(server), "default"); err == nil || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("ambiguous plain refresh error = %v, want explicit incomplete error", err)
+	}
+	entry, err := app.readCachedDHCPReservations(profile, "default")
+	if err != nil {
+		t.Fatalf("read ambiguous cache: %v", err)
+	}
+	if entry.CacheFound {
+		t.Fatal("ambiguous plain page was cached")
+	}
+}
+
+func TestDHCPReservationCacheInvalidationFailurePropagates(t *testing.T) {
+	app := testApp(t)
+	parent := t.TempDir()
+	file := filepath.Join(parent, "not-a-directory")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("create cache path blocker: %v", err)
+	}
+	app.ConfigDir = file
+	if err := app.queueDHCPReservationCacheRefresh(Profile{Name: "default", Server: "https://grid.example"}, "default"); err == nil {
+		t.Fatal("cache invalidation failure was swallowed")
+	}
+}
+
+func TestDHCPReservationRefreshReleasesExactLeaseWhenProfileLoadFails(t *testing.T) {
+	app := testApp(t)
+	profile := Profile{Name: "default", Server: "https://grid.example", Username: "admin"}
+	if acquired, err := app.tryAcquireNetRefreshLease(profile, dhcpReservationCacheKind, "default", "", time.Now(), recordRefreshLeaseTTL); err != nil || !acquired {
+		t.Fatalf("acquire DHCP lease: acquired=%v err=%v", acquired, err)
+	}
+	leaseToken, err := app.netRefreshLeaseToken(profile, dhcpReservationCacheKind, "default", "")
+	if err != nil || leaseToken == 0 {
+		t.Fatalf("read DHCP lease token: token=%d err=%v", leaseToken, err)
+	}
+	t.Setenv(cacheRefreshProfileKeyEnv, cacheProfileName(profile))
+	t.Setenv(cacheRefreshLeaseTokenEnv, fmt.Sprint(leaseToken))
+	if err := app.runNetCacheRefresh(profile.Name, dhcpReservationCacheKind, "default", ""); err == nil {
+		t.Fatal("profile load unexpectedly succeeded")
+	}
+	active, err := app.netRefreshLeaseActive(profile, dhcpReservationCacheKind, "default", "", time.Now())
+	if err != nil {
+		t.Fatalf("check released lease: %v", err)
+	}
+	if active {
+		t.Fatal("exact acquired DHCP lease remained after profile load failure")
 	}
 }
 

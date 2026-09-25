@@ -30,20 +30,21 @@ func (e *WapiError) Error() string {
 }
 
 type WapiClient struct {
-	Server             string
-	ReadServer         string
-	ReadVerifySSL      bool
-	TLSFingerprint     string
-	ReadTLSFingerprint string
-	WAPIVersion        string
-	Username           string
-	Password           string
-	View               string
-	ForcePrimaryReads  bool
-	httpClient         *http.Client
-	readHTTPClient     *http.Client
-	debug              func(string, ...debugField)
-	context            context.Context
+	Server                string
+	ReadServer            string
+	ReadVerifySSL         bool
+	TLSFingerprint        string
+	ReadTLSFingerprint    string
+	WAPIVersion           string
+	Username              string
+	Password              string
+	View                  string
+	ForcePrimaryReads     bool
+	cacheRefreshStartedAt int64
+	httpClient            *http.Client
+	readHTTPClient        *http.Client
+	debug                 func(string, ...debugField)
+	context               context.Context
 }
 
 const (
@@ -339,9 +340,15 @@ func pagedQuery(client *WapiClient, objectType string, params url.Values) ([]map
 }
 
 func pagedQueryWithPageSize(client *WapiClient, objectType string, params url.Values, pageSize int) ([]map[string]any, error) {
+	rows, _, err := pagedQueryWithPageSizeComplete(client, objectType, params, pageSize)
+	return rows, err
+}
+
+func pagedQueryWithPageSizeComplete(client *WapiClient, objectType string, params url.Values, pageSize int) ([]map[string]any, bool, error) {
 	// Infoblox returns either a plain list or an object with result/next_page_id
-	// depending on paging support and object type. Handle both shapes so callers
-	// can request "all rows" without duplicating pagination branches.
+	// depending on paging support and object type. A plain list exactly at the
+	// requested page size is ambiguous: it may be truncated with no continuation
+	// token, so callers that cache all rows must treat it as incomplete.
 	pageParams := cloneValues(params)
 	pageParams.Set("_paging", "1")
 	pageParams.Set("_return_as_object", "1")
@@ -359,19 +366,23 @@ func pagedQueryWithPageSize(client *WapiClient, objectType string, params url.Va
 		}
 		response, err := client.Request(http.MethodGet, objectType, requestParams, nil)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		switch typed := response.(type) {
 		case []any:
-			return append(results, mapSliceFromAny(typed)...), nil
+			rows := mapSliceFromAny(typed)
+			if len(rows) == pageSize {
+				return nil, false, cliError("WAPI returned an ambiguous plain list of exactly %d rows; the result may be incomplete", pageSize)
+			}
+			return append(results, rows...), true, nil
 		case map[string]any:
 			results = append(results, mapSliceFromAny(typed["result"])...)
 			pageID = strings.TrimSpace(fmt.Sprint(typed["next_page_id"]))
 			if pageID == "" || pageID == "<nil>" {
-				return results, nil
+				return results, true, nil
 			}
 		default:
-			return results, nil
+			return results, false, nil
 		}
 	}
 }

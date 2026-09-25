@@ -12,14 +12,19 @@
 
 It is built for daily record and network tasks: compact tables for humans, plain JSON/CSV for automation, safe read/write routing, dynamic completion, and cache-backed searches that stay responsive on large zones.
 
+<p align="center">
+  <img src="./docs/assets/go-record1.gif" width="100%" alt="Animated preview of ib DNS record output">
+</p>
+
 ## What `ib` helps you do
 
 - Manage local and Linux-global Infoblox profiles with encrypted credentials.
 - Work in the right DNS context from saved defaults, shell-session view/zone state, environment variables, or one-command `--view` and `--zone` overrides.
 - List, search, create, edit, and delete DNS records with type filters, exclusions, sorting, selected columns, duplicate selection, and confirmation.
 - Read IPAM network views, IPv4 networks and containers, addresses, VLAN assignments, and next available IPs.
+- Manage DHCP fixed-address reservations with explicit IPv4 addresses or next-available IP allocation from an IPAM network.
 - Route read-only GET requests to a validated Grid Master Candidate with separate TLS trust while keeping POST, PUT, DELETE, and next-IP function calls on the primary Grid Master.
-- Use Badger-backed zone, record, IPAM, and VLAN caches with bounded workers and stale-while-revalidate refreshes.
+- Use Badger-backed zone, record, IPAM, VLAN, and DHCP reservation caches with bounded workers and stale-while-revalidate refreshes.
 - Generate dynamic shell completion for profiles, views, zones, records, networks, record types, flags, columns, and output formats.
 - Emit optional JSON Lines audit events for successful DNS/config writes and failed DNS record WAPI mutations while keeping read workflows quiet.
 
@@ -139,7 +144,7 @@ ib vlan show 123
 Reservations use the Infoblox fixedaddress object. Reads use GET routing, while create, edit, delete, and next-IP allocation use the primary server.
 
 ```
-ib dhcp reservation list [SEARCH] [--network-view VIEW] [--name NAME] [--comment COMMENT]
+ib dhcp reservation list [SEARCH] [--network-view VIEW] [--name NAME] [--comment COMMENT] [--refresh]
 ib dhcp reservation show IP [--network-view VIEW]
 ib dhcp reservation create [IP] --mac MAC [--network-view VIEW] [--name NAME] [--comment COMMENT]
 ib dhcp reservation create --next-ip NETWORK --mac MAC [--network-view VIEW] [--name NAME] [--comment COMMENT]
@@ -147,7 +152,7 @@ ib dhcp reservation edit IP [--mac MAC] [--network-view VIEW] [--name NAME] [--c
 ib dhcp reservation delete IP [--network-view VIEW] [-y|--yes]
 ```
 
-create requires --mac and exactly one allocation source: an explicit IPv4 address or --next-ip NETWORK with an IPv4 CIDR. On edit, --network-view selects the source reservation and cannot move it to another view; edit requires at least one other field. Delete prompts for confirmation unless --yes is supplied.
+create requires --mac and exactly one allocation source: an explicit IPv4 address or --next-ip NETWORK with an IPv4 CIDR. For next-IP creates, a minimal POST response is checked with a primary GET when a reference is available; if the allocated address still cannot be confirmed, ib reports partial success and says not to retry. On edit, --network-view selects the source reservation and cannot move it to another view; edit requires at least one other field. Delete prompts for confirmation unless --yes is supplied.
 
 ## Output controls
 
@@ -177,7 +182,7 @@ DNS record fields include `type`, `name`, `value`, `zone`, `ttl`, and `comment`.
 
 When a profile has a validated `read_server`, read-only GET requests can use that endpoint with its own TLS setting or certificate pin. Create, update, delete, and next-IP function calls always use the primary Grid Master. WAPI responses are size-limited and cancel when the command receives Ctrl-C.
 
-Zone, record, IPAM, and VLAN rows are cached in `~/.ib/cache.badger/` for local profiles or `/etc/ib/cache.badger/` for Linux global profiles. Cache namespaces include the profile endpoint, so repointing a profile cannot reuse another Grid's data. Record and IPAM freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` can be returned immediately while refresh work runs in the background. Large DNS searches use bounded workers, reuse cache rows, and batch stale multi-zone record revalidation.
+Zone, record, IPAM, VLAN, and DHCP reservation rows are cached in `~/.ib/cache.badger/` for local profiles or `/etc/ib/cache.badger/` for Linux global profiles. Cache namespaces include the profile endpoint, so repointing a profile cannot reuse another Grid's data. Record, IPAM, and DHCP reservation freshness is calculated from `cached_at + cache_ttl`; stale rows inside `records_cache_swr_ttl` can be returned immediately while one lease-protected refresh runs in the background. Use `ib dhcp reservation list --refresh` when the list must wait for fresh WAPI data. Large DNS searches use bounded workers, reuse cache rows, and batch stale multi-zone record revalidation.
 
 For the deeper cache and worker model, see [Performance & Caching](docs/performance-caching.md).
 

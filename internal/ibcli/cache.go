@@ -48,19 +48,20 @@ type cacheStatusSnapshot struct {
 }
 
 type cacheStatusStatistics struct {
-	CacheEntries       int `json:"cache_entries"`
-	ZoneEntries        int `json:"zone_entries"`
-	RecordEntries      int `json:"record_entries"`
-	NetworkViewEntries int `json:"network_view_entries"`
-	NetworkEntries     int `json:"network_entries"`
-	ContainerEntries   int `json:"container_entries"`
-	IPv4AddressEntries int `json:"ipv4_address_entries"`
-	VLANEntries        int `json:"vlan_entries"`
-	CachedRecords      int `json:"cached_records"`
-	FreshEntries       int `json:"fresh_entries"`
-	SWRStaleEntries    int `json:"swr_stale_entries"`
-	ExpiredEntries     int `json:"expired_entries"`
-	ActiveRefreshes    int `json:"active_refreshes"`
+	CacheEntries           int `json:"cache_entries"`
+	ZoneEntries            int `json:"zone_entries"`
+	RecordEntries          int `json:"record_entries"`
+	NetworkViewEntries     int `json:"network_view_entries"`
+	NetworkEntries         int `json:"network_entries"`
+	ContainerEntries       int `json:"container_entries"`
+	IPv4AddressEntries     int `json:"ipv4_address_entries"`
+	VLANEntries            int `json:"vlan_entries"`
+	DHCPReservationEntries int `json:"dhcp_reservation_entries"`
+	CachedRecords          int `json:"cached_records"`
+	FreshEntries           int `json:"fresh_entries"`
+	SWRStaleEntries        int `json:"swr_stale_entries"`
+	ExpiredEntries         int `json:"expired_entries"`
+	ActiveRefreshes        int `json:"active_refreshes"`
 }
 
 type badgerCacheEntry struct {
@@ -84,6 +85,16 @@ type badgerLeaseEntry struct {
 	Scope     string `json:"scope,omitempty"`
 	StartedAt int64  `json:"started_at"`
 	ExpiresAt int64  `json:"expires_at"`
+}
+
+type dhcpReservationFenceEntry struct {
+	Generation uint64 `json:"generation"`
+}
+
+type dhcpReservationCacheToken struct {
+	Global  uint64
+	Profile uint64
+	Scope   uint64
 }
 
 func (a *App) cachePath() string {
@@ -226,6 +237,18 @@ func netLeaseKey(profile string, kind string, scope string) []byte {
 	return cacheEntryKey("net_refresh_locks", profile, kind, scope)
 }
 
+func dhcpReservationFenceKey(profile string, networkView string) []byte {
+	return cacheEntryKey("dhcp_reservation_fences", profile, strings.TrimSpace(networkView))
+}
+
+func dhcpReservationProfileFenceKey(profileName string) []byte {
+	return cacheEntryKey("dhcp_reservation_profile_fences", strings.TrimSpace(profileName))
+}
+
+func dhcpReservationGlobalFenceKey() []byte {
+	return badgerKey("dhcp_reservation_global_fence")
+}
+
 func normalizeCacheZone(zone string) string {
 	return strings.ToLower(strings.TrimRight(strings.TrimSpace(zone), "."))
 }
@@ -274,11 +297,15 @@ func (a *App) readProfileCacheEntry(profile Profile, kind string, parts ...strin
 	if err != nil || found || strings.TrimSpace(profile.Server) == "" {
 		return entry, found, err
 	}
-	// Callers that construct a Profile without an endpoint (notably embedding
-	// users) retain an isolated "unknown" namespace. It is never shared with
-	// persisted profiles, whose server is always known before cache access.
+	// Existing DNS/IPAM callers may construct an endpoint-less Profile in unit
+	// tests or embedding integrations. Keep that isolated unknown namespace
+	// fallback for those caches; DHCP reservations use the exact reader below.
 	unknownProfileName := cacheProfileName(Profile{Name: profile.Name})
 	return a.readBadgerCacheEntry(cacheEntryKey(kind, unknownProfileName, parts...))
+}
+
+func (a *App) readExactProfileCacheEntry(profile Profile, kind string, parts ...string) (badgerCacheEntry, bool, error) {
+	return a.readBadgerCacheEntry(cacheEntryKey(kind, cacheProfileName(profile), parts...))
 }
 
 func (a *App) writeBadgerCacheEntry(key []byte, entry badgerCacheEntry) error {
@@ -481,6 +508,176 @@ func (a *App) writeCachedIPv4AddressesEntry(profile Profile, ip string, networkV
 	})
 }
 
+func (a *App) readCachedDHCPReservations(profile Profile, networkView string) (cachedPayload, error) {
+	networkView = strings.TrimSpace(networkView)
+	entry, found, err := a.readExactProfileCacheEntry(profile, dhcpReservationCacheKind, networkView)
+	if err != nil {
+		return cachedPayload{}, err
+	}
+	if !found {
+		return cachedPayload{}, nil
+	}
+	return cachedPayloadFromBadger(entry), nil
+}
+
+func (a *App) dhcpReservationStaleExpiresAt(cachedAt time.Time) int64 {
+	return cachedAt.Add(a.cacheTTL()).Add(a.recordsCacheSWRTTL()).Unix()
+}
+
+func canonicalDHCPReservationRows(rows []map[string]any) []map[string]any {
+	canonical := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		canonical = append(canonical, dhcpReservationOutputRow(row))
+	}
+	return canonical
+}
+
+func (a *App) dhcpReservationCacheEntry(profileName, networkView string, rows []map[string]any, now time.Time) badgerCacheEntry {
+	return badgerCacheEntry{
+		Kind:           dhcpReservationCacheKind,
+		Profile:        profileName,
+		NetworkView:    strings.TrimSpace(networkView),
+		CachedAt:       now.Unix(),
+		StaleExpiresAt: a.dhcpReservationStaleExpiresAt(now),
+		Rows:           rows,
+	}
+}
+
+func (a *App) writeCachedDHCPReservations(profile Profile, networkView string, rows []map[string]any, now time.Time) error {
+	profileName := cacheProfileName(profile)
+	entry := a.dhcpReservationCacheEntry(profileName, networkView, canonicalDHCPReservationRows(rows), now)
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	db, err := a.openCacheDB()
+	if err != nil {
+		return err
+	}
+	return db.Update(func(txn *badger.Txn) error {
+		return txn.Set(cacheEntryKey(dhcpReservationCacheKind, profileName, strings.TrimSpace(networkView)), raw)
+	})
+}
+
+func dhcpReservationFenceGenerationInTxn(txn *badger.Txn, key []byte) (uint64, error) {
+	item, err := txn.Get(key)
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var fence dhcpReservationFenceEntry
+	if err := item.Value(func(raw []byte) error { return json.Unmarshal(raw, &fence) }); err != nil {
+		return 0, err
+	}
+	return fence.Generation, nil
+}
+
+func dhcpReservationCacheTokenInTxn(txn *badger.Txn, profileName, networkView string) (dhcpReservationCacheToken, error) {
+	global, err := dhcpReservationFenceGenerationInTxn(txn, dhcpReservationGlobalFenceKey())
+	if err != nil {
+		return dhcpReservationCacheToken{}, err
+	}
+	scope, err := dhcpReservationFenceGenerationInTxn(txn, dhcpReservationFenceKey(profileName, networkView))
+	if err != nil {
+		return dhcpReservationCacheToken{}, err
+	}
+	profile, err := dhcpReservationFenceGenerationInTxn(txn, dhcpReservationProfileFenceKey(strings.SplitN(profileName, "\x1e", 2)[0]))
+	if err != nil {
+		return dhcpReservationCacheToken{}, err
+	}
+	return dhcpReservationCacheToken{Global: global, Profile: profile, Scope: scope}, nil
+}
+
+func (a *App) readDHCPReservationCacheToken(profile Profile, networkView string) (dhcpReservationCacheToken, error) {
+	db, err := a.openCacheDB()
+	if err != nil {
+		return dhcpReservationCacheToken{}, err
+	}
+	profileName := cacheProfileName(profile)
+	var token dhcpReservationCacheToken
+	err = db.View(func(txn *badger.Txn) error {
+		var err error
+		token, err = dhcpReservationCacheTokenInTxn(txn, profileName, strings.TrimSpace(networkView))
+		return err
+	})
+	return token, err
+}
+
+func advanceDHCPReservationGenerationInTxn(txn *badger.Txn, key []byte) error {
+	generation, err := dhcpReservationFenceGenerationInTxn(txn, key)
+	if err != nil {
+		return err
+	}
+	if generation == ^uint64(0) {
+		return errors.New("DHCP reservation cache generation exhausted")
+	}
+	raw, err := json.Marshal(dhcpReservationFenceEntry{Generation: generation + 1})
+	if err != nil {
+		return err
+	}
+	return txn.Set(key, raw)
+}
+
+func (a *App) writeDHCPReservationCacheIfCurrent(profile Profile, networkView string, rows []map[string]any, now time.Time, token dhcpReservationCacheToken) (bool, error) {
+	profileName := cacheProfileName(profile)
+	networkView = strings.TrimSpace(networkView)
+	entry := a.dhcpReservationCacheEntry(profileName, networkView, canonicalDHCPReservationRows(rows), now)
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return false, err
+	}
+	db, err := a.openCacheDB()
+	if err != nil {
+		return false, err
+	}
+	wrote := false
+	err = db.Update(func(txn *badger.Txn) error {
+		current, err := dhcpReservationCacheTokenInTxn(txn, profileName, networkView)
+		if err != nil {
+			return err
+		}
+		if current != token {
+			return nil
+		}
+		if err := txn.Set(cacheEntryKey(dhcpReservationCacheKind, profileName, networkView), raw); err != nil {
+			return err
+		}
+		wrote = true
+		return nil
+	})
+	return wrote, err
+}
+
+func (a *App) invalidateDHCPReservationCache(profile Profile, networkView string) error {
+	profileName := cacheProfileName(profile)
+	networkView = strings.TrimSpace(networkView)
+	views := []string{""}
+	if networkView != "" {
+		views = append(views, networkView)
+	}
+	db, err := a.openCacheDB()
+	if err != nil {
+		return err
+	}
+	return db.Update(func(txn *badger.Txn) error {
+		for _, view := range views {
+			if err := txn.Delete(cacheEntryKey(dhcpReservationCacheKind, profileName, view)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+				return err
+			}
+			if err := advanceDHCPReservationGenerationInTxn(txn, dhcpReservationFenceKey(profileName, view)); err != nil {
+				return err
+			}
+			leaseKey := netLeaseKey(profileName, dhcpReservationCacheKind, netRefreshScope(dhcpReservationCacheKind, view, ""))
+			if err := txn.Delete(leaseKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (a *App) readCachedRecords(profile Profile, zone string) (cachedPayload, error) {
 	started := time.Now()
 	profileName, view := cacheScope(profile)
@@ -665,21 +862,47 @@ func (a *App) invalidateRecordCache(profile Profile, zone string) {
 }
 
 func (a *App) clearCache() error {
-	path := a.cachePath()
-	if err := a.closeCacheDB(path); err != nil {
+	db, err := a.openCacheDB()
+	if err != nil {
 		return err
 	}
-	// A full cache clear should reclaim Badger storage files too. Prefix deletes
-	// or DropAll remove rows but can leave a large active sparse value-log file
-	// behind, which is surprising for users running `ib config cache clear` to
-	// free space.
-	if err := os.RemoveAll(path); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return err
-	}
-	return a.protectCacheFileForScope(false)
+	// Advance the global generation and remove rows in one transaction. A
+	// refresh that started before this transaction cannot publish afterwards.
+	return db.Update(func(txn *badger.Txn) error {
+		if err := advanceDHCPReservationGenerationInTxn(txn, dhcpReservationGlobalFenceKey()); err != nil {
+			return err
+		}
+		for _, prefix := range []string{
+			"zones",
+			"records",
+			"record_refresh_locks",
+			"network_views",
+			"networks",
+			"network_containers",
+			"ipv4_addresses",
+			"net_refresh_locks",
+			"vlans",
+			dhcpReservationCacheKind,
+			"dhcp_reservation_fences",
+			"dhcp_reservation_profile_fences",
+		} {
+			if err := deleteBadgerPrefixInTxn(txn, badgerKey(prefix)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (a *App) clearDHCPReservationProfileCache(db *badger.DB, profileName string) error {
+	return db.Update(func(txn *badger.Txn) error {
+		for _, kind := range []string{dhcpReservationCacheKind, "dhcp_reservation_fences", "net_refresh_locks"} {
+			if err := deleteBadgerPrefixInTxn(txn, []byte(kind+"\x1f"+profileName+"\x1e")); err != nil {
+				return err
+			}
+		}
+		return advanceDHCPReservationGenerationInTxn(txn, dhcpReservationProfileFenceKey(profileName))
+	})
 }
 
 func (a *App) clearProfileCache(profileName string) error {
@@ -689,6 +912,9 @@ func (a *App) clearProfileCache(profileName string) error {
 	}
 	db, err := a.openCacheDB()
 	if err != nil {
+		return err
+	}
+	if err := a.clearDHCPReservationProfileCache(db, profileName); err != nil {
 		return err
 	}
 	for _, prefix := range []string{
@@ -710,6 +936,8 @@ func (a *App) clearProfileCache(profileName string) error {
 }
 
 func deleteBadgerProfilePrefix(db *badger.DB, kind, profileName string) error {
+	// Profile cache keys continue with endpoint and username separated by \x1e;
+	// clear every identity belonging to the logical profile name.
 	prefix := []byte(kind + "\x1f" + profileName + "\x1e")
 	return deleteBadgerPrefix(db, prefix)
 }
@@ -853,15 +1081,21 @@ func netRefreshScope(kind string, networkView string, ip string) string {
 }
 
 func (a *App) tryAcquireNetRefreshLease(profile Profile, kind string, networkView string, ip string, now time.Time, ttl time.Duration) (bool, error) {
+	acquired, _, err := a.tryAcquireNetRefreshLeaseWithToken(profile, kind, networkView, ip, now, ttl)
+	return acquired, err
+}
+
+func (a *App) tryAcquireNetRefreshLeaseWithToken(profile Profile, kind string, networkView string, ip string, now time.Time, ttl time.Duration) (bool, int64, error) {
 	profileName := cacheProfileName(profile)
 	scope := netRefreshScope(kind, networkView, ip)
 	key := netLeaseKey(profileName, kind, scope)
 	db, err := a.openCacheDB()
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
 
 	nowUnix := now.Unix()
+	leaseToken := now.UnixNano()
 	acquired := false
 	err = db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get(key)
@@ -882,7 +1116,7 @@ func (a *App) tryAcquireNetRefreshLease(profile Profile, kind string, networkVie
 			Profile:   profileName,
 			Kind:      kind,
 			Scope:     scope,
-			StartedAt: nowUnix,
+			StartedAt: leaseToken,
 			ExpiresAt: now.Add(ttl).Unix(),
 		})
 		if err != nil {
@@ -894,24 +1128,65 @@ func (a *App) tryAcquireNetRefreshLease(profile Profile, kind string, networkVie
 		acquired = true
 		return nil
 	})
-	return acquired, err
+	if err != nil || !acquired {
+		leaseToken = 0
+	}
+	return acquired, leaseToken, err
 }
 
 func (a *App) releaseNetRefreshLease(profile Profile, kind string, networkView string, ip string) error {
-	profileName := cacheProfileName(profile)
-	scope := netRefreshScope(kind, networkView, ip)
-	key := netLeaseKey(profileName, kind, scope)
+	return a.releaseNetRefreshLeaseByProfileKey(cacheProfileName(profile), kind, networkView, ip)
+}
+
+func (a *App) releaseNetRefreshLeaseByProfileKey(profileKey string, kind string, networkView string, ip string) error {
+	return a.releaseNetRefreshLeaseIfOwner(profileKey, kind, networkView, ip, 0)
+}
+
+func (a *App) releaseNetRefreshLeaseIfOwner(profileKey string, kind string, networkView string, ip string, token int64) error {
 	db, err := a.openCacheDB()
 	if err != nil {
 		return err
 	}
+	key := netLeaseKey(profileKey, kind, netRefreshScope(kind, networkView, ip))
 	return db.Update(func(txn *badger.Txn) error {
-		err := txn.Delete(key)
+		item, err := txn.Get(key)
 		if errors.Is(err, badger.ErrKeyNotFound) {
 			return nil
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		if token != 0 {
+			var lease badgerLeaseEntry
+			if err := item.Value(func(raw []byte) error { return json.Unmarshal(raw, &lease) }); err != nil {
+				return err
+			}
+			if lease.StartedAt != token {
+				return nil
+			}
+		}
+		return txn.Delete(key)
 	})
+}
+
+func (a *App) netRefreshLeaseToken(profile Profile, kind string, networkView string, ip string) (int64, error) {
+	profileName := cacheProfileName(profile)
+	db, err := a.openCacheDB()
+	if err != nil {
+		return 0, err
+	}
+	var lease badgerLeaseEntry
+	err = db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(netLeaseKey(profileName, kind, netRefreshScope(kind, networkView, ip)))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return item.Value(func(raw []byte) error { return json.Unmarshal(raw, &lease) })
+	})
+	return lease.StartedAt, err
 }
 
 func (a *App) netRefreshLeaseActive(profile Profile, kind string, networkView string, ip string, now time.Time) (bool, error) {
@@ -993,7 +1268,7 @@ func (a *App) cacheStatusSnapshot() (cacheStatusSnapshot, error) {
 	now := nowTime.Unix()
 	snapshot := cacheStatusSnapshot{Entries: []map[string]any{}}
 	if err := db.View(func(txn *badger.Txn) error {
-		for _, kind := range []string{"zones", "records", "network_views", "networks", "network_containers", "ipv4_addresses", "vlans"} {
+		for _, kind := range []string{"zones", "records", "network_views", "networks", "network_containers", "ipv4_addresses", "vlans", dhcpReservationCacheKind} {
 			options := badger.DefaultIteratorOptions
 			options.PrefetchValues = true
 			iterator := txn.NewIterator(options)
@@ -1069,23 +1344,27 @@ func deleteBadgerPrefixes(db *badger.DB, prefixes []string) error {
 	return nil
 }
 
+func deleteBadgerPrefixInTxn(txn *badger.Txn, prefix []byte) error {
+	options := badger.DefaultIteratorOptions
+	options.PrefetchValues = false
+	iterator := txn.NewIterator(options)
+	defer iterator.Close()
+	var keys [][]byte
+	for iterator.Seek(prefix); iterator.ValidForPrefix(prefix); iterator.Next() {
+		key := append([]byte(nil), iterator.Item().Key()...)
+		keys = append(keys, key)
+	}
+	for _, key := range keys {
+		if err := txn.Delete(key); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
 func deleteBadgerPrefix(db *badger.DB, prefix []byte) error {
 	return db.Update(func(txn *badger.Txn) error {
-		options := badger.DefaultIteratorOptions
-		options.PrefetchValues = false
-		iterator := txn.NewIterator(options)
-		defer iterator.Close()
-		var keys [][]byte
-		for iterator.Seek(prefix); iterator.ValidForPrefix(prefix); iterator.Next() {
-			key := append([]byte(nil), iterator.Item().Key()...)
-			keys = append(keys, key)
-		}
-		for _, key := range keys {
-			if err := txn.Delete(key); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-				return err
-			}
-		}
-		return nil
+		return deleteBadgerPrefixInTxn(txn, prefix)
 	})
 }
 
@@ -1126,6 +1405,8 @@ func (s *cacheStatusStatistics) addEntry(kind string, itemCount int, staleExpire
 		s.IPv4AddressEntries++
 	case "vlans":
 		s.VLANEntries++
+	case dhcpReservationCacheKind:
+		s.DHCPReservationEntries++
 	}
 	if nowUnix < freshUntil {
 		s.FreshEntries++
@@ -1168,6 +1449,7 @@ func renderCacheStatusStatistics(stats cacheStatusStatistics) string {
 		renderCacheStatusBadge(cacheStatsEntryStyle, "Containers", stats.ContainerEntries),
 		renderCacheStatusBadge(cacheStatsEntryStyle, "IPv4 addresses", stats.IPv4AddressEntries),
 		renderCacheStatusBadge(cacheStatsEntryStyle, "VLANs", stats.VLANEntries),
+		renderCacheStatusBadge(cacheStatsEntryStyle, "DHCP reservations", stats.DHCPReservationEntries),
 		renderCacheStatusBadge(cacheStatsFreshStyle, "Fresh", stats.FreshEntries),
 		renderCacheStatusBadge(cacheStatsStaleStyle, "SWR stale", stats.SWRStaleEntries),
 		renderCacheStatusBadge(cacheStatsExpiredStyle, "Expired", stats.ExpiredEntries),

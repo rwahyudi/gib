@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,15 +16,19 @@ import (
 )
 
 const (
-	networkViewReturnFields = "name,comment"
-	ipv4AddressReturnFields = "ip_address,network,network_view,status,types,names,mac_address,lease_state,usage,comment,extattrs"
-	defaultNetSortField     = "network"
-	netCacheKindViews       = "network_views"
-	netCacheKindNetworks    = "networks"
-	netCacheKindContainers  = "network_containers"
-	netCacheKindAddresses   = "ipv4_addresses"
-	ipamTypeNetwork         = "network"
-	ipamTypeContainer       = "container"
+	cacheRefreshStartedAtEnv  = "IB_CACHE_REFRESH_STARTED_AT"
+	cacheRefreshProfileKeyEnv = "IB_CACHE_REFRESH_PROFILE_KEY"
+	cacheRefreshLeaseTokenEnv = "IB_CACHE_REFRESH_LEASE_TOKEN"
+	cacheRefreshPrimaryEnv    = "IB_CACHE_REFRESH_PRIMARY"
+	networkViewReturnFields   = "name,comment"
+	ipv4AddressReturnFields   = "ip_address,network,network_view,status,types,names,mac_address,lease_state,usage,comment,extattrs"
+	defaultNetSortField       = "network"
+	netCacheKindViews         = "network_views"
+	netCacheKindNetworks      = "networks"
+	netCacheKindContainers    = "network_containers"
+	netCacheKindAddresses     = "ipv4_addresses"
+	ipamTypeNetwork           = "network"
+	ipamTypeContainer         = "container"
 )
 
 // networkColumnHeaders maps network field names to display headers.
@@ -70,9 +75,10 @@ type NetSort struct {
 }
 
 type netCacheOptions struct {
-	ForceRefresh  bool
-	ServeExpired  bool
-	OnStaleServed func()
+	ForceRefresh       bool
+	ServeExpired       bool
+	PropagateReadError bool
+	OnStaleServed      func()
 }
 
 func (options netCacheOptions) notifyStaleServed() {
@@ -424,6 +430,9 @@ func (a *App) cachedNetRows(profile Profile, kind string, networkView string, ip
 	now := time.Now()
 	started := now
 	entry, err := read()
+	if err != nil && options.PropagateReadError {
+		return nil, err
+	}
 	if err == nil && entry.CacheFound {
 		if !options.ForceRefresh && a.cacheEntryFresh(entry, now) {
 			a.debugEvent("cache ipam source", df("kind", kind), df("network_view", networkView), df("ip", ip), df("source", "fresh cache"), df("rows", len(entry.Rows)), df("duration", time.Since(started)))
@@ -581,8 +590,17 @@ func (a *App) startNetCacheRefreshAsync(profile Profile, kind string, networkVie
 }
 
 func (a *App) startNetCacheRefresh(profile Profile, kind string, networkView string, ip string) error {
+	return a.startNetCacheRefreshWithOptions(profile, kind, networkView, ip, false)
+}
+
+func (a *App) startNetCacheRefreshPrimary(profile Profile, kind string, networkView string, ip string) error {
+	return a.startNetCacheRefreshWithOptions(profile, kind, networkView, ip, true)
+}
+
+func (a *App) startNetCacheRefreshWithOptions(profile Profile, kind string, networkView string, ip string, forcePrimary bool) error {
 	done := a.debugPhase("cache ipam refresh dispatch", df("profile", cacheProfileName(profile)), df("kind", kind), df("network_view", networkView), df("ip", ip))
-	acquired, err := a.tryAcquireNetRefreshLease(profile, kind, networkView, ip, time.Now(), recordRefreshLeaseTTL)
+	refreshStartedAt := time.Now()
+	acquired, leaseToken, err := a.tryAcquireNetRefreshLeaseWithToken(profile, kind, networkView, ip, refreshStartedAt, recordRefreshLeaseTTL)
 	if err != nil || !acquired {
 		done(err)
 		if err == nil {
@@ -590,9 +608,12 @@ func (a *App) startNetCacheRefresh(profile Profile, kind string, networkView str
 		}
 		return err
 	}
+	release := func() {
+		_ = a.releaseNetRefreshLeaseIfOwner(cacheProfileName(profile), kind, networkView, ip, leaseToken)
+	}
 	if a.backgroundNetRefresher != nil {
 		if err := a.backgroundNetRefresher(profile, kind, networkView, ip); err != nil {
-			_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+			release()
 			done(err)
 			return err
 		}
@@ -601,12 +622,12 @@ func (a *App) startNetCacheRefresh(profile Profile, kind string, networkView str
 	}
 	executable, ok, err := backgroundRefreshExecutable()
 	if err != nil {
-		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+		release()
 		done(err)
 		return err
 	}
 	if !ok {
-		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+		release()
 		done(nil)
 		return nil
 	}
@@ -622,9 +643,17 @@ func (a *App) startNetCacheRefresh(profile Profile, kind string, networkView str
 		args = append(args, "--ip", strings.TrimSpace(ip))
 	}
 	cmd := exec.Command(executable, args...) // #nosec G204 -- executable is this ib binary and args are fixed internal cache-refresh flags
-	cmd.Env = os.Environ()
+	env := []string{
+		cacheRefreshStartedAtEnv + "=" + fmt.Sprint(refreshStartedAt.UnixNano()),
+		cacheRefreshProfileKeyEnv + "=" + cacheProfileName(profile),
+		cacheRefreshLeaseTokenEnv + "=" + fmt.Sprint(leaseToken),
+	}
+	if forcePrimary {
+		env = append(env, cacheRefreshPrimaryEnv+"=1")
+	}
+	cmd.Env = append(os.Environ(), env...)
 	if err := cmd.Start(); err != nil {
-		_ = a.releaseNetRefreshLease(profile, kind, networkView, ip)
+		release()
 		done(err)
 		return err
 	}
@@ -640,7 +669,17 @@ func (a *App) runNetCacheRefresh(profileName string, kind string, networkView st
 	if releaseProfile.Name == "" {
 		releaseProfile.Name = defaultProfileName
 	}
+	leaseProfileKey := strings.TrimSpace(os.Getenv(cacheRefreshProfileKeyEnv))
+	leaseToken, _ := strconv.ParseInt(strings.TrimSpace(os.Getenv(cacheRefreshLeaseTokenEnv)), 10, 64)
 	defer func() {
+		if leaseProfileKey != "" {
+			_ = a.releaseNetRefreshLeaseIfOwner(leaseProfileKey, kind, networkView, ip, leaseToken)
+			return
+		}
+		if leaseToken != 0 {
+			_ = a.releaseNetRefreshLeaseIfOwner(cacheProfileName(releaseProfile), kind, networkView, ip, leaseToken)
+			return
+		}
 		_ = a.releaseNetRefreshLease(releaseProfile, kind, networkView, ip)
 	}()
 	profile, err := a.loadConfigProfile(profileName, true)
@@ -649,6 +688,14 @@ func (a *App) runNetCacheRefresh(profileName string, kind string, networkView st
 	}
 	releaseProfile = profile
 	client := a.newClient(profile)
+	if startedAt, parseErr := strconv.ParseInt(strings.TrimSpace(os.Getenv(cacheRefreshStartedAtEnv)), 10, 64); parseErr == nil {
+		client.cacheRefreshStartedAt = startedAt
+	}
+	if kind == dhcpReservationCacheKind && strings.TrimSpace(os.Getenv(cacheRefreshPrimaryEnv)) == "1" {
+		// A mutation queues this refresh only after the primary write succeeds;
+		// reading the primary avoids publishing lagging read-server state.
+		client.ForcePrimaryReads = true
+	}
 	switch kind {
 	case netCacheKindViews:
 		_, err = a.refreshNetworkViewCache(profile, client)
@@ -664,6 +711,8 @@ func (a *App) runNetCacheRefresh(profileName string, kind string, networkView st
 		_, err = a.refreshIPv4AddressCache(profile, client, ip, networkView)
 	case vlanCacheKind:
 		_, err = a.refreshVLANCache(profile, client, networkView)
+	case dhcpReservationCacheKind:
+		_, err = a.refreshDHCPReservationCache(profile, client, networkView)
 	default:
 		err = cliError("unsupported net cache refresh kind %q", kind)
 	}

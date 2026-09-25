@@ -8,13 +8,15 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
 const (
-	fixedAddressObject      = "fixedaddress"
-	dhcpReservationPageSize = 20000
+	fixedAddressObject       = "fixedaddress"
+	dhcpReservationCacheKind = "dhcp_reservations"
+	dhcpReservationPageSize  = 20000
 )
 
 var (
@@ -35,16 +37,18 @@ func (a *App) dhcpReservationCommand() *cobra.Command {
 }
 func (a *App) dhcpReservationListCommand() *cobra.Command {
 	var networkView, name, comment string
+	var refresh bool
 	cmd := &cobra.Command{Use: "list [SEARCH]", Short: "List DHCP fixed-address reservations", Args: cobra.MaximumNArgs(1), ValidArgsFunction: completeFlagsAfterArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		search := ""
 		if len(args) == 1 {
 			search = args[0]
 		}
-		return a.runDHCPReservationList(search, networkView, name, comment)
+		return a.runDHCPReservationListWithRefresh(search, networkView, name, comment, refresh)
 	}}
 	a.addNetworkViewFlag(cmd, &networkView, "network view filter")
 	cmd.Flags().StringVar(&name, "name", "", "reservation name filter")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "reservation comment filter")
+	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh DHCP reservation cache before listing")
 	return cmd
 }
 func (a *App) dhcpReservationShowCommand() *cobra.Command {
@@ -105,11 +109,15 @@ func (a *App) dhcpReservationDeleteCommand() *cobra.Command {
 }
 
 func (a *App) runDHCPReservationList(search, networkView, name, comment string) error {
-	_, client, err := a.configuredClient()
+	return a.runDHCPReservationListWithRefresh(search, networkView, name, comment, false)
+}
+
+func (a *App) runDHCPReservationListWithRefresh(search, networkView, name, comment string, refresh bool) error {
+	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
-	reservations, err := queryDHCPReservations(client, networkView, "")
+	reservations, err := a.cachedDHCPReservations(profile, client, networkView, refresh)
 	if err != nil {
 		return err
 	}
@@ -134,6 +142,76 @@ func (a *App) runDHCPReservationList(search, networkView, name, comment string) 
 	}
 	return a.emitRows(fmt.Sprintf("DHCP Reservations (%d)", len(rows)), dhcpReservationOutputFields, rows)
 }
+func (a *App) cachedDHCPReservations(profile Profile, client *WapiClient, networkView string, forceRefresh bool) ([]map[string]any, error) {
+	networkView = strings.TrimSpace(networkView)
+	return a.cachedNetRows(
+		profile,
+		dhcpReservationCacheKind,
+		networkView,
+		"",
+		func() (cachedPayload, error) { return a.readCachedDHCPReservations(profile, networkView) },
+		func() ([]map[string]any, error) { return a.refreshDHCPReservationCache(profile, client, networkView) },
+		netCacheOptions{ForceRefresh: forceRefresh, PropagateReadError: true},
+	)
+}
+
+func (a *App) refreshDHCPReservationCache(profile Profile, client *WapiClient, networkView string) ([]map[string]any, error) {
+	// Capture the cache generation before WAPI work. The guarded write compares
+	// this token inside the same Badger transaction as the cache write.
+	token, err := a.readDHCPReservationCacheToken(profile, networkView)
+	if err != nil {
+		return nil, err
+	}
+	rows, complete, err := queryDHCPReservationsWithCompleteness(client, networkView, "")
+	if err != nil {
+		return nil, err
+	}
+	canonical := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		canonical = append(canonical, dhcpReservationOutputRow(row))
+	}
+	if !complete {
+		return nil, cliError("DHCP reservation list is incomplete: Infoblox returned an ambiguous plain response at the %d-row page limit", dhcpReservationPageSize)
+	}
+	wrote, err := a.writeDHCPReservationCacheIfCurrent(profile, networkView, canonical, time.Now(), token)
+	if err != nil {
+		return nil, err
+	}
+	if !wrote {
+		// A mutation or cache clear invalidated this refresh while its WAPI
+		// request was in flight. Never publish pre-mutation rows.
+		return canonical, nil
+	}
+	return canonical, nil
+}
+
+func (a *App) reportDHCPReservationCacheFailure(err error) {
+	if err == nil {
+		return
+	}
+	a.debugEvent("dhcp reservation cache warning", df("error", err.Error()))
+	a.PrintWarning("WARNING: DHCP reservation operation succeeded, but cache invalidation/refresh failed; do not retry the operation: " + err.Error())
+}
+
+func (a *App) queueDHCPReservationCacheRefresh(profile Profile, networkView string) error {
+	networkView = strings.TrimSpace(networkView)
+	if networkView == "" {
+		networkView = "default"
+	}
+	if err := a.invalidateDHCPReservationCache(profile, networkView); err != nil {
+		return err
+	}
+	if err := a.startNetCacheRefreshPrimary(profile, dhcpReservationCacheKind, networkView, ""); err != nil {
+		return err
+	}
+	if networkView != "" {
+		if err := a.startNetCacheRefreshPrimary(profile, dhcpReservationCacheKind, "", ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *App) runDHCPReservationShow(ip, networkView string) error {
 	ip, err := normalizeIPv4Address(ip)
 	if err != nil {
@@ -185,7 +263,7 @@ func (a *App) runDHCPReservationCreate(ip, nextIP, networkView, mac, name, comme
 			return err
 		}
 	}
-	_, client, err := a.configuredClient()
+	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
@@ -205,13 +283,38 @@ func (a *App) runDHCPReservationCreate(ip, nextIP, networkView, mac, name, comme
 		return err
 	}
 	row, authoritative := dhcpReservationCreateResponseRow(response, payload, nextIP != "")
+	allocationWarning := ""
 	if nextIP != "" && !authoritative {
-		return cliError("fixedaddress create response did not include the allocated IPv4 address")
+		if recovered, recoveredAuthoritative, recoverErr := recoverDHCPReservationCreateRow(client, response, payload); recoverErr != nil {
+			a.debugEvent("dhcp reservation allocation recovery failed", df("error", recoverErr.Error()))
+			allocationWarning = "allocated IPv4 address could not be confirmed; do not retry"
+		} else if recoveredAuthoritative {
+			row, authoritative = recovered, true
+		} else {
+			allocationWarning = "allocated IPv4 address could not be confirmed; do not retry"
+		}
+		if !authoritative {
+			row["ip"] = ""
+			a.PrintWarning("WARNING: DHCP reservation was created successfully, but " + allocationWarning)
+		}
+	}
+	affectedView := strings.TrimSpace(networkView)
+	if affectedView == "" {
+		affectedView = cleanString(row["network_view"])
+	}
+	a.reportDHCPReservationCacheFailure(a.queueDHCPReservationCacheRefresh(profile, affectedView))
+	message := "created DHCP reservation"
+	if allocationWarning != "" {
+		message += "; " + allocationWarning
 	}
 	if !a.isTableOutput() {
-		return a.emitObject("Action", dhcpReservationActionFields, dhcpReservationActionRow("create", row, "created DHCP reservation"))
+		return a.emitObject("Action", dhcpReservationActionFields, dhcpReservationActionRow("create", row, message))
 	}
-	a.PrintSuccess("SUCCESS: created DHCP reservation " + cleanString(row["ip"]))
+	if allocationWarning != "" {
+		a.PrintSuccess("SUCCESS: created DHCP reservation (" + allocationWarning + ")")
+	} else {
+		a.PrintSuccess("SUCCESS: created DHCP reservation " + cleanString(row["ip"]))
+	}
 	return nil
 }
 func (a *App) runDHCPReservationEdit(ip, networkView string, updates map[string]any) error {
@@ -245,7 +348,7 @@ func (a *App) runDHCPReservationEdit(ip, networkView string, updates map[string]
 			payload[key] = comment
 		}
 	}
-	_, client, err := a.configuredClient()
+	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
@@ -260,6 +363,11 @@ func (a *App) runDHCPReservationEdit(ip, networkView string, updates map[string]
 	if _, err := client.Request(http.MethodPut, ref, nil, payload); err != nil {
 		return err
 	}
+	affectedView := cleanString(reservation["network_view"])
+	if affectedView == "" {
+		affectedView = strings.TrimSpace(networkView)
+	}
+	a.reportDHCPReservationCacheFailure(a.queueDHCPReservationCacheRefresh(profile, affectedView))
 	row := dhcpReservationOutputRow(reservation)
 	for key, value := range payload {
 		row[key] = value
@@ -276,7 +384,7 @@ func (a *App) runDHCPReservationDelete(ip, networkView string, skipConfirm bool)
 	if err != nil {
 		return err
 	}
-	_, client, err := a.configuredClient()
+	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
 	}
@@ -304,6 +412,11 @@ func (a *App) runDHCPReservationDelete(ip, networkView string, skipConfirm bool)
 	if _, err := client.Request(http.MethodDelete, ref, nil, nil); err != nil {
 		return err
 	}
+	affectedView := cleanString(reservation["network_view"])
+	if affectedView == "" {
+		affectedView = strings.TrimSpace(networkView)
+	}
+	a.reportDHCPReservationCacheFailure(a.queueDHCPReservationCacheRefresh(profile, affectedView))
 	row := dhcpReservationOutputRow(reservation)
 	if !a.isTableOutput() {
 		return a.emitObject("Action", dhcpReservationActionFields, dhcpReservationActionRow("delete", row, "deleted DHCP reservation"))
@@ -312,6 +425,11 @@ func (a *App) runDHCPReservationDelete(ip, networkView string, skipConfirm bool)
 	return nil
 }
 func queryDHCPReservations(client *WapiClient, networkView, ip string) ([]map[string]any, error) {
+	rows, _, err := queryDHCPReservationsWithCompleteness(client, networkView, ip)
+	return rows, err
+}
+
+func queryDHCPReservationsWithCompleteness(client *WapiClient, networkView, ip string) ([]map[string]any, bool, error) {
 	params := url.Values{}
 	params.Set("_return_fields", dhcpReservationReturnFields)
 	if networkView = strings.TrimSpace(networkView); networkView != "" {
@@ -320,7 +438,7 @@ func queryDHCPReservations(client *WapiClient, networkView, ip string) ([]map[st
 	if ip = strings.TrimSpace(ip); ip != "" {
 		params.Set("ipv4addr", ip)
 	}
-	return pagedQueryWithPageSize(client, fixedAddressObject, params, dhcpReservationPageSize)
+	return pagedQueryWithPageSizeComplete(client, fixedAddressObject, params, dhcpReservationPageSize)
 }
 func findDHCPReservation(client *WapiClient, ip, networkView string) (map[string]any, error) {
 	reservations, err := queryDHCPReservations(client, networkView, ip)
@@ -335,6 +453,25 @@ func findDHCPReservation(client *WapiClient, ip, networkView string) (map[string
 	}
 	return reservations[0], nil
 }
+func recoverDHCPReservationCreateRow(client *WapiClient, response any, payload map[string]any) (map[string]any, bool, error) {
+	item := dhcpReservationResponseItem(response)
+	ref := cleanString(item["_ref"])
+	if ref == "" {
+		return nil, false, nil
+	}
+	// POST writes already use the primary. Force the recovery GET there too so
+	// a lagging read server cannot make a successful allocation look missing.
+	forcePrimary := client.ForcePrimaryReads
+	client.ForcePrimaryReads = true
+	recovered, err := client.Request(http.MethodGet, ref, nil, nil)
+	client.ForcePrimaryReads = forcePrimary
+	if err != nil {
+		return nil, false, err
+	}
+	row, authoritative := dhcpReservationCreateResponseRow(recovered, payload, true)
+	return row, authoritative, nil
+}
+
 func dhcpReservationCreateResponseRow(response any, payload map[string]any, requireIP bool) (map[string]any, bool) {
 	item := dhcpReservationResponseItem(response)
 	row := dhcpReservationOutputRow(item)
@@ -378,6 +515,14 @@ func dhcpReservationResponseItem(response any) map[string]any {
 			return nil
 		}
 		return typed[0]
+	case string:
+		// Infoblox may encode a minimal create response as a JSON string
+		// containing only the newly-created object's reference.
+		ref := strings.TrimSpace(typed)
+		if ref == "" {
+			return nil
+		}
+		return map[string]any{"_ref": ref}
 	default:
 		return nil
 	}

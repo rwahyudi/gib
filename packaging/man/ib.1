@@ -166,9 +166,11 @@ Existing cache is returned immediately; add --refresh to wait for fresh WAPI dat
 .B ib net address 192.0.2.10 --network-view default
 Show IPAM address details for 192.0.2.10, including extensible attributes when available.
 .TP
-.B ib dhcp reservation list --network-view default
+.B ib dhcp reservation list --network-view default [--refresh]
 List DHCP fixed-address reservations. Add a search term, `--name`, or
-`--comment` to filter the returned rows.
+`--comment` to filter the returned rows. Cached rows are served immediately
+when fresh or inside the stale-while-revalidate window; use `--refresh` to
+wait for fresh WAPI data.
 .TP
 .B ib dhcp reservation show 192.0.2.25 --network-view default
 Show one fixed-address reservation.

@@ -13,7 +13,7 @@ worker pool.
 | Freshness | Fresh until `cached_at + cache_ttl`; `fresh_until` is not stored. |
 | Stale window | Record and targeted IPAM rows can be served stale until `stale_expires_at`; IPAM list/search can serve older cached rows by default. |
 | Revalidation | Stale rows return immediately; DNS rows renew locally when cached zone serials match, otherwise background refresh starts are lease-protected and batched for multi-zone search, with batch dispatch ordered by descending cached record count. |
-| IPAM refresh | IPAM cache refresh skips serial checks and re-downloads the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. |
+| IPAM/DHCP refresh | IPAM and DHCP reservation cache refreshes skip serial checks and re-download the target WAPI data. Unqualified network list/search merges unscoped network/container rows with per-view rows so all visible IPAM objects are represented. DHCP reservation rows are keyed by requested network view, including an unscoped list; an ambiguous plain response exactly at the 20,000-row page limit fails as incomplete and is never displayed or cached. |
 | Read endpoint | GET requests use `read_server` when configured, with `read_server_verify_ssl` and an optional `read_tls_fingerprint` pin controlling that endpoint's TLS trust; high-parallel DNS search can spread a configured share back to primary. |
 | Write endpoint | POST, PUT, and DELETE always use the primary Grid Master. |
 | Workers | Global and recursive search load multiple zones in parallel, limited by `dns_search_worker_limit`; the active/root zone is submitted first, then remaining zones descend by cached record count. |
@@ -24,7 +24,7 @@ Default tuning in the profile config `[meta]` section:
 | Setting | Default | Meaning |
 | --- | ---: | --- |
 | `cache_ttl` | `300` seconds | Normal freshness for zone, record, and IPAM cache rows. |
-| `records_cache_swr_ttl` | `259200` seconds | How long expired record and IPAM rows can be served stale while revalidating. |
+| `records_cache_swr_ttl` | `259200` seconds | How long expired record, IPAM, and DHCP reservation rows can be served stale while revalidating. |
 | `dns_search_worker_limit` | `16` | Maximum parallel zone workers during multi-zone search. |
 | `dns_search_primary_read_percent` | `20` | Primary-server share for global-search worker GETs when `dns_search_worker_limit` is greater than 10 and `read_server` is configured. |
 | `max_background_worker_wait` | `3` seconds | Maximum wait for an active same-zone refresh before foreground WAPI work. |
@@ -50,7 +50,8 @@ batch network work completes to apply unchanged snapshots. `ib net list` and
 `ib net search` prefer latency even
 more aggressively: when network-view, network, or container cache rows exist,
 they return those rows even after SWR expiry and queue a background refresh. Use
-`--refresh` on those commands when the command must block for fresh WAPI data.
+`--refresh` on those commands, or on `ib dhcp reservation list`, when the
+command must block for fresh WAPI data.
 DNS record reads and targeted IPAM reads only block on Infoblox when the row is
 missing, changed, serial-less, or already outside the stale window. Before doing
 that foreground work, they wait up to `max_background_worker_wait` seconds for
@@ -81,7 +82,8 @@ When an operator accepts an untrusted certificate, its SHA-256 certificate
 fingerprint is saved as `read_tls_fingerprint`; the pin applies only to that
 read endpoint.
 Writes never use that endpoint: create, edit, delete, and zone mutation commands
-stay on the primary Grid Master.
+stay on the primary Grid Master. DHCP reservation refreshes queued after those
+writes also read from the primary before repopulating the affected cache rows.
 When `dns_search_worker_limit` is greater than 10 and `read_server` is distinct
 from the primary server, global DNS search assigns `dns_search_primary_read_percent`
 of record-loading workers to primary GETs and leaves the other workers on the
@@ -124,7 +126,9 @@ name, normalized endpoint, and username, so repointing a profile or changing
 its credentials cannot reuse another Grid's rows. `zones` caches authoritative
 zone-list payloads per identity and view. `records` stores `/allrecords`
 payloads per identity, view, and zone. `network_views`, `networks`,
-`network_containers`, and `ipv4_addresses` store IPAM read payloads.
+`network_containers`, `ipv4_addresses`, and `dhcp_reservations` store IPAM and
+DHCP reservation read payloads. DHCP reservation writes invalidate both the
+affected network-view row and the unscoped row before queuing refreshes.
 IPAM cache rows include extensible attributes (`extattrs`) when the WAPI returns them.
 Extensible attributes are cached alongside other network, container, and address fields,
 and are available immediately from cache for `net list`, `net search`, `net show`, and `net address` output.
@@ -146,6 +150,11 @@ Successful DNS zone create and delete operations refresh the zone-list cache in
 the background. Deleting a zone removes that zone's record cache instead of
 trying to refresh records for a zone that no longer exists.
 
+Successful DHCP reservation creates, edits, and deletes invalidate the affected
+network-view and unscoped reservation-list rows, then queue lease-protected
+background refreshes. The list command applies filters after loading the
+canonical cached fixed-address rows.
+
 Use these commands when troubleshooting cache behavior:
 
 ```bash
@@ -153,9 +162,9 @@ ib config cache status
 ib config cache clear
 ```
 
-`ib config cache clear` drops and recreates the selected local/global Badger
-cache scope, removing storage files including value-log (`.vlog`) files instead
-of only deleting matching cache rows.
+`ib config cache clear` fences in-flight DHCP refreshes and removes the
+selected local/global cache rows. The fence remains in Badger so a refresh
+that was already running cannot resurrect cleared DHCP reservations.
 
 Use `ib dns search KEYWORD --global --debug` to print timestamped command,
 WAPI, and cache timing lines to stderr while keeping stdout unchanged. Cache
