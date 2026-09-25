@@ -239,6 +239,7 @@ Common usage:
 	  ib dns search app
   ib net list
   ib net next-ip 192.0.2.0/24 -n 3
+  ib dhcp reservation list
   ib vlan list
   ib vlan show 123
 	  ib dns create host app 192.0.2.10 -c "Application host"
@@ -296,6 +297,7 @@ Common usage:
 	root.AddCommand(a.configCommand())
 	root.AddCommand(a.dnsCommand())
 	root.AddCommand(a.netCommand())
+	root.AddCommand(a.dhcpCommand())
 	root.AddCommand(a.vlanCommand())
 	a.installHelp(root)
 	return root

@@ -9,8 +9,9 @@ ib \- operator-focused Infoblox DNS and IPAM CLI
 is a command line interface for managing Infoblox DNS and IPAM records from the shell.
 It supports profile setup, encrypted credentials, DNS view and zone context,
 record workflows, read-only Grid Master Candidate routing with separate TLS
-trust, IPAM network lookup, cache inspection, next available IP lookup, optional
-write-action audit logging, and shell completion.
+trust, IPAM network lookup, cache inspection, next available IP lookup, DHCP
+fixed-address reservations, optional write-action audit logging, and shell
+completion.
 .SH COMMANDS
 .TP
 .B ib config
@@ -25,6 +26,10 @@ Manage DNS views, zones, records, searches, and next-IP lookups (`create`,
 Manage IPAM network views, IPv4 networks and containers, address details, and
 next available IP lookups (`view`, `list`, `search`, `show`, `address`, and
 `next-ip`).
+.TP
+.B ib dhcp reservation
+Manage fixed-address DHCP reservations with `list`, `show`, `create`, `edit`,
+and `delete`.
 .TP
 .B ib vlan
 List, search, inspect, and select VLANs derived from the vlans array on IPAM
@@ -61,9 +66,15 @@ create accepts `--comment`, `--format`, and `--ns-group`, and zone delete accept
 .PP
 IPAM list and search support `--network-view`, `--refresh`, `--sort`, and
 `--columns`. IPAM details use `--network-view`; `next-ip` additionally supports
-`--num` and repeatable `--exclude`. VLAN list and search use the same filter,
-refresh, sort, and column controls; VLAN details use `--network-view`, and `use`
-takes a VLAN ID or name.
+`--num` and repeatable `--exclude`. DHCP reservation list supports `SEARCH`,
+`--network-view`, `--name`, and `--comment`; show and delete accept
+`--network-view`; create accepts an explicit IP or `--next-ip NETWORK`, requires
+`--mac`, and supports `--network-view`, `--name`, and `--comment`; edit accepts
+`--network-view` only as the source-object selection filter and does not move a
+reservation between views, while the other fields are updates; delete accepts
+`--yes`. VLAN list and search use the
+same filter, refresh, sort, and column controls; VLAN details use
+`--network-view`, and `use` takes a VLAN ID or name.
 .SH EXAMPLES
 .TP
 .B ib
@@ -154,6 +165,28 @@ Existing cache is returned immediately; add --refresh to wait for fresh WAPI dat
 .TP
 .B ib net address 192.0.2.10 --network-view default
 Show IPAM address details for 192.0.2.10, including extensible attributes when available.
+.TP
+.B ib dhcp reservation list --network-view default
+List DHCP fixed-address reservations. Add a search term, `--name`, or
+`--comment` to filter the returned rows.
+.TP
+.B ib dhcp reservation show 192.0.2.25 --network-view default
+Show one fixed-address reservation.
+.TP
+.B ib dhcp reservation create 192.0.2.25 --mac 00:11:22:33:44:55 --network-view default
+Create a reservation for an explicit IPv4 address. Use `--name` and `--comment`
+for operator metadata.
+.TP
+.B ib dhcp reservation create --next-ip 192.0.2.0/24 --mac 00:11:22:33:44:66
+Ask the IPAM network for the next available IPv4 address, then create its
+fixed-address reservation.
+.TP
+.B ib dhcp reservation edit 192.0.2.25 --name printer-new
+Update one or more reservation fields. `--network-view` selects the source
+reservation and cannot move it to another network view.
+.TP
+.B ib dhcp reservation delete 192.0.2.25 --yes
+Delete a reservation without the interactive confirmation prompt.
 .TP
 .B ib net show 192.0.2.0/24
 Show details for one IPv4 network or container, including extensible attributes.
