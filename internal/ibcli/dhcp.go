@@ -25,6 +25,8 @@ var (
 	dhcpReservationReturnFields = "ipv4addr,mac,name,network,network_view,comment"
 	dhcpReservationOutputFields = []string{"ip", "mac", "name", "network", "network_view", "comment"}
 	dhcpReservationActionFields = []string{"status", "action", "type", "ip", "mac", "name", "network_view", "comment", "message"}
+	dhcpReservationTableColumns = []string{"ip", "mac", "name", "network", "comment"}
+	dhcpReservationSortFields   = []string{"ip", "mac", "name", "network", "network_view", "comment"}
 )
 
 func (a *App) dhcpCommand() *cobra.Command {
@@ -38,19 +40,31 @@ func (a *App) dhcpReservationCommand() *cobra.Command {
 	return cmd
 }
 func (a *App) dhcpReservationListCommand() *cobra.Command {
-	var networkView, name, comment string
+	var networkView, name, comment, sortRaw, columnsRaw string
 	var refresh bool
 	cmd := &cobra.Command{Use: "list [SEARCH]", Short: "List DHCP fixed-address reservations", Args: cobra.MaximumNArgs(1), ValidArgsFunction: completeFlagsAfterArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		search := ""
 		if len(args) == 1 {
 			search = args[0]
 		}
-		return a.runDHCPReservationListWithRefresh(search, networkView, name, comment, refresh)
+		reservationSort, err := parseDHCPReservationSort(sortRaw, cmd.Flags().Changed("sort"))
+		if err != nil {
+			return err
+		}
+		reservationColumns, err := parseDHCPReservationColumns(columnsRaw)
+		if err != nil {
+			return err
+		}
+		return a.runDHCPReservationListWithOptions(search, networkView, name, comment, refresh, reservationSort, reservationColumns)
 	}}
 	a.addNetworkViewFlag(cmd, &networkView, "network view filter")
 	cmd.Flags().StringVar(&name, "name", "", "reservation name filter")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "reservation comment filter")
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh DHCP reservation cache before listing")
+	cmd.Flags().StringVarP(&sortRaw, "sort", "s", "", "sort reservations by field: ip, mac, name, network, network_view, or comment; prefix with - for descending")
+	_ = cmd.RegisterFlagCompletionFunc("sort", dhcpReservationSortFlagCompletion)
+	cmd.Flags().StringVarP(&columnsRaw, "columns", "C", "", "reservation output columns, comma-separated")
+	_ = cmd.RegisterFlagCompletionFunc("columns", dhcpReservationColumnFlagCompletion)
 	return cmd
 }
 func (a *App) dhcpReservationShowCommand() *cobra.Command {
@@ -115,6 +129,10 @@ func (a *App) runDHCPReservationList(search, networkView, name, comment string) 
 }
 
 func (a *App) runDHCPReservationListWithRefresh(search, networkView, name, comment string, refresh bool) error {
+	return a.runDHCPReservationListWithOptions(search, networkView, name, comment, refresh, dhcpReservationSort{}, defaultDHCPReservationColumns())
+}
+
+func (a *App) runDHCPReservationListWithOptions(search, networkView, name, comment string, refresh bool, reservationSort dhcpReservationSort, columns []string) error {
 	profile, client, err := a.configuredClient()
 	if err != nil {
 		return err
@@ -139,11 +157,12 @@ func (a *App) runDHCPReservationListWithRefresh(search, networkView, name, comme
 		rows = append(rows, row)
 	}
 	sortDHCPReservationRows(rows)
+	applyDHCPReservationSort(rows, reservationSort)
 	if len(rows) == 0 && a.isTableOutput() {
 		a.PrintWarning("No DHCP reservations found.")
 	}
 	if a.isTableOutput() {
-		return a.emitDHCPReservationTable(rows, networkView)
+		return a.emitDHCPReservationTable(rows, networkView, columns)
 	}
 	return a.emitRows(fmt.Sprintf("DHCP Reservations (%d)", len(rows)), dhcpReservationOutputFields, rows)
 }
@@ -554,6 +573,113 @@ func normalizeDHCPName(raw string) (string, error) {
 	}
 	return value, nil
 }
+
+type dhcpReservationSort struct {
+	Enabled bool
+	Field   string
+	Desc    bool
+}
+
+func defaultDHCPReservationColumns() []string {
+	return append([]string(nil), dhcpReservationTableColumns...)
+}
+
+func parseDHCPReservationColumns(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultDHCPReservationColumns(), nil
+	}
+	seen := map[string]bool{}
+	var columns []string
+	for _, part := range strings.Split(raw, ",") {
+		column := strings.ToLower(strings.TrimSpace(part))
+		if column == "" {
+			return nil, cliError("reservation column cannot be empty. Supported: %s", strings.Join(dhcpReservationOutputFields, ", "))
+		}
+		if !containsDHCPString(dhcpReservationOutputFields, column) {
+			return nil, cliError("unsupported column %q. Supported: %s", column, strings.Join(dhcpReservationOutputFields, ", "))
+		}
+		if seen[column] {
+			return nil, cliError("duplicate column %q", column)
+		}
+		seen[column] = true
+		columns = append(columns, column)
+	}
+	return columns, nil
+}
+
+func parseDHCPReservationSort(raw string, enabled bool) (dhcpReservationSort, error) {
+	if !enabled {
+		return dhcpReservationSort{}, nil
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "ip"
+	}
+	desc := strings.HasPrefix(raw, "-")
+	if desc {
+		raw = strings.TrimPrefix(raw, "-")
+	}
+	field := strings.ToLower(strings.TrimSpace(raw))
+	if !containsDHCPString(dhcpReservationSortFields, field) {
+		return dhcpReservationSort{}, cliError("unsupported sort field %q. Supported: %s", field, strings.Join(dhcpReservationSortFields, ", "))
+	}
+	return dhcpReservationSort{Enabled: true, Field: field, Desc: desc}, nil
+}
+
+func (a *App) printDHCPReservationTableFooter(networkView string, count int) {
+	parts := []string{a.dhcpReservationContextLine(networkView)}
+	if count > 5 {
+		parts = append(parts, recordTotalBadgeStyle.Render(fmt.Sprintf("Total records: %d", count)))
+	}
+	fmt.Fprintln(a.Stdout, strings.Join(parts, "  "))
+}
+
+func dhcpReservationSortFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	prefix := strings.ToLower(strings.TrimSpace(toComplete))
+	var rows []string
+	for _, field := range dhcpReservationSortFields {
+		for _, value := range []string{field, "-" + field} {
+			if prefix == "" || strings.HasPrefix(value, prefix) {
+				rows = append(rows, value)
+			}
+		}
+	}
+	return rows, cobra.ShellCompDirectiveNoFileComp
+}
+
+func dhcpReservationColumnFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	raw := strings.ToLower(strings.TrimSpace(toComplete))
+	parts := strings.Split(raw, ",")
+	prefix := parts[len(parts)-1]
+	selected := map[string]bool{}
+	for _, part := range parts[:len(parts)-1] {
+		if part = strings.TrimSpace(part); part != "" {
+			selected[part] = true
+		}
+	}
+	base := ""
+	if len(parts) > 1 {
+		base = strings.Join(parts[:len(parts)-1], ",") + ","
+	}
+	var rows []string
+	for _, column := range dhcpReservationOutputFields {
+		if !selected[column] && (prefix == "" || strings.HasPrefix(column, prefix)) {
+			rows = append(rows, base+column)
+		}
+	}
+	return rows, cobra.ShellCompDirectiveNoFileComp
+}
+
+func containsDHCPString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func effectiveDHCPNetworkView(networkView string) string {
 	if networkView = strings.TrimSpace(networkView); networkView == "" {
 		return "default"
@@ -561,18 +687,23 @@ func effectiveDHCPNetworkView(networkView string) string {
 	return networkView
 }
 
-func (a *App) emitDHCPReservationTable(rows []map[string]any, networkView string) error {
+func (a *App) emitDHCPReservationTable(rows []map[string]any, networkView string, columns []string) error {
 	displayRows := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		displayRows = append(displayRows, []string{
-			stringify(row["ip"]), stringify(row["mac"]),
-			wrapRecordTableCell(stringify(row["name"]), dhcpReservationNameWidth),
-			stringify(row["network"]), stringify(row["network_view"]),
-			wrapRecordTableCell(stringify(row["comment"]), dhcpReservationCommentWidth),
-		})
+		display := make([]string, 0, len(columns))
+		for _, column := range columns {
+			value := stringify(row[column])
+			if column == "name" {
+				value = wrapRecordTableCell(value, dhcpReservationNameWidth)
+			} else if column == "comment" {
+				value = wrapRecordTableCell(value, dhcpReservationCommentWidth)
+			}
+			display = append(display, value)
+		}
+		displayRows = append(displayRows, display)
 	}
-	fmt.Fprintln(a.Stdout, renderTable(fmt.Sprintf("DHCP Reservations (%d)", len(rows)), titleCaseFields(dhcpReservationOutputFields), displayRows))
-	fmt.Fprintln(a.Stdout, a.dhcpReservationContextLine(networkView))
+	fmt.Fprintln(a.Stdout, renderTable(fmt.Sprintf("DHCP Reservations (%d)", len(rows)), titleCaseFields(columns), displayRows))
+	a.printDHCPReservationTableFooter(networkView, len(rows))
 	return nil
 }
 
@@ -604,11 +735,34 @@ func dhcpReservationRowContains(row map[string]any, search string) bool {
 }
 func sortDHCPReservationRows(rows []map[string]any) {
 	sort.SliceStable(rows, func(i, j int) bool {
-		left, leftErr := netip.ParseAddr(cleanString(rows[i]["ip"]))
-		right, rightErr := netip.ParseAddr(cleanString(rows[j]["ip"]))
-		if leftErr == nil && rightErr == nil && left.Is4() && right.Is4() && left.Compare(right) != 0 {
-			return left.Compare(right) < 0
-		}
-		return compareCaseInsensitiveText(cleanString(rows[i]["ip"]), cleanString(rows[j]["ip"])) < 0
+		return compareDHCPReservationIP(cleanString(rows[i]["ip"]), cleanString(rows[j]["ip"])) < 0
 	})
+}
+
+func applyDHCPReservationSort(rows []map[string]any, option dhcpReservationSort) {
+	if !option.Enabled || len(rows) < 2 {
+		return
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		left, right := cleanString(rows[i][option.Field]), cleanString(rows[j][option.Field])
+		var result int
+		if option.Field == "ip" {
+			result = compareDHCPReservationIP(left, right)
+		} else {
+			result = compareCaseInsensitiveText(left, right)
+		}
+		if option.Desc {
+			result = -result
+		}
+		return result < 0
+	})
+}
+
+func compareDHCPReservationIP(left, right string) int {
+	leftIP, leftErr := netip.ParseAddr(left)
+	rightIP, rightErr := netip.ParseAddr(right)
+	if leftErr == nil && rightErr == nil && leftIP.Compare(rightIP) != 0 {
+		return leftIP.Compare(rightIP)
+	}
+	return compareCaseInsensitiveText(left, right)
 }

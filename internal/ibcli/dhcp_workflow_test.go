@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func dhcpWorkflowApp(t *testing.T, primaryURL, readURL, output string) *App {
@@ -448,5 +450,31 @@ func TestDHCPReservationTableWrapsCellsAndShowsContext(t *testing.T) {
 	}
 	if !strings.Contains(out, "first line") || !strings.Contains(out, "second line") {
 		t.Fatalf("multiline comment was not preserved: %s", out)
+	}
+}
+
+func TestDHCPReservationColumnsSortAndCompletion(t *testing.T) {
+	columns, err := parseDHCPReservationColumns("ip,network_view,comment")
+	if err != nil || strings.Join(columns, ",") != "ip,network_view,comment" {
+		t.Fatalf("columns = %#v, err = %v", columns, err)
+	}
+	if _, err := parseDHCPReservationColumns("ip,ip"); err == nil || !strings.Contains(err.Error(), "duplicate column") {
+		t.Fatalf("duplicate columns error = %v", err)
+	}
+	option, err := parseDHCPReservationSort("-ip", true)
+	if err != nil || !option.Desc || option.Field != "ip" {
+		t.Fatalf("sort option = %#v, err = %v", option, err)
+	}
+	if _, err := parseDHCPReservationSort("bogus", true); err == nil || !strings.Contains(err.Error(), "unsupported sort field") {
+		t.Fatalf("invalid sort error = %v", err)
+	}
+	rows := []map[string]any{{"ip": "192.0.2.100", "name": "b"}, {"ip": "192.0.2.2", "name": "a"}}
+	applyDHCPReservationSort(rows, dhcpReservationSort{Enabled: true, Field: "ip"})
+	if rows[0]["ip"] != "192.0.2.2" {
+		t.Fatalf("IP sort = %#v", rows)
+	}
+	completions, directive := dhcpReservationSortFlagCompletion(nil, nil, "-")
+	if directive != cobra.ShellCompDirectiveNoFileComp || len(completions) == 0 || completions[0] != "-ip" {
+		t.Fatalf("sort completions = %#v, directive = %v", completions, directive)
 	}
 }
