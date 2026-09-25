@@ -45,6 +45,9 @@ func TestDHCPReservationListUsesReadServer(t *testing.T) {
 		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/fixedaddress") {
 			t.Fatalf("read request = %s %s", r.Method, r.URL.Path)
 		}
+		if got := r.URL.Query().Get("_max_results"); got != "20000" {
+			t.Fatalf("max results = %q, want 20000", got)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"ipv4addr": "192.0.2.25", "mac": "00:11:22:33:44:55", "name": "printer", "network_view": "default", "comment": "lab"}}})
 	}))
 	defer read.Close()

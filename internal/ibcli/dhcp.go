@@ -12,7 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const fixedAddressObject = "fixedaddress"
+const (
+	fixedAddressObject      = "fixedaddress"
+	dhcpReservationPageSize = 20000
+)
 
 var (
 	dhcpReservationReturnFields = "ipv4addr,mac,name,network,network_view,comment"
@@ -317,7 +320,7 @@ func queryDHCPReservations(client *WapiClient, networkView, ip string) ([]map[st
 	if ip = strings.TrimSpace(ip); ip != "" {
 		params.Set("ipv4addr", ip)
 	}
-	return pagedQuery(client, fixedAddressObject, params)
+	return pagedQueryWithPageSize(client, fixedAddressObject, params, dhcpReservationPageSize)
 }
 func findDHCPReservation(client *WapiClient, ip, networkView string) (map[string]any, error) {
 	reservations, err := queryDHCPReservations(client, networkView, ip)

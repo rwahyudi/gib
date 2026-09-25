@@ -335,13 +335,20 @@ func responseSnippet(raw []byte) string {
 }
 
 func pagedQuery(client *WapiClient, objectType string, params url.Values) ([]map[string]any, error) {
+	return pagedQueryWithPageSize(client, objectType, params, wapiPageSize)
+}
+
+func pagedQueryWithPageSize(client *WapiClient, objectType string, params url.Values, pageSize int) ([]map[string]any, error) {
 	// Infoblox returns either a plain list or an object with result/next_page_id
 	// depending on paging support and object type. Handle both shapes so callers
 	// can request "all rows" without duplicating pagination branches.
 	pageParams := cloneValues(params)
 	pageParams.Set("_paging", "1")
 	pageParams.Set("_return_as_object", "1")
-	pageParams.Set("_max_results", fmt.Sprint(wapiPageSize))
+	if pageSize <= 0 {
+		pageSize = wapiPageSize
+	}
+	pageParams.Set("_max_results", fmt.Sprint(pageSize))
 
 	var results []map[string]any
 	pageID := ""
