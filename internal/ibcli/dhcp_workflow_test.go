@@ -3,6 +3,7 @@ package ibcli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -513,5 +514,45 @@ func TestDHCPReservationCreateCommandUsesPositionalMACSyntax(t *testing.T) {
 	}
 	if !strings.Contains(cmd.Example, "create 192.0.2.25 00:11:22:33:44:55") || !strings.Contains(cmd.Example, "--next-ip") {
 		t.Fatalf("examples do not show positional syntax: %s", cmd.Example)
+	}
+}
+
+func TestDHCPReservationCreateArgumentErrorsPrintErrorBeforeUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "explicit IP without MAC", args: []string{"dhcp", "reservation", "create", "192.0.2.25"}, want: "provide IP and MAC positionally"},
+		{name: "next-ip without MAC", args: []string{"dhcp", "reservation", "create", "--next-ip", "192.0.2.0/24"}, want: "with --next-ip NETWORK"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := testApp(t)
+			var stdout, stderr bytes.Buffer
+			app.Stdout = &stdout
+			app.Stderr = &stderr
+			app.gum = NewGum(app.Stdin, app.Stdout, app.Stderr)
+
+			err := app.Execute(tt.args)
+			if err == nil {
+				t.Fatalf("Execute(%v) succeeded, want nonzero error", tt.args)
+			}
+			if !errors.Is(err, errUsageDisplayed) {
+				t.Fatalf("Execute(%v) error = %v, want usage sentinel", tt.args, err)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("Execute(%v) wrote stdout: %s", tt.args, stdout.String())
+			}
+			output := stderr.String()
+			errorIndex := strings.Index(output, tt.want)
+			usageIndex := strings.Index(output, "Usage")
+			if errorIndex < 0 || usageIndex < 0 || errorIndex >= usageIndex {
+				t.Fatalf("Execute(%v) output does not print error before usage: %s", tt.args, output)
+			}
+			if !strings.Contains(output, "ib dhcp reservation create IP MAC [flags]") {
+				t.Fatalf("Execute(%v) missing create usage: %s", tt.args, output)
+			}
+		})
 	}
 }

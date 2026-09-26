@@ -74,19 +74,24 @@ func (a *App) dhcpReservationShowCommand() *cobra.Command {
 }
 func (a *App) dhcpReservationCreateCommand() *cobra.Command {
 	var nextIP, networkView, name, comment string
-	cmd := &cobra.Command{Use: "create IP MAC", Short: "Create a DHCP fixed-address reservation", Example: "ib dhcp reservation create 192.0.2.25 00:11:22:33:44:55\nib dhcp reservation create 00-11-22-33-44-55 --next-ip 192.0.2.0/24\n# MAC formats: colon, hyphen, Cisco-period, or 12-hex continuous", Args: cobra.MaximumNArgs(2), ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cmd := &cobra.Command{Use: "create IP MAC", Short: "Create a DHCP fixed-address reservation", Example: "ib dhcp reservation create 192.0.2.25 00:11:22:33:44:55\nib dhcp reservation create 00-11-22-33-44-55 --next-ip 192.0.2.0/24\n# MAC formats: colon, hyphen, Cisco-period, or 12-hex continuous", Args: func(cmd *cobra.Command, args []string) error {
+		if nextIP != "" {
+			if len(args) == 1 {
+				return nil
+			}
+			return a.dhcpReservationCreateArgumentError(cmd, "with --next-ip NETWORK, provide exactly one positional MAC address")
+		}
+		if len(args) == 2 {
+			return nil
+		}
+		return a.dhcpReservationCreateArgumentError(cmd, "provide IP and MAC positionally, or provide MAC with --next-ip NETWORK")
+	}, ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}, RunE: func(cmd *cobra.Command, args []string) error {
 		mac := ""
 		if nextIP != "" {
-			if len(args) != 1 {
-				return cliError("with --next-ip NETWORK, provide exactly one positional MAC address")
-			}
 			mac = args[0]
 		} else {
-			if len(args) != 2 {
-				return cliError("provide IP and MAC positionally, or provide MAC with --next-ip NETWORK")
-			}
 			ip := args[0]
 			mac = args[1]
 			return a.runDHCPReservationCreate(ip, nextIP, networkView, mac, name, comment)
@@ -98,6 +103,14 @@ func (a *App) dhcpReservationCreateCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&name, "name", "n", "", "reservation name")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "reservation comment")
 	return cmd
+}
+
+func (a *App) dhcpReservationCreateArgumentError(cmd *cobra.Command, message string) error {
+	a.PrintError(cliError("%s", message))
+	if err := cmd.Usage(); err != nil {
+		return err
+	}
+	return errUsageDisplayed
 }
 func (a *App) dhcpReservationEditCommand() *cobra.Command {
 	var mac, networkView, name, comment string
