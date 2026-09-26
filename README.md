@@ -131,6 +131,8 @@ ib dns create ptr 192.0.2.10 app.example.com
 ib dns delete a app
 ib net address 192.0.2.10 --network-view default
 ib dhcp reservation list --network-view default
+ib dhcp lease list --state ACTIVE
+ib dhcp lease show 192.0.2.25 --network-view default
 ib dhcp reservation show 192.0.2.25 --network-view default
 ib dhcp reservation create 192.0.2.25 00:11:22:33:44:55 --network-view default --name printer -c "Lab printer"
 ib dhcp reservation create 00:11:22:33:44:66 --next-ip 192.0.2.0/24 --network-view default
@@ -153,6 +155,15 @@ ib dhcp reservation delete IP [--network-view VIEW] [-y|--yes]
 ```
 
 create requires either positional IP MAC or positional MAC with --next-ip NETWORK (an IPv4 CIDR). MACs are accepted in colon, hyphen, Cisco-period, and continuous 12-hex formats and are normalized to lowercase colon form. For next-IP creates, a minimal POST response is checked with a primary GET when a reference is available; if the allocated address still cannot be confirmed, ib reports partial success and says not to retry. On edit, --network-view selects the source reservation and cannot move it to another view; edit requires at least one other field. Delete prompts for confirmation unless --yes is supplied.
+
+### DHCP leases
+
+Leases are read live from the WAPI `lease` object and are never cached. List supports `SEARCH`, `--network-view`, `--network`, `--mac`, `--hostname`, `--state`, `-C|--columns`, and `-s|--sort`; omitted network views use `default`.
+
+```
+ib dhcp lease list [SEARCH] [--network-view VIEW] [--network NETWORK] [--mac MAC] [--hostname HOSTNAME] [--state STATE]
+ib dhcp lease show IP [--network-view VIEW]
+```
 
 ## Output controls
 

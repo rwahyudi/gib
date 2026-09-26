@@ -30,7 +30,7 @@ var (
 
 func (a *App) dhcpCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "dhcp", Short: "Manage Infoblox DHCP reservations"}
-	cmd.AddCommand(a.dhcpReservationCommand())
+	cmd.AddCommand(a.dhcpReservationCommand(), a.dhcpLeaseCommand())
 	return cmd
 }
 func (a *App) dhcpReservationCommand() *cobra.Command {

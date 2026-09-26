@@ -27,6 +27,10 @@ Manage IPAM network views, IPv4 networks and containers, address details, and
 next available IP lookups (`view`, `list`, `search`, `show`, `address`, and
 `next-ip`).
 .TP
+.B ib dhcp
+Inspect live DHCP leases and manage fixed-address reservations with the
+`lease` and `reservation` command groups.
+.TP
 .B ib dhcp reservation
 Manage fixed-address DHCP reservations with `list`, `show`, `create`, `edit`,
 and `delete`.
@@ -174,6 +178,13 @@ wait for fresh WAPI data.
 .TP
 .B ib dhcp reservation show 192.0.2.25 --network-view default
 Show one fixed-address reservation.
+.TP
+.B ib dhcp lease list --state ACTIVE
+List live DHCP leases. Supports SEARCH, network-view, network, MAC, hostname,
+state, columns, and sort filters; omitted network views use `default`.
+.TP
+.B ib dhcp lease show 192.0.2.25 --network-view default
+Show the live lease for one address. Lease data is never cached.
 .TP
 .B ib dhcp reservation create 192.0.2.25 00:11:22:33:44:55 --network-view default
 Create a reservation for an explicit IPv4 address. Use `-n|--name` and
