@@ -2,7 +2,6 @@ package ibcli
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -74,20 +73,29 @@ func (a *App) dhcpReservationShowCommand() *cobra.Command {
 	return cmd
 }
 func (a *App) dhcpReservationCreateCommand() *cobra.Command {
-	var nextIP, networkView, mac, name, comment string
-	cmd := &cobra.Command{Use: "create [IP]", Short: "Create a DHCP fixed-address reservation", Example: "ib dhcp reservation create 192.0.2.25 --mac 00:11:22:33:44:55\nib dhcp reservation create --next-ip 192.0.2.0/24 --mac 00:11:22:33:44:55", Args: cobra.MaximumNArgs(1), ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	var nextIP, networkView, name, comment string
+	cmd := &cobra.Command{Use: "create IP MAC", Short: "Create a DHCP fixed-address reservation", Example: "ib dhcp reservation create 192.0.2.25 00:11:22:33:44:55\nib dhcp reservation create 00-11-22-33-44-55 --next-ip 192.0.2.0/24\n# MAC formats: colon, hyphen, Cisco-period, or 12-hex continuous", Args: cobra.MaximumNArgs(2), ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return flagCompletions(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}, RunE: func(cmd *cobra.Command, args []string) error {
-		ip := ""
-		if len(args) == 1 {
-			ip = args[0]
+		mac := ""
+		if nextIP != "" {
+			if len(args) != 1 {
+				return cliError("with --next-ip NETWORK, provide exactly one positional MAC address")
+			}
+			mac = args[0]
+		} else {
+			if len(args) != 2 {
+				return cliError("provide IP and MAC positionally, or provide MAC with --next-ip NETWORK")
+			}
+			ip := args[0]
+			mac = args[1]
+			return a.runDHCPReservationCreate(ip, nextIP, networkView, mac, name, comment)
 		}
-		return a.runDHCPReservationCreate(ip, nextIP, networkView, mac, name, comment)
+		return a.runDHCPReservationCreate("", nextIP, networkView, mac, name, comment)
 	}}
 	a.addNetworkViewFlag(cmd, &networkView, "network view for the reservation")
 	cmd.Flags().StringVar(&nextIP, "next-ip", "", "allocate the next available IP from NETWORK")
-	cmd.Flags().StringVarP(&mac, "mac", "m", "", "client MAC address (required)")
-	cmd.Flags().StringVar(&name, "name", "", "reservation name")
+	cmd.Flags().StringVarP(&name, "name", "n", "", "reservation name")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "reservation comment")
 	return cmd
 }
@@ -558,13 +566,49 @@ func dhcpReservationResponseItem(response any) map[string]any {
 func normalizeDHCPMAC(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
-		return "", cliError("--mac is required")
+		return "", cliError("MAC address is required; provide it positionally")
 	}
-	parsed, err := net.ParseMAC(value)
-	if err != nil || len(parsed) != 6 {
-		return "", cliError("--mac must be a valid Ethernet MAC address")
+	if strings.IndexFunc(value, func(r rune) bool { return r == ' ' || r == '\t' || r == '\r' || r == '\n' }) >= 0 {
+		return "", cliError("MAC address must be a valid 48-bit Ethernet address")
 	}
-	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", parsed[0], parsed[1], parsed[2], parsed[3], parsed[4], parsed[5]), nil
+	var hex string
+	switch {
+	case strings.Contains(value, "."):
+		parts := strings.Split(value, ".")
+		if len(parts) != 3 || len(parts[0]) != 4 || len(parts[1]) != 4 || len(parts[2]) != 4 {
+			return "", cliError("MAC address must be a valid 48-bit Ethernet address")
+		}
+		hex = strings.Join(parts, "")
+	case strings.Contains(value, ":") || strings.Contains(value, "-"):
+		delimiter := ":"
+		if strings.Contains(value, "-") {
+			delimiter = "-"
+		}
+		if strings.Contains(value, " :") || (delimiter == ":" && strings.Contains(value, "-")) || (delimiter == "-" && strings.Contains(value, ":")) {
+			return "", cliError("MAC address must be a valid 48-bit Ethernet address")
+		}
+		parts := strings.Split(value, delimiter)
+		if len(parts) != 6 {
+			return "", cliError("MAC address must be a valid 48-bit Ethernet address")
+		}
+		for _, part := range parts {
+			if len(part) != 2 {
+				return "", cliError("MAC address must be a valid 48-bit Ethernet address")
+			}
+		}
+		hex = strings.Join(parts, "")
+	default:
+		hex = value
+	}
+	if len(hex) != 12 || strings.IndexFunc(hex, func(r rune) bool { return !isDHCPMACHex(r) }) >= 0 {
+		return "", cliError("MAC address must be a valid 48-bit Ethernet address")
+	}
+	hex = strings.ToLower(hex)
+	return fmt.Sprintf("%s:%s:%s:%s:%s:%s", hex[0:2], hex[2:4], hex[4:6], hex[6:8], hex[8:10], hex[10:12]), nil
+}
+
+func isDHCPMACHex(r rune) bool {
+	return r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F'
 }
 func normalizeDHCPName(raw string) (string, error) {
 	value := strings.TrimSpace(raw)

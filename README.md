@@ -117,7 +117,7 @@ Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, audi
 | Delete a zone | `ib dns zone delete example.com` | Requires an interactive confirmation; use `-y` only for deliberate automation. |
 | Read IPAM | `ib net list prod --network-view default` | Lists or searches IPv4 networks and containers, including assigned VLAN fields when WAPI supports them. |
 | Find addresses | `ib net next-ip 192.0.2.0/24 -n 3` | Resolves networks and containers, then asks the primary server for current next-IP results. |
-| Reserve DHCP addresses | `ib dhcp reservation create --next-ip 192.0.2.0/24 --mac 00:11:22:33:44:55` | Creates a fixed-address reservation; use an explicit IP instead of `--next-ip` when the address is already known. |
+| Reserve DHCP addresses | `ib dhcp reservation create 00:11:22:33:44:55 --next-ip 192.0.2.0/24` | Creates a fixed-address reservation; use `IP MAC` when the address is already known. MACs accept colon, hyphen, Cisco-period, or 12-hex continuous formats. |
 | Inspect VLANs | `ib vlan list --network-view default` | Derives VLAN rows from IPAM network/container metadata; stock NIOS has no VLAN CRUD WAPI. |
 
 Common examples:
@@ -132,8 +132,8 @@ ib dns delete a app
 ib net address 192.0.2.10 --network-view default
 ib dhcp reservation list --network-view default
 ib dhcp reservation show 192.0.2.25 --network-view default
-ib dhcp reservation create 192.0.2.25 --mac 00:11:22:33:44:55 --network-view default --name printer -c "Lab printer"
-ib dhcp reservation create --next-ip 192.0.2.0/24 --mac 00:11:22:33:44:66 --network-view default
+ib dhcp reservation create 192.0.2.25 00:11:22:33:44:55 --network-view default --name printer -c "Lab printer"
+ib dhcp reservation create 00:11:22:33:44:66 --next-ip 192.0.2.0/24 --network-view default
 ib dhcp reservation edit 192.0.2.25 --name printer-new
 ib dhcp reservation delete 192.0.2.25 -y
 ib vlan show 123
@@ -146,13 +146,13 @@ Reservations use the Infoblox fixedaddress object. Reads use GET routing, while 
 ```
 ib dhcp reservation list [SEARCH] [--network-view VIEW] [--name NAME] [--comment COMMENT] [--refresh]
 ib dhcp reservation show IP [--network-view VIEW]
-ib dhcp reservation create [IP] --mac MAC [--network-view VIEW] [--name NAME] [--comment COMMENT]
-ib dhcp reservation create --next-ip NETWORK --mac MAC [--network-view VIEW] [--name NAME] [--comment COMMENT]
+ib dhcp reservation create IP MAC [--network-view VIEW] [-n|--name NAME] [--comment COMMENT]
+ib dhcp reservation create MAC --next-ip NETWORK [--network-view VIEW] [-n|--name NAME] [--comment COMMENT]
 ib dhcp reservation edit IP [--mac MAC] [--network-view VIEW] [--name NAME] [--comment COMMENT]
 ib dhcp reservation delete IP [--network-view VIEW] [-y|--yes]
 ```
 
-create requires --mac and exactly one allocation source: an explicit IPv4 address or --next-ip NETWORK with an IPv4 CIDR. For next-IP creates, a minimal POST response is checked with a primary GET when a reference is available; if the allocated address still cannot be confirmed, ib reports partial success and says not to retry. On edit, --network-view selects the source reservation and cannot move it to another view; edit requires at least one other field. Delete prompts for confirmation unless --yes is supplied.
+create requires either positional IP MAC or positional MAC with --next-ip NETWORK (an IPv4 CIDR). MACs are accepted in colon, hyphen, Cisco-period, and continuous 12-hex formats and are normalized to lowercase colon form. For next-IP creates, a minimal POST response is checked with a primary GET when a reference is available; if the allocated address still cannot be confirmed, ib reports partial success and says not to retry. On edit, --network-view selects the source reservation and cannot move it to another view; edit requires at least one other field. Delete prompts for confirmation unless --yes is supplied.
 
 ## Output controls
 

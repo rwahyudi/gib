@@ -175,11 +175,12 @@ wait for fresh WAPI data.
 .B ib dhcp reservation show 192.0.2.25 --network-view default
 Show one fixed-address reservation.
 .TP
-.B ib dhcp reservation create 192.0.2.25 --mac 00:11:22:33:44:55 --network-view default
-Create a reservation for an explicit IPv4 address. Use `--name` and `--comment`
-for operator metadata.
+.B ib dhcp reservation create 192.0.2.25 00:11:22:33:44:55 --network-view default
+Create a reservation for an explicit IPv4 address. Use `-n|--name` and
+`--comment` for operator metadata. MACs accept colon, hyphen, Cisco-period, or
+continuous 12-hex formats and normalize to lowercase colon form.
 .TP
-.B ib dhcp reservation create --next-ip 192.0.2.0/24 --mac 00:11:22:33:44:66
+.B ib dhcp reservation create 00:11:22:33:44:66 --next-ip 192.0.2.0/24
 Ask the IPAM network for the next available IPv4 address, then create its
 fixed-address reservation.
 .TP

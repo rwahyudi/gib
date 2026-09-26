@@ -148,7 +148,7 @@ func TestDHCPReservationCreateValidatesAllocationSourceAndMAC(t *testing.T) {
 	if err := app.runDHCPReservationCreate("192.0.2.25", "192.0.2.0/24", "", "00:11:22:33:44:55", "", ""); err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Fatalf("both allocation sources error = %v", err)
 	}
-	if err := app.runDHCPReservationCreate("192.0.2.25", "", "", "", "", ""); err == nil || !strings.Contains(err.Error(), "--mac is required") {
+	if err := app.runDHCPReservationCreate("192.0.2.25", "", "", "", "", ""); err == nil || !strings.Contains(err.Error(), "MAC address is required") {
 		t.Fatalf("missing MAC error = %v", err)
 	}
 }
@@ -476,5 +476,42 @@ func TestDHCPReservationColumnsSortAndCompletion(t *testing.T) {
 	completions, directive := dhcpReservationSortFlagCompletion(nil, nil, "-")
 	if directive != cobra.ShellCompDirectiveNoFileComp || len(completions) == 0 || completions[0] != "-ip" {
 		t.Fatalf("sort completions = %#v, directive = %v", completions, directive)
+	}
+}
+
+func TestNormalizeDHCPMACFormatsAndRejectsInvalidAddresses(t *testing.T) {
+	cases := map[string]string{
+		"00:11:22:aa:bb:cc": "00:11:22:aa:bb:cc",
+		"00-11-22-AA-BB-CC": "00:11:22:aa:bb:cc",
+		"0011.22AA.BBCC":    "00:11:22:aa:bb:cc",
+		"001122AAbbCC":      "00:11:22:aa:bb:cc",
+	}
+	for input, want := range cases {
+		got, err := normalizeDHCPMAC(input)
+		if err != nil || got != want {
+			t.Errorf("normalizeDHCPMAC(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"", "00:11:22:33:44", "00:11:22:33:44:55:66", "0011.2233.4455.6677", "00:11:22:33:44:gg", "00:11-22:33-44:55"} {
+		if _, err := normalizeDHCPMAC(input); err == nil {
+			t.Errorf("normalizeDHCPMAC(%q) accepted malformed MAC", input)
+		}
+	}
+}
+
+func TestDHCPReservationCreateCommandUsesPositionalMACSyntax(t *testing.T) {
+	cmd := testApp(t).dhcpReservationCreateCommand()
+	if cmd.Use != "create IP MAC" {
+		t.Fatalf("Use = %q", cmd.Use)
+	}
+	if cmd.Flags().Lookup("mac") != nil || cmd.Flags().Lookup("m") != nil {
+		t.Fatal("create still exposes --mac/-m")
+	}
+	name := cmd.Flags().Lookup("name")
+	if name == nil || name.Shorthand != "n" {
+		t.Fatalf("name flag = %#v, want shorthand -n", name)
+	}
+	if !strings.Contains(cmd.Example, "create 192.0.2.25 00:11:22:33:44:55") || !strings.Contains(cmd.Example, "--next-ip") {
+		t.Fatalf("examples do not show positional syntax: %s", cmd.Example)
 	}
 }
