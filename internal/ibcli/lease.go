@@ -125,7 +125,29 @@ func queryDHCPLeases(client *WapiClient, networkView, network, mac, hostname, st
 		params.Set("address", address)
 	}
 	rows, _, err := pagedQueryWithPageSizeComplete(client, "lease", params, dhcpLeasePageSize)
-	return rows, err
+	if err != nil {
+		return nil, err
+	}
+	return deduplicateDHCPLeases(rows), nil
+}
+
+func deduplicateDHCPLeases(rows []map[string]any) []map[string]any {
+	seen := make(map[string]struct{}, len(rows))
+	unique := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		address := cleanString(row["address"])
+		if address == "" {
+			address = cleanString(row["ip"])
+		}
+		view := effectiveDHCPNetworkView(cleanString(row["network_view"]))
+		key := view + "\x00" + address
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, row)
+	}
+	return unique
 }
 
 func findDHCPLease(client *WapiClient, networkView, address string) (map[string]any, error) {

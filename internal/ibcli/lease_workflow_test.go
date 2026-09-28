@@ -66,9 +66,30 @@ func TestDHCPLeasePaginationAndShowDefaultView(t *testing.T) {
 	}
 }
 
+func TestDeduplicateDHCPLeasesPreservesFirstPeerAndDistinctKeys(t *testing.T) {
+	first := map[string]any{"address": "192.0.2.25", "network_view": "default", "starts": "first"}
+	rows := []map[string]any{
+		first,
+		{"address": "192.0.2.25", "network_view": "default", "starts": "peer"},
+		{"address": "192.0.2.25", "network_view": "guest", "starts": "other view"},
+		{"address": "192.0.2.26", "network_view": "default", "starts": "other IP"},
+	}
+
+	got := deduplicateDHCPLeases(rows)
+	if len(got) != 3 || got[0]["starts"] != "first" {
+		t.Fatalf("deduplicated rows = %#v", got)
+	}
+	if got[1]["network_view"] != "guest" || got[2]["address"] != "192.0.2.26" {
+		t.Fatalf("distinct rows = %#v", got)
+	}
+}
+
 func TestDHCPLeaseTableAndMachineColumnsRemainDeterministic(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{"address": "192.0.2.25", "hardware": "00:11:22:33:44:55", "client_hostname": strings.Repeat("host", 20), "binding_state": "ACTIVE", "network": "192.0.2.0/24", "network_view": "default"}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{
+			{"address": "192.0.2.25", "hardware": "00:11:22:33:44:55", "client_hostname": strings.Repeat("host", 20), "binding_state": "ACTIVE", "network": "192.0.2.0/24", "network_view": "default"},
+			{"address": "192.0.2.25", "hardware": "peer", "client_hostname": "peer", "binding_state": "EXPIRED", "network": "192.0.2.0/24", "network_view": "default"},
+		}})
 	}))
 	defer server.Close()
 	app := dhcpWorkflowApp(t, server.URL, server.URL, tableOutput)
@@ -76,7 +97,7 @@ func TestDHCPLeaseTableAndMachineColumnsRemainDeterministic(t *testing.T) {
 		t.Fatalf("table: %v", err)
 	}
 	out := app.Stdout.(*bytes.Buffer).String()
-	if strings.Contains(out, "network view") || !strings.Contains(out, "hostname") || !strings.Contains(out, "Current Context:") {
+	if strings.Contains(out, "network view") || !strings.Contains(out, "hostname") || !strings.Contains(out, "Current Context:") || !strings.Contains(out, "DHCP Leases (1)") || strings.Contains(out, "peer") {
 		t.Fatalf("table output = %s", out)
 	}
 
@@ -130,7 +151,7 @@ func TestDHCPLeaseColumnsSortAndCompletions(t *testing.T) {
 	}
 }
 
-func TestDHCPLeaseShowNotFoundAndAmbiguous(t *testing.T) {
+func TestDHCPLeaseShowDeduplicatesPeerRows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("address") != "192.0.2.25" || r.URL.Query().Get("network_view") != "default" {
 			t.Fatalf("show query = %s", r.URL.RequestURI())
@@ -143,8 +164,9 @@ func TestDHCPLeaseShowNotFoundAndAmbiguous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
-	if _, err := findDHCPLease(client, "", "192.0.2.25"); err == nil || !strings.Contains(err.Error(), "multiple DHCP leases") {
-		t.Fatalf("ambiguous error = %v", err)
+	lease, err := findDHCPLease(client, "", "192.0.2.25")
+	if err != nil || lease["address"] != "192.0.2.25" {
+		t.Fatalf("deduplicated lease = %#v, err=%v", lease, err)
 	}
 }
 
