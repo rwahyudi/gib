@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="./docs/assets/readme/hero.svg" width="100%" alt="gib slash ib, a fast Infoblox DNS and IPAM CLI for operators">
-</p>
-
-<p align="center">
   <a href="https://github.com/rwahyudi/gib/releases/latest"><img src="https://img.shields.io/github/v/release/rwahyudi/gib?color=0ea5e9" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/go-1.24.2-00ADD8" alt="Go 1.24.2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="MIT license"></a>
