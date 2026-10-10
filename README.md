@@ -111,7 +111,7 @@ Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, audi
 | --- | --- | --- |
 | Configure access | `ib config new --default` | Validates server reachability, primary/read-endpoint TLS trust, credentials, WAPI version, DNS defaults, and optional audit logging. |
 | List records | `ib dns list` | Uses the current DNS view/zone unless `--view` or `--zone` is supplied. |
-| Search records | `ib dns search app` | Searches record name, value, and comment fields case-insensitively. Add `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
+| Search records | `ib dns search app` | Searches record name, value, and comment fields case-insensitively by default. Multiple positional terms must all match; repeated `--any` terms require at least one match. Add `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
 | Create records | `ib dns create host app 192.0.2.10 -c "Application host"` | Type-first syntax keeps A, AAAA, CNAME, host, MX, NS, PTR, SRV, and TXT workflows consistent. |
 | Edit or delete records | `ib dns edit host app 192.0.2.20` | Deletes match forward DNS names case-insensitively and prompts for confirmation unless `-y` is used. |
 | Delete a zone | `ib dns zone delete example.com` | Requires an interactive confirmation; use `-y` only for deliberate automation. |
@@ -126,6 +126,9 @@ Common examples:
 ib dns view list
 ib dns zone list
 ib dns list --sort name --columns name,value,ttl
+ib dns search web prd
+ib dns search web --any tst --any dev
+ib dns search web prd --any tst --any dev
 ib dns search app --global --sort zone --columns zone,name,value -o csv
 ib dns create ptr 192.0.2.10 app.example.com
 ib dns delete a app

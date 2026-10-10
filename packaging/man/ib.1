@@ -125,7 +125,20 @@ delegation nameservers; filters still use ns.
 Larger IPv4 reverse CIDR scopes can include matching child reverse zones.
 .TP
 .B ib dns search app
-Search records by name, value, or comment.
+Search records by name, value, or comment. Matching is case-insensitive by
+default and spans all three fields. Multiple positional terms must all match;
+repeated --any terms require at least one of those terms to match. Use
+--case-sensitive to make matching case-sensitive.
+.TP
+.B ib dns search web prd
+Search for records matching both web and prd across the name, value, and
+comment fields.
+.TP
+.B ib dns search web --any tst --any dev
+Search for records matching web and at least one of tst or dev.
+.TP
+.B ib dns search web prd --any tst --any dev
+Search for records matching both web and prd, plus at least one of tst or dev.
 .TP
 .B ib dns zone delete example.com
 Delete a DNS zone after an interactive confirmation showing its zone, view, and

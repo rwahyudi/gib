@@ -256,6 +256,8 @@ func TestDNSSearchHelpShowsSort(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"Search Records Usage",
+		"positional terms are all required",
+		"--any term is repeatable",
 		"FQDN can infer zone",
 		"-s name or --sort=-name sorts by field",
 		"-C name,value prints selected output columns",
@@ -675,10 +677,7 @@ func TestConfigCacheAndCompletionHelpCoversOperationalDetails(t *testing.T) {
 }
 
 func TestDNSSearchArgumentErrorsPrintUsage(t *testing.T) {
-	for _, args := range [][]string{
-		{"dns", "search"},
-		{"dns", "search", "one", "two"},
-	} {
+	for _, args := range [][]string{{"dns", "search"}} {
 		app := testApp(t)
 		var stdout, stderr bytes.Buffer
 		app.Stdout = &stdout
@@ -695,9 +694,11 @@ func TestDNSSearchArgumentErrorsPrintUsage(t *testing.T) {
 		output := stderr.String()
 		for _, want := range []string{
 			"Usage",
-			"ib dns search <keyword> [flags]",
+			"ib dns search <term>... [flags]",
 			"Example",
 			"ib dns search app",
+			"ib dns search web prd",
+			"ib dns search web --any tst --any dev",
 			"ib dns search ben-dr-vss.net.latrobe.edu.au",
 			`Use "ib dns search -h" for more info.`,
 		} {

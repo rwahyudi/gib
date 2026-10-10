@@ -637,6 +637,40 @@ func TestReverseSearchMatchesIPAddressName(t *testing.T) {
 	}
 }
 
+func TestRecordMatchesRequiredTermsAndAnyGroup(t *testing.T) {
+	record := TypedRecord{
+		Type: "a",
+		Item: map[string]any{
+			"name":    "WEB-api.example.com",
+			"address": "prd-backend",
+			"comment": "development service",
+		},
+	}
+
+	if !recordMatches(record, SearchOptions{
+		Keywords: []string{"web", "prd"},
+		Any:      []string{"tst", "DEV"},
+	}) {
+		t.Fatal("record did not match case-insensitive required terms across fields and OR group")
+	}
+	if recordMatches(record, SearchOptions{
+		Keywords: []string{"web", "prd"},
+		Any:      []string{"qa", "stage"},
+	}) {
+		t.Fatal("record matched when no --any term matched")
+	}
+}
+
+func TestRecordMatchesPreservesCaseSensitiveSearch(t *testing.T) {
+	record := TypedRecord{Type: "a", Item: map[string]any{"name": "Web.example.com"}}
+	if !recordMatches(record, SearchOptions{Keywords: []string{"Web"}, CaseSensitive: true}) {
+		t.Fatal("case-sensitive search did not match exact case")
+	}
+	if recordMatches(record, SearchOptions{Keywords: []string{"web"}, CaseSensitive: true}) {
+		t.Fatal("case-sensitive search matched different case")
+	}
+}
+
 func TestRecordTypeColorMapsKnownTypes(t *testing.T) {
 	tests := map[string]string{
 		"host":           "#06b6d4",

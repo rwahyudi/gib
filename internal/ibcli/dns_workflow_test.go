@@ -2150,6 +2150,33 @@ func TestDNSSearchColumnsLimitJSONOutput(t *testing.T) {
 	assertJSONRecordColumns(t, stdout.String(), []string{"name", "comment"})
 }
 
+func TestDNSSearchMultipleTermsAndAnyGroup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns search should use fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	if err := app.writeCachedZones(profile, []map[string]any{
+		{"fqdn": "example.com", "view": "default", "zone_format": "FORWARD", "primary_type": "Grid"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write zone cache: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "web-cross.example.com", "address": "prd-target", "zone": "example.com", "comment": "DEV environment"},
+		{"type": "record:a", "name": "web-no-or.example.com", "address": "prd-target", "zone": "example.com", "comment": "qa environment"},
+		{"type": "record:a", "name": "other-prd.example.com", "address": "192.0.2.10", "zone": "example.com", "comment": "DEV environment"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "search", "WEB", "PRD", "--any", "tst", "--any", "dev", "--columns", "name"}); err != nil {
+		t.Fatalf("dns search: %v\nstdout:\n%s", err, stdout.String())
+	}
+	assertJSONRecordNames(t, stdout.String(), []string{"web-cross.example.com"})
+}
+
 func TestDNSSearchNoRecordsSkipsTableOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("dns search should use fresh cache, got %s %s", r.Method, r.URL.Path)

@@ -3124,19 +3124,22 @@ func isSecondaryZone(zone map[string]any) bool {
 }
 
 type SearchOptions struct {
-	Keyword          string
-	KeywordAliases   []string
-	KeywordAliasZone string
-	CaseSensitive    bool
-	Global           bool
-	Fuzzy            bool
-	Recursive        bool
-	Zone             string
-	View             string
-	Types            []string
-	Exclude          []string
-	Sort             RecordSort
-	Progress         SearchProgressFunc
+	Keyword           string
+	Keywords          []string
+	Any               []string
+	KeywordAliases    []string
+	KeywordAliasZone  string
+	KeywordAliasIndex int
+	CaseSensitive     bool
+	Global            bool
+	Fuzzy             bool
+	Recursive         bool
+	Zone              string
+	View              string
+	Types             []string
+	Exclude           []string
+	Sort              RecordSort
+	Progress          SearchProgressFunc
 }
 
 type SearchProgressFunc func(SearchProgressEvent)
@@ -3215,11 +3218,28 @@ func (a *App) collectSearchResults(profile Profile, client *WapiClient, options 
 		preferredZone, _ = a.resolveDNSZone(profile, "")
 	}
 	if options.Zone == "" {
-		var relativeName string
-		inferredZone, relativeName, inferred = inferSearchFQDNZone(options.Keyword, zones)
-		if inferred {
+		if strings.TrimSpace(options.Keyword) == "" && len(options.Keywords) > 0 {
+			options.Keyword = options.Keywords[0]
+		}
+		inferenceTerms := options.Keywords
+		if len(inferenceTerms) == 0 {
+			inferenceTerms = []string{options.Keyword}
+		}
+		inferenceIndex := 0
+		for index, term := range inferenceTerms {
+			var relativeName string
+			var found bool
+			inferredZone, relativeName, found = inferSearchFQDNZone(term, zones)
+			if !found {
+				continue
+			}
+			options.Keyword = term
+			inferenceIndex = index
+			inferred = true
 			options.KeywordAliases = appendSearchKeywordAlias(options.KeywordAliases, relativeName)
 			options.KeywordAliasZone = inferredZone
+			options.KeywordAliasIndex = inferenceIndex
+			break
 		}
 	}
 	if !options.Global {
@@ -3594,15 +3614,40 @@ func recordMatches(record TypedRecord, options SearchOptions) bool {
 			return false
 		}
 	}
-	return searchValuesMatchAny(values, searchKeywords(record, options), options.CaseSensitive, options.Fuzzy)
+	for _, keyword := range searchRequiredKeywords(record, options) {
+		if !searchValuesMatchAny(values, keyword, options.CaseSensitive, options.Fuzzy) {
+			return false
+		}
+	}
+	anyKeywords := uniqueSearchKeywords(options.Any)
+	if len(anyKeywords) > 0 && !searchValuesMatchAny(values, anyKeywords, options.CaseSensitive, options.Fuzzy) {
+		return false
+	}
+	return true
 }
 
-func searchKeywords(record TypedRecord, options SearchOptions) []string {
-	keywords := make([]string, 0, 1+len(options.KeywordAliases))
-	candidates := []string{options.Keyword}
-	if options.KeywordAliasZone == "" || isSameZone(cleanString(record.Item["zone"]), options.KeywordAliasZone) {
-		candidates = append(candidates, options.KeywordAliases...)
+func searchRequiredKeywords(record TypedRecord, options SearchOptions) [][]string {
+	terms := options.Keywords
+	if len(terms) == 0 && (strings.TrimSpace(options.Keyword) != "" || len(options.KeywordAliases) > 0) {
+		terms = []string{options.Keyword}
 	}
+	keywords := make([][]string, 0, len(terms))
+	for index, term := range terms {
+		term = strings.TrimSpace(term)
+		if term == "" {
+			continue
+		}
+		candidates := []string{term}
+		if index == options.KeywordAliasIndex && (options.KeywordAliasZone == "" || isSameZone(cleanString(record.Item["zone"]), options.KeywordAliasZone)) {
+			candidates = append(candidates, options.KeywordAliases...)
+		}
+		keywords = append(keywords, uniqueSearchKeywords(candidates))
+	}
+	return keywords
+}
+
+func uniqueSearchKeywords(candidates []string) []string {
+	keywords := make([]string, 0, len(candidates))
 	for _, keyword := range candidates {
 		keyword = strings.TrimSpace(keyword)
 		if keyword == "" {

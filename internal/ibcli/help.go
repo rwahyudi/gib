@@ -202,6 +202,8 @@ func (a *App) commandDetails(cmd *cobra.Command) string {
 		})
 	case "ib dns search":
 		return sectionWithRows("Search Records Usage", [][]string{
+			{"terms", "positional terms are all required; each matches name, value, or comment"},
+			{"any", "--any term is repeatable; at least one --any value must match"},
 			{"scope", "current zone by default; FQDN can infer zone; use -r child or -g view-wide"},
 			{"type", "-t host or --type a,txt filters record types"},
 			{"exclude", "-e keyword excludes matching name, value, or comment"},
@@ -443,7 +445,7 @@ func usageDetails(cmd *cobra.Command) string {
 	switch cmd.CommandPath() {
 	case "ib dns search":
 		return strings.Join([]string{
-			sectionWithLines("Example", []string{"ib dns search app", "ib dns search ben-dr-vss.net.latrobe.edu.au"}),
+			sectionWithLines("Example", []string{"ib dns search app", "ib dns search web prd", "ib dns search web --any tst --any dev", "ib dns search ben-dr-vss.net.latrobe.edu.au"}),
 			helpSubtitleStyle.Render(`Use "ib dns search -h" for more info.`),
 		}, "\n")
 	case "ib dns next-ip":

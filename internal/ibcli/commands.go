@@ -890,18 +890,29 @@ func (a *App) dnsSearchCommand() *cobra.Command {
 	var sortRaw string
 	var columnsRaw string
 	cmd := &cobra.Command{
-		Use:   "search <keyword>",
-		Short: "Search DNS records by name, value, or comment",
+		Use:   "search <term>...",
+		Short: "Search DNS records by required terms",
 		Example: strings.TrimSpace(`ib dns search app
 ib dns search ben-dr-vss.net.latrobe.edu.au
+ib dns search web prd
+ib dns search web --any tst --any dev
 ib dns search app -t host
 ib dns search app -z example.com
 ib dns search app -z example.com -r
 ib dns search app --global`),
-		Args:              exactArgsOrUsage(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return nil
+			}
+			if err := cmd.Usage(); err != nil {
+				return err
+			}
+			return errUsageDisplayed
+		},
 		ValidArgsFunction: completeFlagsAfterArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.Keyword = args[0]
+			options.Keywords = append([]string(nil), args...)
 			types, err := parseRecordTypes(typeFilter)
 			if err != nil {
 				return err
@@ -941,6 +952,7 @@ ib dns search app --global`),
 	cmd.Flags().BoolVarP(&options.Fuzzy, "fuzzy", "f", false, "enable fuzzy matching")
 	cmd.Flags().StringVarP(&typeFilter, "type", "t", "", "record type filter, comma-separated")
 	_ = cmd.RegisterFlagCompletionFunc("type", recordTypeFlagCompletion)
+	cmd.Flags().StringArrayVar(&options.Any, "any", nil, "require at least one of these terms to match; repeatable")
 	cmd.Flags().StringArrayVarP(&options.Exclude, "exclude", "e", nil, "exclude records matching keyword")
 	addRecordSortFlag(cmd, &sortRaw)
 	addRecordColumnsFlag(cmd, &columnsRaw)
