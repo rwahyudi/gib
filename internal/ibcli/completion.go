@@ -181,7 +181,14 @@ func (a *App) editArgCompletion(cmd *cobra.Command, args []string, toComplete st
 	case 0:
 		return recordTypeCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
 	case 1:
-		return a.completeRecordNames(cmd, commandZoneFlag(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
+		recordType, err := normalizeRecordTypeArg(args[0])
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		if recordType == "ptr" {
+			return a.completePTRRecordNames(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+		}
+		return a.completeRecordNamesForType(cmd, commandZoneFlag(cmd), recordType, toComplete), cobra.ShellCompDirectiveNoFileComp
 	case 2:
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	default:
@@ -939,6 +946,10 @@ func matchingVLANIdentifiers(vlans []map[string]any, toComplete string) []string
 }
 
 func (a *App) completeRecordNames(cmd *cobra.Command, explicitZone, toComplete string) []string {
+	return a.completeRecordNamesForType(cmd, explicitZone, "", toComplete)
+}
+
+func (a *App) completeRecordNamesForType(cmd *cobra.Command, explicitZone, recordType, toComplete string) []string {
 	profile, err := a.loadConfig(true)
 	if err != nil {
 		return nil
@@ -955,6 +966,9 @@ func (a *App) completeRecordNames(cmd *cobra.Command, explicitZone, toComplete s
 	records, err := a.cachedRecordNamesForCompletion(profile, zone)
 	if err != nil {
 		return nil
+	}
+	if recordType != "" {
+		return matchingRecordNamesForType(records, recordType, toComplete)
 	}
 	return matchingRecordNames(records, toComplete)
 }
@@ -1059,6 +1073,18 @@ func matchingRecordNames(records []TypedRecord, toComplete string) []string {
 		return strings.ToLower(recordCompletionName(rows[i])) < strings.ToLower(recordCompletionName(rows[j]))
 	})
 	return rows
+}
+
+func matchingRecordNamesForType(records []TypedRecord, recordType, toComplete string) []string {
+	filtered := make([]TypedRecord, 0, len(records))
+	for _, record := range records {
+		cachedType := strings.TrimSpace(record.Type)
+		// A host's address is returned as an A record by some WAPI endpoints.
+		if strings.EqualFold(cachedType, recordType) || (recordType == "host" && strings.EqualFold(cachedType, "a")) {
+			filtered = append(filtered, record)
+		}
+	}
+	return matchingRecordNames(filtered, toComplete)
 }
 
 func matchingPTRRecordNames(records []TypedRecord, toComplete string) []string {

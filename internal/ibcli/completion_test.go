@@ -1066,6 +1066,45 @@ func TestDNSEditCompletesRecordNamesAndTypes(t *testing.T) {
 	}
 }
 
+func TestDNSEditCompletesOnlySelectedRecordType(t *testing.T) {
+	app, stdout := completionAppWithRecords(t)
+	profile, err := app.loadConfig(true)
+	if err != nil {
+		t.Fatalf("load profile: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "app", "address": "192.0.2.10", "zone": "example.com"},
+		{"type": "record:txt", "name": "app", "text": "v=spf1 -all", "zone": "example.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"__complete", "dns", "edit", "TXT", ""}); err != nil {
+		t.Fatalf("record completion: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "app\tTXT v=spf1 -all") {
+		t.Fatalf("completion output missing TXT record:\n%s", output)
+	}
+	if strings.Contains(output, "app\tA 192.0.2.10") {
+		t.Fatalf("completion output included a record:\n%s", output)
+	}
+}
+
+func TestDNSEditPTRCompletesReverseRecordIPs(t *testing.T) {
+	app, stdout := completionAppWithPTRRecords(t)
+	if err := app.Execute([]string{"__complete", "dns", "edit", "PTR", "192.0.2."}); err != nil {
+		t.Fatalf("ptr completion: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "192.0.2.2\tPTR two.example.com") || !strings.Contains(output, "192.0.2.10\tPTR app.example.com") {
+		t.Fatalf("ptr completion output =\n%s", output)
+	}
+	if strings.Contains(output, "app\tA 192.0.2.10") {
+		t.Fatalf("ptr completion included forward record names:\n%s", output)
+	}
+}
+
 func TestSearchCompletesFlagsAfterGlobalFlag(t *testing.T) {
 	app := testApp(t)
 	var stdout bytes.Buffer
