@@ -977,6 +977,31 @@ func TestDNSDeleteCompletesRecordTypesThenRecordNames(t *testing.T) {
 	}
 }
 
+func TestDNSDeleteCompletesOnlySelectedRecordType(t *testing.T) {
+	app, stdout := completionAppWithRecords(t)
+	profile, err := app.loadConfig(true)
+	if err != nil {
+		t.Fatalf("load profile: %v", err)
+	}
+	if err := app.writeCachedRecords(profile, "example.com", "2026050801", []map[string]any{
+		{"type": "record:a", "name": "app", "address": "192.0.2.10", "zone": "example.com"},
+		{"type": "record:txt", "name": "app", "text": "v=spf1 -all", "zone": "example.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("write record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"__complete", "dns", "delete", "TXT", ""}); err != nil {
+		t.Fatalf("record completion: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "app\tTXT v=spf1 -all") {
+		t.Fatalf("completion output missing TXT record:\n%s", output)
+	}
+	if strings.Contains(output, "app\tA 192.0.2.10") {
+		t.Fatalf("completion output included a record:\n%s", output)
+	}
+}
+
 func TestDNSDeletePTRCompletesReverseRecordIPs(t *testing.T) {
 	app, stdout := completionAppWithPTRRecords(t)
 	if err := app.Execute([]string{"__complete", "dns", "delete", "ptr", "192.0.2."}); err != nil {

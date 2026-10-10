@@ -161,10 +161,14 @@ func (a *App) existingRecordArgCompletion(cmd *cobra.Command, args []string, toC
 	case 0:
 		return recordTypeCompletions(toComplete), cobra.ShellCompDirectiveNoFileComp
 	case 1:
-		if strings.EqualFold(strings.TrimSpace(args[0]), "ptr") {
+		recordType, err := normalizeRecordTypeArg(args[0])
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		if recordType == "ptr" {
 			return a.completePTRRecordNames(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 		}
-		return a.completeRecordNames(cmd, commandZoneFlag(cmd), toComplete), cobra.ShellCompDirectiveNoFileComp
+		return a.completeRecordNamesForType(cmd, commandZoneFlag(cmd), recordType, toComplete), cobra.ShellCompDirectiveNoFileComp
 	case 2:
 		return a.completeZoneNames(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 	default:
