@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/rwahyudi/gib/releases/latest"><img src="https://img.shields.io/github/v/release/rwahyudi/gib?color=0ea5e9" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/go-1.24-00ADD8" alt="Go 1.24">
+  <img src="https://img.shields.io/badge/go-1.24.2-00ADD8" alt="Go 1.24.2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="MIT license"></a>
 </p>
 
@@ -111,7 +111,7 @@ Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, audi
 | --- | --- | --- |
 | Configure access | `ib config new --default` | Validates server reachability, primary/read-endpoint TLS trust, credentials, WAPI version, DNS defaults, and optional audit logging. |
 | List records | `ib dns list` | Uses the current DNS view/zone unless `--view` or `--zone` is supplied. |
-| Search records | `ib dns search app` | Searches record name, value, and comment fields case-insensitively by default. Multiple positional terms must all match; repeated `--any` terms require at least one match. Add `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
+| Search records | `ib dns search app` | Searches record name, value, and comment fields case-insensitively by default. Multiple positional terms must all match; repeated `--any` terms require at least one match. Use `--case-sensitive` to preserve case. Add `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
 | Create records | `ib dns create host app 192.0.2.10 -c "Application host"` | Type-first syntax keeps A, AAAA, CNAME, host, MX, NS, PTR, SRV, and TXT workflows consistent. |
 | Edit or delete records | `ib dns edit host app 192.0.2.20` | Deletes match forward DNS names case-insensitively and prompts for confirmation unless `-y` is used. |
 | Delete a zone | `ib dns zone delete example.com` | Requires an interactive confirmation; use `-y` only for deliberate automation. |
@@ -129,7 +129,12 @@ ib dns list --sort name --columns name,value,ttl
 ib dns search web prd
 ib dns search web --any tst --any dev
 ib dns search web prd --any tst --any dev
+ib dns search "web app" prd
+ib dns search Web PRD --case-sensitive
 ib dns search app --global --sort zone --columns zone,name,value -o csv
+
+Search terms are matched against each record's name, value, and comment fields. Terms can match different fields on the same record; for example, `web` may match the name while `prd` matches the comment. Quote a term containing spaces.
+
 ib dns create ptr 192.0.2.10 app.example.com
 ib dns delete a app
 ib net address 192.0.2.10 --network-view default

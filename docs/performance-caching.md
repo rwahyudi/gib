@@ -162,6 +162,8 @@ ib config cache status
 ib config cache clear
 ```
 
+Search matching accepts multiple required terms and repeatable `--any` alternatives; matching remains across record name, value, and comment fields. For example, `ib dns search web prd --any tst --any dev --global --debug` requires `web` and `prd`, plus either `tst` or `dev`, while printing timing lines to stderr.
+
 `ib config cache clear` fences in-flight DHCP refreshes and removes the
 selected local/global cache rows. The fence remains in Badger so a refresh
 that was already running cannot resurrect cleared DHCP reservations.
