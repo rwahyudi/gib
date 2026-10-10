@@ -2171,7 +2171,7 @@ func TestDNSSearchMultipleTermsAndAnyGroup(t *testing.T) {
 		t.Fatalf("write record cache: %v", err)
 	}
 
-	if err := app.Execute([]string{"-o", "json", "dns", "search", "WEB", "PRD", "--any", "tst", "--any", "dev", "--columns", "name"}); err != nil {
+	if err := app.Execute([]string{"-o", "json", "dns", "search", "WEB", "PRD", "--any", "tst", "--or", "dev", "--columns", "name"}); err != nil {
 		t.Fatalf("dns search: %v\nstdout:\n%s", err, stdout.String())
 	}
 	assertJSONRecordNames(t, stdout.String(), []string{"web-cross.example.com"})

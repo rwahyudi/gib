@@ -57,9 +57,10 @@ Stdout remains reserved for normal table, JSON, or CSV output.
 .PP
 DNS commands use `--view`/`-v` and `--zone`/`-z` as one-command context
 overrides where applicable. Record list and search support `--type`,
-`--exclude`, `--sort`, and `--columns`; search also supports repeated `--any`,
-`--global`, `--recursive`, `--fuzzy`, and `--case-sensitive`. Positional search
-terms are required together (AND); `--any` terms form an OR group. Matching is
+`--exclude`, `--sort`, and `--columns`; search also supports repeated `--any`
+or its `--or` alias, `--global`, `--recursive`, `--fuzzy`, and `--case-sensitive`.
+Positional search terms are required together (AND); `--any`/`--or` terms form an
+OR group. Matching is
 case-insensitive by default across name, value, and comment. Record create and edit accept
 `--comment`, `--ttl`, and `--noptr`; delete accepts `--yes`.
 When duplicate forward records match, interactive table mode allows selecting
@@ -129,18 +130,18 @@ Larger IPv4 reverse CIDR scopes can include matching child reverse zones.
 .B ib dns search app
 Search records by name, value, or comment. Matching is case-insensitive by
 default and spans all three fields. Multiple positional terms must all match;
-repeated --any terms require at least one of those terms to match. Use
---case-sensitive to make matching case-sensitive.
+repeated --any terms, or their --or aliases, require at least one of those terms
+to match. Use --case-sensitive to make matching case-sensitive.
 .TP
 .B ib dns search web prd
 Search for records matching both web and prd across the name, value, and
 comment fields.
 .TP
-.B ib dns search web --any tst --any dev
-Search for records matching web and at least one of tst or dev.
+.B ib dns search web --or tst --or dev
+Search for records matching web and at least one of tst or dev; --or is an alias for --any.
 .TP
-.B ib dns search web prd --any tst --any dev
-Search for records matching both web and prd, plus at least one of tst or dev.
+.B ib dns search web prd --any tst --or dev
+Search for records matching both web and prd, plus at least one of tst or dev; --any and --or can be mixed.
 .TP
 .B ib dns zone delete example.com
 Delete a DNS zone after an interactive confirmation showing its zone, view, and

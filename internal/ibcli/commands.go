@@ -895,7 +895,7 @@ func (a *App) dnsSearchCommand() *cobra.Command {
 		Example: strings.TrimSpace(`ib dns search app
 ib dns search ben-dr-vss.net.latrobe.edu.au
 ib dns search web prd
-ib dns search web --any tst --any dev
+ib dns search web --or tst --or dev
 ib dns search app -t host
 ib dns search app -z example.com
 ib dns search app -z example.com -r
@@ -952,7 +952,8 @@ ib dns search app --global`),
 	cmd.Flags().BoolVarP(&options.Fuzzy, "fuzzy", "f", false, "enable fuzzy matching")
 	cmd.Flags().StringVarP(&typeFilter, "type", "t", "", "record type filter, comma-separated")
 	_ = cmd.RegisterFlagCompletionFunc("type", recordTypeFlagCompletion)
-	cmd.Flags().StringArrayVar(&options.Any, "any", nil, "require at least one of these terms to match; repeatable")
+	cmd.Flags().StringArrayVar(&options.Any, "any", nil, "require at least one of these terms to match; repeatable (alias: --or)")
+	cmd.Flags().StringArrayVar(&options.Any, "or", nil, "alias for --any")
 	cmd.Flags().StringArrayVarP(&options.Exclude, "exclude", "e", nil, "exclude records matching keyword")
 	addRecordSortFlag(cmd, &sortRaw)
 	addRecordColumnsFlag(cmd, &columnsRaw)
