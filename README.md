@@ -34,7 +34,7 @@ sudo dnf copr enable rwahyudi/gib
 sudo dnf install gib
 ```
 
-GitHub release assets use stable filenames, so `/releases/latest/download/...` always points at the newest published version. Linux release assets are built with `CGO_ENABLED=0`, so they do not require a specific glibc version.
+GitHub release assets use stable filenames, so `/releases/latest/download/...` always points at the newest published version. Linux release assets are built with `CGO_ENABLED=0`, so they do not require a specific glibc version. macOS archives are published as `ib_darwin_amd64.tar.gz` and `ib_darwin_arm64.tar.gz` and are used by the Homebrew cask.
 
 Linux tarball:
 

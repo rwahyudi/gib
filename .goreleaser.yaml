@@ -122,6 +122,7 @@ homebrew_casks:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
       branch: main
+    directory: Casks
     homepage: https://github.com/rwahyudi/gib
     description: Infoblox DNS command line client.
     license: MIT

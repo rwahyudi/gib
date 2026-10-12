@@ -12,10 +12,13 @@ at `/releases/latest/download/...` without embedding the version:
 - `ib_linux_amd64.tar.gz`
 - `ib_linux_amd64.rpm`
 - `ib_linux_amd64.deb`
+- `ib_darwin_amd64.tar.gz`
+- `ib_darwin_arm64.tar.gz`
 - `ib_windows_amd64.zip`
 - `checksums.txt`
 
-GoReleaser builds Linux and Windows amd64 binaries from `./cmd/ib`. Release
+GoReleaser builds Linux and Windows amd64 binaries plus Darwin amd64 and arm64
+binaries from `./cmd/ib`. Release
 builds inject the version and build date into `internal/ibcli` with ldflags, so
 `ib -v` should show the tag version and an AEST build time.
 
@@ -52,7 +55,7 @@ Common files to check are:
 5. Confirm the README asset names match `.goreleaser.yaml`:
 
 ```bash
-rg 'releases/latest/download|ib_linux_amd64|ib_windows_amd64|ib_[0-9]+\.[0-9]+\.[0-9]+|releases/download/v[0-9]' README.md
+rg 'releases/latest/download|ib_linux_amd64|ib_darwin_(amd64|arm64)|ib_windows_amd64|ib_[0-9]+\.[0-9]+\.[0-9]+|releases/download/v[0-9]' README.md
 rg 'name_template|file_name_template|formats|package_name|bindir' .goreleaser.yaml
 ```
 
@@ -131,7 +134,7 @@ GoReleaser then:
 2. Builds `ib.exe` for Windows amd64 with CGO disabled.
 3. Injects `.Version` and `.Date` into `internal/ibcli.Version` and
    `internal/ibcli.BuildDate`.
-4. Creates the Linux tarball and Windows ZIP with README and license files.
+4. Creates the Linux and Darwin tarballs plus the Windows ZIP with README and license files.
 5. Creates Linux RPM and DEB packages with nFPM. These install `ib` to
    `/usr/local/bin/ib` and package Bash completion under
    `/etc/bash_completion.d/ib`, plus the manual page under
@@ -187,6 +190,8 @@ Confirm the latest stable URLs resolve:
 curl -fI https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64.tar.gz
 curl -fI https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64.rpm
 curl -fI https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64.deb
+curl -fI https://github.com/rwahyudi/gib/releases/latest/download/ib_darwin_amd64.tar.gz
+curl -fI https://github.com/rwahyudi/gib/releases/latest/download/ib_darwin_arm64.tar.gz
 curl -fI https://github.com/rwahyudi/gib/releases/latest/download/ib_windows_amd64.zip
 ```
 
