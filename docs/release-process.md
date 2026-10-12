@@ -23,6 +23,13 @@ Linux and Windows release artifacts are built with `CGO_ENABLED=0` using the
 cgo-free Badger cache, so they do not link against the build host's glibc or
 need MinGW-w64 for cache support.
 
+Tagged releases also update the Homebrew cask in the `rwahyudi/homebrew-tap`
+repository. The release automation requires a repository secret named
+`HOMEBREW_TAP_TOKEN`; its token must have cross-repository `contents: write`
+access to `rwahyudi/homebrew-tap`. Keep this token out of source files and
+logs. Without it, the GitHub release can succeed while the Homebrew cask
+remains stale.
+
 ## Step 1: Choose and Prepare the Version
 
 1. Choose the next semantic version as `VERSION` and tag it as `vVERSION`.
@@ -182,6 +189,19 @@ curl -fI https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64
 curl -fI https://github.com/rwahyudi/gib/releases/latest/download/ib_linux_amd64.deb
 curl -fI https://github.com/rwahyudi/gib/releases/latest/download/ib_windows_amd64.zip
 ```
+
+Verify the Homebrew update from a macOS workstation after the tagged release:
+
+```bash
+brew update
+brew info --cask rwahyudi/tap/ib
+brew upgrade --cask rwahyudi/tap/ib  # or: brew install --cask rwahyudi/tap/ib
+ib -v
+ib --help
+```
+
+Confirm that `brew info --cask` shows the new version and that the installed
+binary's version matches the release tag.
 
 Smoke-test the tarball without installing it globally:
 

@@ -29,6 +29,20 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X github.com/rwahyudi/gib/internal/ibcli.Version={{ .Version }} -X github.com/rwahyudi/gib/internal/ibcli.BuildDate={{ .Date }}
+  - id: ib-darwin
+    main: ./cmd/ib
+    binary: ib
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/rwahyudi/gib/internal/ibcli.Version={{ .Version }} -X github.com/rwahyudi/gib/internal/ibcli.BuildDate={{ .Date }}
 
 archives:
   - id: ib-linux
@@ -51,6 +65,20 @@ archives:
       - README.md
       - LICENSE
       - THIRD_PARTY_LICENSES.md
+  - id: ib-darwin
+    ids:
+      - ib-darwin
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - THIRD_PARTY_LICENSES.md
+      - src: packaging/man/ib.1
+        dst: man/ib.1
+      - src: packaging/bash_completion/ib
+        dst: bash_completion/ib
 
 nfpms:
   - id: ib-linux-packages
@@ -84,6 +112,29 @@ nfpms:
         dst: /usr/share/doc/ib/THIRD_PARTY_LICENSES.md
         file_info:
           mode: 0644
+
+homebrew_casks:
+  - ids:
+      - ib-darwin
+    name: ib
+    repository:
+      owner: rwahyudi
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      branch: main
+    homepage: https://github.com/rwahyudi/gib
+    description: Infoblox DNS command line client.
+    license: MIT
+    binaries:
+      - ib
+    manpages:
+      - man/ib.1
+    completions:
+      bash: bash_completion/ib
+    custom_block: |
+      test do
+        system "#{staged_path}/ib", "-v"
+      end
 
 checksum:
   name_template: checksums.txt

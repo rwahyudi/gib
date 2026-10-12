@@ -64,6 +64,17 @@ ib config completion bash | sudo tee /etc/bash_completion.d/ib >/dev/null
 
 Open a new shell after installing completion.
 
+macOS (Homebrew):
+
+```bash
+brew install --cask rwahyudi/tap/ib
+ib -v
+ib --help
+```
+
+Tagged releases update the `rwahyudi/tap` cask. To upgrade an existing
+installation, run `brew update` followed by `brew upgrade --cask rwahyudi/tap/ib`.
+
 Windows ZIP:
 
 ```powershell
