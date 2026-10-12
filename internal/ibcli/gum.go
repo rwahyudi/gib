@@ -67,7 +67,7 @@ func (g *Gum) Input(label, defaultValue string, secret bool) (string, error) {
 
 func (g *Gum) Confirm(label string, defaultValue bool) (bool, error) {
 	if g.interactive() && g.installed() {
-		cmd := exec.Command("gum", gumConfirmArgs(label, defaultValue)...)
+		cmd := exec.Command("gum", gumConfirmArgs(label, defaultValue)...) // #nosec G204 -- gum is a fixed interactive helper and arguments are generated internally
 		cmd.Stdin = g.in
 		cmd.Stdout = g.out
 		cmd.Stderr = g.err
@@ -137,7 +137,7 @@ func (g *Gum) ListFilter(label string, choices []string, defaultValue string, it
 }
 
 func (g *Gum) capture(args ...string) (string, error) {
-	cmd := exec.Command("gum", args...)
+	cmd := exec.Command("gum", args...) // #nosec G204 -- gum is a fixed interactive helper and arguments are generated internally
 	var stdout bytes.Buffer
 	cmd.Stdin = g.in
 	cmd.Stdout = &stdout

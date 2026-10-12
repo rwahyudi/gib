@@ -12,7 +12,7 @@ On a Fedora packaging workstation:
 sudo dnf install copr-cli fedpkg go2rpm+vendor mock rpm-build rpmdevtools rpmlint spectool
 ```
 
-The spec requires a Go toolchain new enough for the module's `go 1.24.2`
+The spec requires a Go toolchain new enough for the module's `go 1.26.9`
 directive. Start with EPEL 10. Add EPEL 9 only after confirming its buildroot
 has an acceptable Go toolchain.
 

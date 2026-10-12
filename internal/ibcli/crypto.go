@@ -49,7 +49,7 @@ func encryptFernet(keyText, plaintext string) (string, error) {
 	token := make([]byte, 0, 1+8+len(iv)+len(ciphertext)+32)
 	token = append(token, 0x80)
 	timestamp := make([]byte, 8)
-	binary.BigEndian.PutUint64(timestamp, uint64(time.Now().Unix()))
+	binary.BigEndian.PutUint64(timestamp, uint64(time.Now().Unix())) // #nosec G115 -- the timestamp is encoded as an opaque token field
 	token = append(token, timestamp...)
 	token = append(token, iv...)
 	token = append(token, ciphertext...)
@@ -117,7 +117,7 @@ func decodeFernetKey(keyText string) ([]byte, error) {
 
 func pkcs7Pad(data []byte, blockSize int) []byte {
 	padding := blockSize - len(data)%blockSize
-	padText := bytes.Repeat([]byte{byte(padding)}, padding)
+	padText := bytes.Repeat([]byte{byte(padding)}, padding) // #nosec G115 -- PKCS#7 padding is bounded by the cipher block size
 	return append(append([]byte{}, data...), padText...)
 }
 

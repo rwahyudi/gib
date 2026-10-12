@@ -76,12 +76,12 @@ func (a *App) installPowerShellCompletion(home string) (string, []string, error)
 		if err := os.MkdirAll(filepath.Dir(profilePath), 0o700); err != nil {
 			return "", nil, err
 		}
-		raw, err := os.ReadFile(profilePath)
+		raw, err := os.ReadFile(profilePath) // #nosec G304 -- the path comes from the PowerShell profile resolver
 		if err != nil && !os.IsNotExist(err) {
 			return "", nil, err
 		}
 		updated := upsertPowerShellProfileBlock(string(raw), block)
-		if err := os.WriteFile(profilePath, []byte(updated), 0o644); err != nil {
+		if err := os.WriteFile(profilePath, []byte(updated), 0o644); err != nil { // #nosec G703,G306 -- the resolved user profile is the intended completion target
 			return "", nil, err
 		}
 	}
@@ -141,7 +141,7 @@ func currentUserPowerShellProfilePath(shell string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.Command(shellPath, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$PROFILE.CurrentUserCurrentHost")
+	cmd := exec.Command(shellPath, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$PROFILE.CurrentUserCurrentHost") // #nosec G204 -- shellPath is resolved from the trusted system PATH
 	raw, err := cmd.Output()
 	if err != nil {
 		return "", err

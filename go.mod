@@ -1,6 +1,6 @@
 module github.com/rwahyudi/gib
 
-go 1.24.2
+go 1.26.9
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0

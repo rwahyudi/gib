@@ -27,7 +27,7 @@ func credentialProtectionDescription() string {
 }
 
 func protectConfigDir(path string) error {
-	if err := os.Chmod(path, 0o700); err != nil {
+	if err := os.Chmod(path, 0o700); err != nil { // #nosec G302 -- configuration directories intentionally need owner traversal permissions
 		info, statErr := os.Stat(path)
 		if statErr == nil && info.IsDir() && info.Mode().Perm() == 0o700 {
 			return nil
@@ -44,7 +44,7 @@ func protectPrivateFile(path string) error {
 func sessionBaseDir(kind string) string {
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if runtimeDir != "" {
-		if info, err := os.Stat(runtimeDir); err == nil && info.IsDir() {
+		if info, err := os.Stat(runtimeDir); err == nil && info.IsDir() { // #nosec G703 -- XDG_RUNTIME_DIR is the OS-provided per-user runtime directory
 			return filepath.Join(runtimeDir, "ib", kind)
 		}
 	}

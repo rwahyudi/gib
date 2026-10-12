@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -98,7 +97,7 @@ func (a *App) newWAPIHTTPClient(verifySSL bool, timeoutSeconds int, fingerprint 
 			tlsConfig.InsecureSkipVerify = true // #nosec G402 -- operator-controlled Infoblox profile setting
 		}
 		if fingerprint != "" {
-			tlsConfig.VerifyPeerCertificate = certificateFingerprintVerifier(fingerprint)
+			tlsConfig.VerifyConnection = certificateFingerprintVerifier(fingerprint)
 		}
 		if a.tlsRootCAs != nil {
 			tlsConfig.RootCAs = a.tlsRootCAs
@@ -111,13 +110,13 @@ func (a *App) newWAPIHTTPClient(verifySSL bool, timeoutSeconds int, fingerprint 
 	}
 }
 
-func certificateFingerprintVerifier(fingerprint string) func([][]byte, [][]*x509.Certificate) error {
+func certificateFingerprintVerifier(fingerprint string) func(tls.ConnectionState) error {
 	expected := normalizeCertificateFingerprint(fingerprint)
-	return func(rawCertificates [][]byte, _ [][]*x509.Certificate) error {
-		if len(rawCertificates) == 0 {
+	return func(state tls.ConnectionState) error {
+		if len(state.PeerCertificates) == 0 {
 			return cliError("TLS peer did not provide a certificate")
 		}
-		sum := sha256.Sum256(rawCertificates[0])
+		sum := sha256.Sum256(state.PeerCertificates[0].Raw)
 		if actual := normalizeCertificateFingerprint(fmt.Sprintf("%X", sum[:])); actual != expected {
 			return cliError("TLS certificate fingerprint does not match the configured profile")
 		}

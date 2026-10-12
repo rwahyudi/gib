@@ -1,6 +1,7 @@
 package ibcli
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net/netip"
 	"os"
@@ -1888,12 +1889,9 @@ func ipv4AddrToUint32(addr netip.Addr) uint32 {
 }
 
 func uint32ToIPv4Addr(value uint32) netip.Addr {
-	return netip.AddrFrom4([4]byte{
-		byte(value >> 24),
-		byte(value >> 16),
-		byte(value >> 8),
-		byte(value),
-	})
+	var raw [4]byte
+	binary.BigEndian.PutUint32(raw[:], value)
+	return netip.AddrFrom4(raw)
 }
 
 func networkCIDRPrefixHierarchyExpansionEnabled(prefix string) bool {

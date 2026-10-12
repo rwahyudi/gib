@@ -177,7 +177,7 @@ func (a *App) writeAuditFile(path string, line []byte) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- the validated audit path is selected by the operator
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (a *App) testAuditLogFileWritable(path string) error {
 		return err
 	}
 	dir := filepath.Dir(path)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- the validated audit path is selected by the operator
 	if err != nil {
 		return err
 	}
@@ -280,7 +280,7 @@ func (a *App) protectAuditLogFile(path string) error {
 	if err := chownPathGroupFunc(path, group); err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o660)
+	return os.Chmod(path, 0o660) // #nosec G302 -- global audit logs intentionally allow the configured group to read them
 }
 
 func redactAuditData(data map[string]any) map[string]any {

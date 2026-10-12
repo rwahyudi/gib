@@ -70,20 +70,20 @@ func dataBlobFromBytes(data []byte) windows.DataBlob {
 	if len(data) == 0 {
 		return windows.DataBlob{}
 	}
-	return windows.DataBlob{Size: uint32(len(data)), Data: &data[0]}
+	return windows.DataBlob{Size: uint32(len(data)), Data: &data[0]} // #nosec G115 -- Windows DataBlob sizes are bounded by the in-memory byte slice
 }
 
 func bytesFromDataBlob(blob windows.DataBlob) []byte {
 	if blob.Data == nil || blob.Size == 0 {
 		return nil
 	}
-	raw := unsafe.Slice(blob.Data, int(blob.Size))
+	raw := unsafe.Slice(blob.Data, int(blob.Size)) // #nosec G103 -- the Windows API supplies a validated DataBlob pointer and size
 	return append([]byte(nil), raw...)
 }
 
 func freeDataBlob(blob windows.DataBlob) {
 	if blob.Data != nil {
-		_, _ = windows.LocalFree(windows.Handle(unsafe.Pointer(blob.Data)))
+		_, _ = windows.LocalFree(windows.Handle(unsafe.Pointer(blob.Data))) // #nosec G103 -- the pointer belongs to the Windows API allocation being released
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 const (
 	cacheRefreshStartedAtEnv  = "IB_CACHE_REFRESH_STARTED_AT"
 	cacheRefreshProfileKeyEnv = "IB_CACHE_REFRESH_PROFILE_KEY"
-	cacheRefreshLeaseTokenEnv = "IB_CACHE_REFRESH_LEASE_TOKEN"
+	cacheRefreshLeaseTokenEnv = "IB_CACHE_REFRESH_LEASE_TOKEN" // #nosec G101 -- this is an environment variable name, not a credential
 	cacheRefreshPrimaryEnv    = "IB_CACHE_REFRESH_PRIMARY"
 	networkViewReturnFields   = "name,comment"
 	ipv4AddressReturnFields   = "ip_address,network,network_view,status,types,names,mac_address,lease_state,usage,comment,extattrs"

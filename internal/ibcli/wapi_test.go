@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -96,11 +98,19 @@ func TestCertificateFingerprintVerifierRejectsDifferentCertificate(t *testing.T)
 	trusted := []byte("trusted certificate")
 	sum := sha256.Sum256(trusted)
 	verify := certificateFingerprintVerifier(fmt.Sprintf("%X", sum[:]))
-	if err := verify([][]byte{trusted}, nil); err != nil {
+	certificate := &x509.Certificate{Raw: trusted}
+	if err := verify(tls.ConnectionState{PeerCertificates: []*x509.Certificate{certificate}}); err != nil {
 		t.Fatalf("matching certificate rejected: %v", err)
 	}
-	if err := verify([][]byte{[]byte("replacement certificate")}, nil); err == nil {
+	if err := verify(tls.ConnectionState{PeerCertificates: []*x509.Certificate{{Raw: []byte("replacement certificate")}}}); err == nil {
 		t.Fatal("replacement certificate was accepted")
+	}
+}
+
+func TestCertificateFingerprintVerifierRejectsMissingCertificate(t *testing.T) {
+	verify := certificateFingerprintVerifier(strings.Repeat("00", sha256.Size))
+	if err := verify(tls.ConnectionState{}); err == nil || !strings.Contains(err.Error(), "did not provide a certificate") {
+		t.Fatalf("missing certificate error = %v", err)
 	}
 }
 

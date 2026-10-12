@@ -171,7 +171,7 @@ func (a *App) protectConfigDirForScope(strict bool) error {
 			return err
 		}
 	}
-	if err := os.Chmod(a.ConfigDir, 0o2770); err != nil {
+	if err := os.Chmod(a.ConfigDir, 0o2770); err != nil { // #nosec G302 -- shared global configuration requires group access
 		if strict {
 			return err
 		}
@@ -201,7 +201,7 @@ func (a *App) protectCacheFileForScope(strict bool) error {
 	if err := chownPathGroupFunc(a.cachePath(), group); err != nil && strict {
 		return err
 	}
-	if err := os.Chmod(a.cachePath(), 0o2770); err != nil && strict {
+	if err := os.Chmod(a.cachePath(), 0o2770); err != nil && strict { // #nosec G302 -- shared global cache requires group access
 		return err
 	}
 	return filepath.WalkDir(a.cachePath(), func(path string, entry fs.DirEntry, err error) error {
@@ -218,7 +218,7 @@ func (a *App) protectCacheFileForScope(strict bool) error {
 		if entry.IsDir() {
 			mode = 0o2770
 		}
-		if err := os.Chmod(path, mode); err != nil && strict {
+		if err := os.Chmod(path, mode); err != nil && strict { // #nosec G122 -- the cache tree is intentionally updated during one controlled walk
 			return err
 		}
 		return nil

@@ -411,7 +411,7 @@ func decryptPasswordAt(password string, keyFile string) (string, error) {
 	if !strings.HasPrefix(password, encryptedPasswordPrefix) {
 		return password, nil
 	}
-	raw, err := os.ReadFile(keyFile)
+	raw, err := os.ReadFile(keyFile) // #nosec G304 -- keyFile is the validated application configuration path
 	if err != nil {
 		return "", cliError("missing encryption key file at %s; run: ib config new [PROFILE]", keyFile)
 	}
@@ -419,7 +419,7 @@ func decryptPasswordAt(password string, keyFile string) (string, error) {
 }
 
 func readINI(path string) (map[string]map[string]string, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- path is a validated application configuration path
 	if err != nil {
 		return nil, err
 	}
@@ -956,7 +956,7 @@ func readSessionValueFromSessionFiles(kind, prefix, key, profileName string) str
 }
 
 func readSessionValue(path, key, profileName string, parentPID int) string {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- path is the validated session file path
 	if err != nil {
 		return ""
 	}
