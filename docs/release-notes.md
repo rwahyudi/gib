@@ -7,6 +7,12 @@
 - Typed `ib dns edit` and `ib dns delete` lookups query the requested record type first, avoiding unnecessary WAPI scans; the broader lookup is retained only to report an actionable record-type mismatch.
 - Optional DNS audit logging now records failed create, edit, and delete WAPI attempts, including explicit PTR operations, as redacted JSON Lines events with `result: "failure"`. A forward success followed by a PTR sync failure remains represented by separate events.
 
+## v0.4.5 - 2026-10-13
+
+### Packaging
+
+- Removed the legacy `test do` block from the generated Homebrew cask so current Homebrew versions can load and install it.
+
 ## v0.4.4 - 2026-10-13
 
 ### Packaging

@@ -132,10 +132,6 @@ homebrew_casks:
       - man/ib.1
     completions:
       bash: bash_completion/ib
-    custom_block: |
-      test do
-        system "#{staged_path}/ib", "-v"
-      end
 
 checksum:
   name_template: checksums.txt
