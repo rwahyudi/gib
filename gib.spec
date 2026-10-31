@@ -35,7 +35,7 @@ Source2:        go-vendor-tools.toml
 BuildRequires:  bash-completion
 BuildRequires:  go-rpm-macros
 BuildRequires:  go-vendor-tools
-BuildRequires:  golang >= 1.26.9
+BuildRequires:  golang >= 1.26.10
 
 Requires:       ca-certificates
 
