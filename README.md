@@ -9,7 +9,7 @@
 It is built for daily record and network tasks: compact tables for humans, plain JSON/CSV for automation, safe read/write routing, dynamic completion, and cache-backed searches that stay responsive on large zones.
 
 <p align="center">
-  <img src="./docs/assets/go-record1.gif" width="100%" alt="Animated preview of ib DNS record output">
+  <img src="./docs/assets/ib-demo.gif" width="100%" alt="Animated demo of using the ib Infoblox CLI">
 </p>
 
 ## What `ib` helps you do
@@ -117,7 +117,7 @@ Do not commit `~/.ib/config`, `~/.ib/key`, `/etc/ib/config`, `/etc/ib/key`, audi
 | Workflow | Start with | Notes |
 | --- | --- | --- |
 | Configure access | `ib config new --default` | Validates server reachability, primary/read-endpoint TLS trust, credentials, WAPI version, DNS defaults, and optional audit logging. |
-| List records | `ib dns list` | Uses the current DNS view/zone unless `--view` or `--zone` is supplied. |
+| List records | `ib dns list` | Uses the current DNS view/zone unless a positional zone, `--view`, or `--zone` is supplied. CIDR inputs are normalized to their network address: `ib dns list 10.128.0.1/24` looks up `10.128.0.0/24`. |
 | Search records | `ib dns search app` | Searches record name, value, and comment fields case-insensitively by default. Multiple positional terms must all match; repeated `--any` or `--or` terms require at least one match. Use `--case-sensitive` to preserve case. Add `--global` for all searchable zones or `-r` for child zones under the current/root zone. |
 | Create records | `ib dns create host app 192.0.2.10 -c "Application host"` | Type-first syntax keeps A, AAAA, CNAME, host, MX, NS, PTR, SRV, and TXT workflows consistent. |
 | Edit or delete records | `ib dns edit host app 192.0.2.20` | Deletes match forward DNS names case-insensitively and prompts for confirmation unless `-y` is used. |

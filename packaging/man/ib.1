@@ -126,6 +126,8 @@ Use --type ns to list nameserver records. Table output labels NS rows as
 NS-AUTH for authoritative zone nameservers or NS-DELEGATION for child-zone
 delegation nameservers; filters still use ns.
 Larger IPv4 reverse CIDR scopes can include matching child reverse zones.
+CIDR inputs are normalized to their network address before lookup; for example,
+ib dns list 10.128.0.1/24 looks up 10.128.0.0/24.
 .TP
 .B ib dns search app
 Search records by name, value, or comment. Matching is case-insensitive by

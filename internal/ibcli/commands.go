@@ -854,6 +854,10 @@ func (a *App) dnsListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Use the network address consistently for backend lookups and cache keys.
+			if prefix, err := netip.ParsePrefix(target); err == nil {
+				target = prefix.Masked().String()
+			}
 			var records []TypedRecord
 			if err := a.withSpinner("Loading DNS records...", func() error {
 				var loadErr error

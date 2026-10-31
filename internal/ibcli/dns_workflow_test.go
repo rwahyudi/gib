@@ -2090,7 +2090,7 @@ func TestDNSListCIDRParentScopeIncludesChildReverseZones(t *testing.T) {
 		t.Fatalf("write 49 record cache: %v", err)
 	}
 
-	if err := app.Execute([]string{"-o", "json", "dns", "list", "10.128.48.0/23", "--columns", "zone,name,value"}); err != nil {
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "10.128.49.1/23", "--columns", "zone,name,value"}); err != nil {
 		t.Fatalf("dns list parent CIDR scope: %v\nstdout:\n%s", err, stdout.String())
 	}
 	var rows []map[string]any
@@ -2102,6 +2102,79 @@ func TestDNSListCIDRParentScopeIncludesChildReverseZones(t *testing.T) {
 	}
 	if cleanString(rows[0]["zone"]) != "10.128.48.0/24" || cleanString(rows[1]["zone"]) != "10.128.49.0/24" {
 		t.Fatalf("record zones = %#v", rows)
+	}
+}
+
+func TestDNSListHostCIDRUsesCanonicalBackendQuery(t *testing.T) {
+	var requestedZones []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch trimWAPIPath(r.URL.Path) {
+		case "zone_auth":
+			fqdn := r.URL.Query().Get("fqdn")
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{{
+				"fqdn": fqdn, "view": "default", "zone_format": "IPV4", "soa_serial_number": "2026050801",
+			}}})
+		case "allrecords":
+			requestedZones = append(requestedZones, r.URL.Query().Get("zone"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "10.128.0.1/24"}); err != nil {
+		t.Fatalf("dns list host CIDR: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if len(requestedZones) != 1 || requestedZones[0] != "10.128.0.0/24" {
+		t.Fatalf("allrecords zones = %#v, want canonical 10.128.0.0/24", requestedZones)
+	}
+}
+
+func TestDNSListHostCIDRUsesCanonicalFreshRecordCache(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns list should use canonical fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	canonicalZone := "10.128.0.0/24"
+	if err := app.writeCachedRecords(profile, canonicalZone, "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "1", "address": "10.128.0.1", "ptrdname": "cached.example.com", "zone": canonicalZone},
+	}, time.Now()); err != nil {
+		t.Fatalf("write canonical record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "list", "10.128.0.1/24"}); err != nil {
+		t.Fatalf("dns list host CIDR from cache: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "cached.example.com") {
+		t.Fatalf("dns list did not render canonical cached record:\n%s", stdout.String())
+	}
+}
+
+func TestDNSListHostCIDRZoneOverrideUsesCanonicalFreshRecordCache(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dns list should use canonical fresh cache, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	app, stdout := dnsWorkflowApp(t, server.URL, server.URL)
+	profile := mustLoadProfile(t, app)
+	canonicalZone := "10.128.0.0/24"
+	if err := app.writeCachedRecords(profile, canonicalZone, "2026050801", []map[string]any{
+		{"type": "record:ptr", "name": "1", "address": "10.128.0.1", "ptrdname": "override-cache.example.com", "zone": canonicalZone},
+	}, time.Now()); err != nil {
+		t.Fatalf("write canonical record cache: %v", err)
+	}
+
+	if err := app.Execute([]string{"-o", "json", "dns", "--zone", "10.128.0.1/24", "list"}); err != nil {
+		t.Fatalf("dns list host CIDR zone override from cache: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "override-cache.example.com") {
+		t.Fatalf("dns list did not render canonical cached record for zone override:\n%s", stdout.String())
 	}
 }
 
