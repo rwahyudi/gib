@@ -135,6 +135,43 @@ func TestPrecomputedRecordSortRebuildsKeysAfterMutation(t *testing.T) {
 	assertSortedRecordNames(t, records, []string{"z.example.com", "b.example.com"})
 }
 
+func TestRecordSortNormalizesNestedFieldsBeforeCapturingKeys(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reverse=%v", reverse), func(t *testing.T) {
+			records := make([]TypedRecord, 0, 3)
+			for i, name := range []string{"m.example.com", "z.example.com", "a.example.com"} {
+				zone := "example.com"
+				recordType := "a"
+				address := fmt.Sprintf("192.0.2.%d", i+1)
+				if reverse {
+					zone, recordType = "192.0.2.0/24", "ptr"
+					name = []string{"10", "100", "2"}[i]
+					address = "192.0.2." + name
+				}
+				records = append(records, TypedRecord{Type: recordType, Item: map[string]any{
+					"_ref":   fmt.Sprintf("record:%s/%d", recordType, i),
+					"record": map[string]any{"name": name, "zone": zone, "ipv4addr": address},
+				}})
+			}
+			want := []string{"a.example.com", "m.example.com", "z.example.com"}
+			if reverse {
+				want = []string{"192.0.2.2", "192.0.2.10", "192.0.2.100"}
+			}
+			sortRecords(records)
+			assertSortedRecordNames(t, records, want)
+			sortRecords(records)
+			assertSortedRecordNames(t, records, want)
+		})
+	}
+	// Selected-field keys must also see fields promoted from nested records.
+	records := []TypedRecord{
+		{Type: "a", Item: map[string]any{"record": map[string]any{"name": "high", "ttl": 300}}},
+		{Type: "a", Item: map[string]any{"record": map[string]any{"name": "low", "ttl": 60}}},
+	}
+	applyRecordSort(records, RecordSort{Enabled: true, Field: "ttl"})
+	assertSortedRecordNames(t, records, []string{"low", "high"})
+}
+
 func BenchmarkSortRecords10k(b *testing.B) {
 	fixtures := recordSortFixtures(10000)
 	for _, record := range fixtures {

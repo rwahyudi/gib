@@ -1470,13 +1470,7 @@ func recordName(item map[string]any, recordType string) string {
 
 func recordValue(recordType string, item map[string]any) string {
 	recordType = strings.ToLower(recordType)
-	if nested := nestedRecord(item); len(nested) > 0 {
-		for key, value := range nested {
-			if _, exists := item[key]; !exists {
-				item[key] = value
-			}
-		}
-	}
+	promoteNestedRecordFields(item)
 	if value := reverseRecordValue(item); value != "" {
 		return value
 	}
@@ -1526,6 +1520,17 @@ func recordValue(recordType string, item map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// Enriched records may keep their fields under record. Promote missing fields
+// before deriving sort keys so name, zone, and reverse-IP keys all describe the
+// same normalized row, rather than changing as recordValue is evaluated.
+func promoteNestedRecordFields(item map[string]any) {
+	for key, value := range nestedRecord(item) {
+		if _, exists := item[key]; !exists {
+			item[key] = value
+		}
+	}
 }
 
 func reverseRecordName(item map[string]any) string {
@@ -2802,6 +2807,9 @@ func sortRecords(records []TypedRecord) {
 	if len(records) < 2 {
 		return
 	}
+	for _, record := range records {
+		promoteNestedRecordFields(record.Item)
+	}
 	keys := make([]recordSortEntry, len(records))
 	for i, record := range records {
 		keys[i] = recordSortEntry{
@@ -2912,6 +2920,9 @@ func isRecordSortField(field string) bool {
 func applyRecordSort(records []TypedRecord, option RecordSort) {
 	if !option.Enabled || len(records) < 2 {
 		return
+	}
+	for _, record := range records {
+		promoteNestedRecordFields(record.Item)
 	}
 	// Preserve the caller's default ordering for ties, but compute the selected
 	// field only once per record, including numeric TTL and IP-aware values.
