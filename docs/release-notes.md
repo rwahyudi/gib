@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.4.6 - 2026-11-12
+
+### Performance
+
+- Styled table output renders large DNS, IPAM, VLAN, and DHCP results with in-house layout that keeps the same borders, colors, alignment, and wrapping while removing the previous per-cell Lipgloss overhead.
+- DNS record sorting derives name, value, and reverse-IP sort keys once per result set instead of on every comparison. Nested detail fields are normalized before keys are captured, so enriched records sort the same way as flat rows.
+- Command settings are read once per command and shared by search workers; configuration writes invalidate the snapshot and later commands see external edits. Cache freshness still uses the current `cache_ttl` without rewriting cached payloads.
+
 ### DNS Reliability and Auditing
 
 - Typed `ib dns edit` and `ib dns delete` lookups query the requested record type first, avoiding unnecessary WAPI scans; the broader lookup is retained only to report an actionable record-type mismatch.
