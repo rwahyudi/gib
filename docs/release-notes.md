@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.4.7 - 2026-11-12
+
+### Security
+
+- Release builds now use Go 1.26.11, which fixes GO-2026-6859, an HTTP/1 server crash caused by a `MaxBytesReader` header race in `net/http`. `govulncheck` reported the vulnerable `net/http@go1.26.10` standard library as reachable from the CLI's HTTP client, WAPI header handling, and formatting paths.
+
 ## v0.4.6 - 2026-11-12
 
 ### Performance
