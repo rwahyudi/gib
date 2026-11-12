@@ -5,7 +5,7 @@ platform, or when validating source changes before a release.
 
 ## Requirements
 
-- Go 1.26.10 or newer.
+- Go 1.26.11 or newer.
 - Git.
 
 Use `/tmp` for Go caches in restricted or sandboxed checkouts:

@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/rwahyudi/gib/releases/latest"><img src="https://img.shields.io/github/v/release/rwahyudi/gib?color=0ea5e9" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/go-1.26.10-00ADD8" alt="Go 1.26.10">
+  <img src="https://img.shields.io/badge/go-1.26.11-00ADD8" alt="Go 1.26.11">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="MIT license"></a>
 </p>
 
