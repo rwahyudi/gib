@@ -9,7 +9,7 @@
 %global forgeurl https://github.com/rwahyudi/gib
 %global gomodulesmode GO111MODULE=on
 
-Version: 0.4.7
+Version: 0.4.8
 %global tag v%{version}
 %gometa
 
@@ -77,6 +77,9 @@ export CGO_ENABLED=0
 %{_mandir}/man1/ib.1*
 
 %changelog
+* Thu Nov 12 2026 rwahyudi <rwahyudi@users.noreply.github.com> - 0.4.8-1
+- Block releases on reachable Go vulnerabilities with a pinned scan
+
 * Thu Nov 12 2026 rwahyudi <rwahyudi@users.noreply.github.com> - 0.4.7-1
 - Build with Go 1.26.11 to address GO-2026-6859 in net/http
 

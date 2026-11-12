@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.4.8 - 2026-11-12
+
+### Release Process
+
+- Published binaries are now gated on a reachable-vulnerability scan of imported modules and the Go standard library. The scan uses a pinned `govulncheck` and runs before GoReleaser publishes assets, so a finding blocks the release instead of shipping it.
+- The same pinned scan also runs in CI and the security workflow, and is available locally as `scripts/check-vulnerabilities.sh`.
+
 ## v0.4.7 - 2026-11-12
 
 ### Security
