@@ -44,6 +44,9 @@ jobs:
       - name: Check license notices
         run: scripts/check-licenses.sh
 
+      - name: Check reachable Go vulnerabilities
+        run: scripts/check-vulnerabilities.sh
+
       - name: Smoke test Windows build
         run: go build -buildvcs=false -o /tmp/ib.exe ./cmd/ib
         env:

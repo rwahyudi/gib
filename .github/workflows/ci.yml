@@ -36,9 +36,7 @@ jobs:
         run: go test -race ./...
 
       - name: Install static analysis tools
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: Run staticcheck
         # Existing intentional compatibility helpers and test fixtures trigger
@@ -47,7 +45,7 @@ jobs:
         run: '"$(go env GOPATH)/bin/staticcheck" -checks=all,-U1000,-S1030,-SA1019,-SA4006,-ST1000 ./...'
 
       - name: Check reachable Go vulnerabilities
-        run: '"$(go env GOPATH)/bin/govulncheck" ./...'
+        run: scripts/check-vulnerabilities.sh
 
       - name: Install packaging smoke-test dependencies
         run: |

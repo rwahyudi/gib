@@ -67,10 +67,16 @@ Run the normal local checks from a clean worktree:
 env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go test ./...
 env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go vet ./...
 scripts/check-licenses.sh
+scripts/check-vulnerabilities.sh
 env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go build -buildvcs=false -o /tmp/ib ./cmd/ib
 /tmp/ib -v
 /tmp/ib --help
 ```
+
+`scripts/check-vulnerabilities.sh` is the release gate for reachable
+vulnerabilities in imported modules and the Go standard library. It installs a
+pinned `govulncheck` version, so local runs match the release workflow. A
+finding or an unavailable scanner stops the release before publishing.
 
 When release packaging changed, also run a GoReleaser snapshot build before
 tagging:
@@ -124,9 +130,12 @@ Job flow:
 5. Run `go test ./...`.
 6. Run `scripts/check-licenses.sh`, which regenerates third-party notices in
    check mode and rejects blocked or review-required license text.
-7. Smoke-test the Windows build with `GOOS=windows`, `GOARCH=amd64`, and
+7. Run `scripts/check-vulnerabilities.sh`, which scans imported modules and the
+   Go standard library with a pinned `govulncheck`. This runs before GoReleaser,
+   so a reachable vulnerability blocks the release before any asset is created.
+8. Smoke-test the Windows build with `GOOS=windows`, `GOARCH=amd64`, and
    `CGO_ENABLED=0`.
-8. Run `goreleaser/goreleaser-action@v7` with `goreleaser release --clean`.
+9. Run `goreleaser/goreleaser-action@v7` with `goreleaser release --clean`.
 
 GoReleaser then:
 
@@ -271,7 +280,10 @@ packaging workflow explicitly changes. Commit only intentional updates to
 - Release notes document the release changes.
 - README install commands use stable latest-release URLs and asset names match
   `.goreleaser.yaml`.
-- Local tests, vet, license check, and optional snapshot release pass.
+- Local tests, vet, license check, vulnerability gate, and optional snapshot
+  release pass.
+- `scripts/check-vulnerabilities.sh` reports no reachable vulnerabilities in
+  imported modules or the Go standard library.
 - `main` is pushed before the `v*` tag.
 - Release workflow passes.
 - GitHub release is latest and contains all expected assets.

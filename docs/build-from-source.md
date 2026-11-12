@@ -104,9 +104,12 @@ Run the same checks locally when the tools are installed:
 ```bash
 env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go test ./...
 scripts/check-licenses.sh
-env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod govulncheck ./...
+scripts/check-vulnerabilities.sh
 gosec ./...
 trivy fs --scanners vuln,secret,license .
 ```
+
+`scripts/check-vulnerabilities.sh` installs a pinned `govulncheck` and is the
+same gate the release workflow runs before publishing.
 
 For RPM/Copr packaging, see [RPM and Copr Packaging](../packaging/rpm/README.md).
