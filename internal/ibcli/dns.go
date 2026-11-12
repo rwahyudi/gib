@@ -2799,32 +2799,74 @@ func currentZoneSerial(client *WapiClient, zoneName string) (string, bool, error
 }
 
 func sortRecords(records []TypedRecord) {
-	sort.Slice(records, func(i, j int) bool {
-		result := compareDefaultRecordSort(records[i], records[j])
-		if result == 0 {
-			return false
+	if len(records) < 2 {
+		return
+	}
+	keys := make([]recordSortEntry, len(records))
+	for i, record := range records {
+		keys[i] = recordSortEntry{
+			record: record,
 		}
-		return result < 0
+		keys[i].ip, _ = firstSortIPAddress(recordName(record.Item, record.Type))
+		keys[i].text = strings.ToLower(defaultRecordSortKey(record))
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		// Default reverse-zone order compares displayed IPs first, then the
+		// historical zone/name/type/value key (even for equal IPs).
+		left, right := keys[i], keys[j]
+		if left.ip.IsValid() && right.ip.IsValid() {
+			if result := left.ip.Compare(right.ip); result != 0 {
+				return result < 0
+			}
+		} else if left.ip.IsValid() != right.ip.IsValid() {
+			return left.ip.IsValid()
+		}
+		return left.text < right.text
 	})
+	for i := range keys {
+		records[i] = keys[i].record
+	}
 }
 
-func compareDefaultRecordSort(left TypedRecord, right TypedRecord) int {
-	// Reverse zones display PTR owners as IP addresses, so default list output
-	// compares those displayed names numerically before falling back to the
-	// historical zone/name/type/value key used by forward zones.
-	leftIP, leftOK := firstSortIPAddress(recordName(left.Item, left.Type))
-	rightIP, rightOK := firstSortIPAddress(recordName(right.Item, right.Type))
-	switch {
-	case leftOK && rightOK:
-		if result := leftIP.Compare(rightIP); result != 0 {
-			return result
+// Sort keys are scoped to a single sort: record maps can be enriched or receive
+// zone context later, so keeping derived keys on TypedRecord would make them stale.
+// Formatting, lowercasing, and address parsing happen O(n), not per comparison.
+type recordSortEntry struct {
+	record  TypedRecord
+	text    string
+	ip      netip.Addr
+	ttl     int
+	numeric bool
+}
+
+func compareRecordSortEntries(left, right recordSortEntry, ipAware, ttl, desc bool) int {
+	if ttl {
+		switch {
+		case left.numeric && right.numeric:
+			result := 0
+			if left.ttl < right.ttl {
+				result = -1
+			} else if left.ttl > right.ttl {
+				result = 1
+			}
+			return applySortDirection(result, desc)
+		case left.numeric:
+			return applySortDirection(-1, desc)
+		case right.numeric:
+			return applySortDirection(1, desc)
 		}
-	case leftOK:
-		return -1
-	case rightOK:
-		return 1
 	}
-	return compareCaseInsensitiveText(defaultRecordSortKey(left), defaultRecordSortKey(right))
+	if ipAware {
+		switch {
+		case left.ip.IsValid() && right.ip.IsValid():
+			return applySortDirection(left.ip.Compare(right.ip), desc)
+		case left.ip.IsValid():
+			return -1
+		case right.ip.IsValid():
+			return 1
+		}
+	}
+	return applySortDirection(strings.Compare(left.text, right.text), desc)
 }
 
 func defaultRecordSortKey(record TypedRecord) string {
@@ -2871,27 +2913,30 @@ func applyRecordSort(records []TypedRecord, option RecordSort) {
 	if !option.Enabled || len(records) < 2 {
 		return
 	}
-	// The caller applies the historical zone/name/type sort first. This stable
-	// sort then groups by the selected field without losing deterministic ties.
-	sort.SliceStable(records, func(i, j int) bool {
-		result := compareRecordSort(records[i], records[j], option.Field, option.Desc)
-		if result == 0 {
-			return false
+	// Preserve the caller's default ordering for ties, but compute the selected
+	// field only once per record, including numeric TTL and IP-aware values.
+	keys := make([]recordSortEntry, len(records))
+	ipAware := option.Field == "name" || option.Field == "value"
+	for i, record := range records {
+		value := recordSortValue(record, option.Field)
+		keys[i].record = record
+		if option.Field == "ttl" {
+			value = strings.TrimSpace(recordTTL(record.Item))
+			var err error
+			keys[i].ttl, err = strconv.Atoi(value)
+			keys[i].numeric = err == nil
 		}
-		return result < 0
+		keys[i].text = strings.ToLower(value)
+		if ipAware {
+			keys[i].ip, _ = firstSortIPAddress(value)
+		}
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		return compareRecordSortEntries(keys[i], keys[j], ipAware, option.Field == "ttl", option.Desc) < 0
 	})
-}
-
-func compareRecordSort(left TypedRecord, right TypedRecord, field string, desc bool) int {
-	if field == "ttl" {
-		return applySortDirection(compareRecordTTL(recordTTL(left.Item), recordTTL(right.Item)), desc)
+	for i := range keys {
+		records[i] = keys[i].record
 	}
-	leftValue := recordSortValue(left, field)
-	rightValue := recordSortValue(right, field)
-	if field == "name" || field == "value" {
-		return compareRecordIPAwareText(leftValue, rightValue, desc)
-	}
-	return applySortDirection(compareCaseInsensitiveText(leftValue, rightValue), desc)
 }
 
 func recordSortValue(record TypedRecord, field string) string {

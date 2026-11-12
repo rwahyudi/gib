@@ -31,6 +31,11 @@ Default tuning in the profile config `[meta]` section:
 | `completion_cache_prefetch` | `true` | Whether cache-backed shell completion starts background refresh helpers for missing or stale DNS/IPAM context caches. |
 | refresh lease TTL | `300` seconds | Local lock lifetime that prevents duplicate refresh subprocesses. |
 
+Settings are read once on demand and shared by workers within a command.
+Configuration writes invalidate that snapshot; edits from another process are
+picked up by the next command. Existing cache rows still use the current
+`cache_ttl`, without rewriting their payloads.
+
 ## Cache Decision Flow
 
 ![Nord cache decision flow](assets/cache-decision-flow.svg)

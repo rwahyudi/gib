@@ -71,7 +71,7 @@ func (a *App) newClient(profile Profile) *WapiClient {
 	if readServer == "" {
 		readServer = profile.Server
 	}
-	return &WapiClient{
+	client := &WapiClient{
 		Server:             profile.Server,
 		ReadServer:         readServer,
 		ReadVerifySSL:      profile.ReadServerVerifySSL,
@@ -83,9 +83,12 @@ func (a *App) newClient(profile Profile) *WapiClient {
 		View:               profile.DNSView,
 		httpClient:         httpClient,
 		readHTTPClient:     readHTTPClient,
-		debug:              a.debugEvent,
 		context:            a.requestContext,
 	}
+	if a.debugEnabled() {
+		client.debug = a.debugEvent
+	}
+	return client
 }
 
 func (a *App) newWAPIHTTPClient(verifySSL bool, timeoutSeconds int, fingerprint string) *http.Client {
@@ -209,7 +212,9 @@ func (c *WapiClient) request(method, objectPath string, params url.Values, paylo
 	}
 	endpoint := c.endpoint(base, objectPath, params)
 	started := time.Now()
-	c.debugEvent("wapi start", df("method", method), df("object", objectPath), df("target", target), df("params", safeWAPIParamSummary(params)), df("payload", payload != nil))
+	if c.debug != nil {
+		c.debugEvent("wapi start", df("method", method), df("object", objectPath), df("target", target), df("params", safeWAPIParamSummary(params)), df("payload", payload != nil))
+	}
 
 	var body io.Reader
 	if payload != nil {

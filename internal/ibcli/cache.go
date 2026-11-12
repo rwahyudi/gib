@@ -254,8 +254,8 @@ func normalizeCacheZone(zone string) string {
 }
 
 func (a *App) cacheFreshUntil(cachedAt int64) int64 {
-	// Freshness is deliberately derived instead of stored. Changing cache_ttl in
-	// config immediately changes how existing cache rows are interpreted.
+	// Freshness is derived instead of stored, using the current command's settings
+	// snapshot. The next command picks up cache_ttl edits for existing cache rows.
 	return cachedAt + int64(a.cacheTTL()/time.Second)
 }
 
@@ -345,7 +345,9 @@ func (a *App) readCachedZones(profile Profile) (cachedPayload, error) {
 		return cachedPayload{}, nil
 	}
 	payload := cachedPayloadFromBadger(entry)
-	a.debugEvent("cache zones hit", df("profile", profileName), df("view", view), df("rows", len(payload.Rows)), df("fresh", a.cacheEntryFresh(payload, time.Now())), df("duration", time.Since(started)))
+	if a.debugEnabled() {
+		a.debugEvent("cache zones hit", df("profile", profileName), df("view", view), df("rows", len(payload.Rows)), df("fresh", a.cacheEntryFresh(payload, time.Now())), df("duration", time.Since(started)))
+	}
 	return payload, nil
 }
 
@@ -692,7 +694,9 @@ func (a *App) readCachedRecords(profile Profile, zone string) (cachedPayload, er
 		return cachedPayload{}, nil
 	}
 	payload := cachedPayloadFromBadger(entry)
-	a.debugEvent("cache records hit", df("profile", profileName), df("view", view), df("zone", zone), df("serial", payload.Serial), df("rows", len(payload.Rows)), df("fresh", a.cacheEntryFresh(payload, time.Now())), df("stale_valid", time.Now().Unix() < payload.StaleExpiresAt), df("duration", time.Since(started)))
+	if a.debugEnabled() {
+		a.debugEvent("cache records hit", df("profile", profileName), df("view", view), df("zone", zone), df("serial", payload.Serial), df("rows", len(payload.Rows)), df("fresh", a.cacheEntryFresh(payload, time.Now())), df("stale_valid", time.Now().Unix() < payload.StaleExpiresAt), df("duration", time.Since(started)))
+	}
 	return payload, nil
 }
 

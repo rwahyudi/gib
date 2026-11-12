@@ -87,6 +87,7 @@ func (a *App) currentConfigLocation() configLocation {
 }
 
 func (a *App) useConfigLocation(location configLocation) {
+	a.invalidateConfigSettings()
 	a.ConfigDir = location.Dir
 	a.ConfigFile = location.File
 	a.ConfigKeyFile = location.KeyFile

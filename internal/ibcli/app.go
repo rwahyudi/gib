@@ -111,6 +111,9 @@ type App struct {
 	globalConfigGroup                string
 	cacheDBMu                        sync.Mutex
 	cacheDBs                         map[string]*badger.DB
+	settingsMu                       sync.Mutex
+	settingsCache                    *ConfigSettings
+	settingsCacheEnabled             bool
 }
 
 func NewDefaultApp() (*App, error) {
@@ -157,6 +160,8 @@ func executableIsGoTestBinary(executable string) bool {
 }
 
 func (a *App) Execute(args []string) error {
+	a.beginCommandSettings()
+	defer a.endCommandSettings()
 	if a.completeRecordSortValue(args) || a.completeZoneSortValue(args) || a.completeNetSortValue(args) || a.completeVLANSortValue(args) || a.completeZoneListFlagNames(args) {
 		return nil
 	}

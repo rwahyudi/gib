@@ -207,6 +207,42 @@ func readConfigSettingsAt(location configLocation) (ConfigSettings, bool, error)
 }
 
 func (a *App) configSettings() ConfigSettings {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+	if a.settingsCacheEnabled && a.settingsCache != nil {
+		return *a.settingsCache
+	}
+	settings := a.loadConfigSettings()
+	if a.settingsCacheEnabled {
+		a.settingsCache = &settings
+	}
+	return settings
+}
+
+// Settings are a per-command snapshot shared by search workers. Start a new
+// snapshot for every Execute so external edits are visible on the next command.
+// Direct helper calls (outside Execute) retain their immediate-read behavior.
+func (a *App) beginCommandSettings() {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+	a.settingsCache = nil
+	a.settingsCacheEnabled = true
+}
+
+func (a *App) endCommandSettings() {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+	a.settingsCache = nil
+	a.settingsCacheEnabled = false
+}
+
+func (a *App) invalidateConfigSettings() {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+	a.settingsCache = nil
+}
+
+func (a *App) loadConfigSettings() ConfigSettings {
 	merged, err := a.readMergedConfig(false)
 	if err != nil {
 		return defaultConfigSettings()
@@ -689,8 +725,10 @@ func (a *App) writeConfigProfilesWithSettingsMode(defaultProfile string, profile
 	}
 
 	if err := os.WriteFile(a.ConfigFile, []byte(builder.String()), 0o600); err != nil {
+		a.invalidateConfigSettings()
 		return err
 	}
+	a.invalidateConfigSettings()
 	return a.protectConfigFileForScope(true)
 }
 

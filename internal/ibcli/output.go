@@ -36,37 +36,241 @@ func renderTableWithRowStyles(title string, headers []string, rows [][]string, r
 func renderTableWithStyles(title string, headers []string, rows [][]string, rowStyles map[int]lipgloss.Style, cellStyles map[tableCellPosition]lipgloss.Style) string {
 	headers = lowerTableHeaders(headers)
 	numericColumns := numericTableColumns(headers)
-	t := table.New().
-		Border(lipgloss.RoundedBorder()).
-		BorderStyle(tableBorderStyle).
-		Headers(headers...).
-		Rows(rows...).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			rightAlign := numericColumns[col] || numericFieldValueCell(headers, rows, row, col)
-			if row == table.HeaderRow {
-				style := tableHeaderStyle.Padding(0, 1)
-				if rightAlign {
-					return style.Align(lipgloss.Right)
-				}
-				return style
+	// Config tables use arbitrary inherited styles. Keep their full Lipgloss
+	// layout semantics (padding, borders, transforms), while large record tables
+	// use the fast path and retain their inline ANSI record-type colors.
+	if len(rowStyles) > 0 || len(cellStyles) > 0 || useLipglossTableFallback(headers, rows) {
+		return renderLipglossTable(title, headers, rows, numericColumns, rowStyles, cellStyles)
+	}
+	return renderFastTable(title, headers, rows, numericColumns)
+}
+
+func useLipglossTableFallback(headers []string, rows [][]string) bool {
+	if len(headers) == 0 {
+		return true
+	}
+	for _, value := range headers {
+		if strings.ContainsAny(value, "\n\r\t") {
+			return true
+		}
+	}
+	for _, row := range rows {
+		for _, value := range row {
+			// Multiline ANSI state can span lines; the original renderer handles
+			// those sequences as a whole cell rather than styling separate lines.
+			if strings.ContainsAny(value, "\r\t") || (strings.Contains(value, "\n") && strings.Contains(value, "\x1b")) {
+				return true
 			}
-			style := tableCellStyle
+		}
+	}
+	return false
+}
+
+func renderLipglossTable(title string, headers []string, rows [][]string, numericColumns map[int]bool, rowStyles map[int]lipgloss.Style, cellStyles map[tableCellPosition]lipgloss.Style) string {
+	t := table.New().Border(lipgloss.RoundedBorder()).BorderStyle(tableBorderStyle).Headers(headers...).Rows(rows...).StyleFunc(func(row, col int) lipgloss.Style {
+		rightAlign := numericColumns[col] || numericFieldValueCell(headers, rows, row, col)
+		if row == table.HeaderRow {
+			style := tableHeaderStyle.Padding(0, 1)
 			if rightAlign {
-				style = style.Align(lipgloss.Right)
-			}
-			if rowStyle, ok := rowStyles[row]; ok {
-				style = style.Inherit(rowStyle)
-			}
-			if cellStyle, ok := cellStyles[tableCellPosition{row: row, col: col}]; ok {
-				style = style.Inherit(cellStyle)
+				return style.Align(lipgloss.Right)
 			}
 			return style
-		})
-
+		}
+		style := tableCellStyle
+		if rightAlign {
+			style = style.Align(lipgloss.Right)
+		}
+		if rowStyle, ok := rowStyles[row]; ok {
+			style = style.Inherit(rowStyle)
+		}
+		if cellStyle, ok := cellStyles[tableCellPosition{row: row, col: col}]; ok {
+			style = style.Inherit(cellStyle)
+		}
+		return style
+	})
 	if title == "" {
 		return t.String()
 	}
 	return tableTitleStyle.Render(title) + "\n" + t.String()
+}
+
+// renderFastTable keeps the table's layout work in one pass. In particular, the
+// lipgloss table's StyleFunc is expensive on large tables because it repeatedly
+// normalizes rows and resolves styles while rendering each cell.
+func renderFastTable(title string, headers []string, rows [][]string, numericColumns map[int]bool) string {
+	columns := len(headers)
+	for _, row := range rows {
+		if len(row) > columns {
+			columns = len(row)
+		}
+	}
+	widths := make([]int, columns)
+	for col := 0; col < columns; col++ {
+		if col < len(headers) {
+			widths[col] = tableCellWidth(headers[col])
+		}
+	}
+	for _, row := range rows {
+		for col, value := range row {
+			if width := tableCellWidth(value); width > widths[col] {
+				widths[col] = width
+			}
+		}
+	}
+	for col := range widths {
+		widths[col] += 2 // one horizontal padding cell on each side
+	}
+
+	borderTop := tableBorderStyle.Render(tableBorderLine("╭", "┬", "╮", widths))
+	borderMiddle := tableBorderStyle.Render(tableBorderLine("├", "┼", "┤", widths))
+	borderBottom := tableBorderStyle.Render(tableBorderLine("╰", "┴", "╯", widths))
+	vertical := tableBorderStyle.Render("│")
+	headerStyles := make([]lipgloss.Style, columns)
+	bodyStyles := make([]lipgloss.Style, columns)
+	for col, width := range widths {
+		headerStyles[col] = tableHeaderStyle.Padding(0, 1).Width(width)
+		bodyStyles[col] = tableCellStyle.Width(width)
+		if numericColumns[col] {
+			bodyStyles[col] = bodyStyles[col].Align(lipgloss.Right)
+		}
+	}
+	fieldValueRows := make([]bool, len(rows))
+	fieldValueTable := len(headers) == 2 && strings.EqualFold(strings.TrimSpace(headers[0]), "Field") && strings.EqualFold(strings.TrimSpace(headers[1]), "Value")
+	if fieldValueTable {
+		for rowIndex, row := range rows {
+			fieldValueRows[rowIndex] = len(row) > 0 && numericTableField(row[0])
+		}
+	}
+
+	var b strings.Builder
+	if title != "" {
+		b.WriteString(tableTitleStyle.Render(title))
+		b.WriteByte('\n')
+	}
+	b.WriteString(borderTop)
+	b.WriteByte('\n')
+	b.WriteString(renderFastRow(headers, -1, widths, headerStyles, bodyStyles, vertical, numericColumns, fieldValueRows))
+	b.WriteByte('\n')
+	b.WriteString(borderMiddle)
+	for rowIndex, row := range rows {
+		b.WriteByte('\n')
+		b.WriteString(renderFastRow(row, rowIndex, widths, headerStyles, bodyStyles, vertical, numericColumns, fieldValueRows))
+	}
+	b.WriteByte('\n')
+	b.WriteString(borderBottom)
+	return b.String()
+}
+
+func tableCellWidth(value string) int {
+	width := 0
+	for len(value) > 0 {
+		line := value
+		if index := strings.IndexByte(value, '\n'); index >= 0 {
+			line = value[:index]
+			value = value[index+1:]
+		} else {
+			value = ""
+		}
+		lineWidth := 0
+		if printableASCII(line) {
+			lineWidth = len(line)
+		} else {
+			lineWidth = lipgloss.Width(line)
+		}
+		if lineWidth > width {
+			width = lineWidth
+		}
+	}
+	return width
+}
+
+func printableASCII(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func tableBorderLine(left, join, right string, widths []int) string {
+	var b strings.Builder
+	b.WriteString(left)
+	for col, width := range widths {
+		if col > 0 {
+			b.WriteString(join)
+		}
+		b.WriteString(strings.Repeat("─", width))
+	}
+	b.WriteString(right)
+	return b.String()
+}
+
+func renderFastRow(values []string, rowIndex int, widths []int, headerStyles, bodyStyles []lipgloss.Style, vertical string, numericColumns map[int]bool, fieldValueRows []bool) string {
+	height := 1
+	for _, value := range values {
+		lines := strings.Count(value, "\n") + 1
+		if lines > height {
+			height = lines
+		}
+	}
+	// Split only multiline rows, once per cell. Scanning from the first newline
+	// for every visual line would make long wrapped TXT values quadratic.
+	var cellLines [][]string
+	if height > 1 {
+		cellLines = make([][]string, len(values))
+		for col, value := range values {
+			cellLines[col] = strings.Split(value, "\n")
+		}
+	}
+
+	var b strings.Builder
+	for line := 0; line < height; line++ {
+		if line > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(vertical)
+		for col, width := range widths {
+			if col > 0 {
+				b.WriteString(vertical)
+			}
+			text := ""
+			if col < len(values) {
+				if height == 1 {
+					text = values[col]
+				} else if line < len(cellLines[col]) {
+					text = cellLines[col][line]
+				}
+			}
+			rightAlign := numericColumns[col] || (col == 1 && rowIndex >= 0 && rowIndex < len(fieldValueRows) && fieldValueRows[rowIndex])
+			if rowIndex >= 0 && printableASCII(text) {
+				padding := width - len(text) - 2
+				if padding < 0 {
+					padding = 0
+				}
+				b.WriteByte(' ')
+				if rightAlign {
+					b.WriteString(strings.Repeat(" ", padding))
+					b.WriteString(text)
+				} else {
+					b.WriteString(text)
+					b.WriteString(strings.Repeat(" ", padding))
+				}
+				b.WriteByte(' ')
+				continue
+			}
+			style := bodyStyles[col]
+			if rowIndex < 0 {
+				style = headerStyles[col]
+			}
+			if rightAlign {
+				style = style.Align(lipgloss.Right)
+			}
+			b.WriteString(style.Render(text))
+		}
+		b.WriteString(vertical)
+	}
+	return b.String()
 }
 
 func lowerTableHeaders(headers []string) []string {
